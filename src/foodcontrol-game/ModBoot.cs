@@ -50,6 +50,18 @@ namespace FoodControl.Game
             {
                 try { Log.Error("[FoodControl] 注册需求域失败（已吞掉）：" + e); } catch (Exception) { }
             }
+
+            // 装上"意图出口"（日志 + JSONL 文件）。幂等。
+            // ⚠ 放在这里而不是首次写意图时：出口要**从第一条意图起**就存在，
+            //   否则"第一条意图去哪了"会变成一个查不清的问题。
+            try
+            {
+                IntentIpc.InstallDefaults();
+            }
+            catch (Exception e)
+            {
+                try { Log.Error("[FoodControl] 装意图出口失败（已吞掉）：" + e); } catch (Exception) { }
+            }
         }
 
         /// <summary>

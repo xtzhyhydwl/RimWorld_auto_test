@@ -120,6 +120,10 @@ namespace FoodControl.Game
                 int totalUnforbidden = ColonySetup.TotalUnforbidden;
                 Scribe_Values.Look(ref totalUnforbidden, "foodControlTotalUnforbidden", 0);
                 ColonySetup.TotalUnforbidden = totalUnforbidden;
+
+                // AI 托管开关也要存：玩家关掉之后不希望读档又自己开了
+                // （⚠ 键名在 `TakeoverController.ScribeKey` 里，改它会让老存档读不回来）
+                TakeoverController.ExposeMode();
             }
             catch (Exception e)
             {
@@ -161,6 +165,20 @@ namespace FoodControl.Game
                 if (map == null || !map.IsPlayerHome) return;
 
                 int day = CalendarDay(map);
+
+                // ── ⓪ AI 托管总开关（用户 2026-10-03 要的局内开关）──
+                //
+                // ⚠ 这个闸门放在**最前面**，是"一个开关管住所有域"的**唯一方式**：
+                //   如果让每个域自己去问开关，那么"新加一个域忘了问"就会变成一个
+                //   安静的漏洞（托管关了它还在动）。放在这里，加域**不可能**绕过去。
+                //
+                // 被拦下时**记一条 Vetoed 意图**并写清是哪一关拦的 ——
+                // 否则窗口上只会看到"没有待办"，玩家分不清是"AI 觉得没事"还是"我把 AI 关了"。
+                if (!TakeoverController.ShouldActAndRecord("framework", "auto",
+                        IntentKind.Notify, "本轮所有域的自动闭环"))
+                {
+                    return;
+                }
 
                 // ── ① 每日一次：按优先级跑各"需求域" ──
                 //

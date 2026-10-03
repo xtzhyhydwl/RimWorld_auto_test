@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using FoodControl.Core;
+using FoodControl.Game;
 using Verse;
 
 namespace FoodControl.Game
@@ -106,6 +107,23 @@ namespace FoodControl.Game
 
         public string Summary = "";
         public string Error = "";
+
+        /// <summary>
+        /// **本轮打算做什么**（可选，2026-10-03 新增）。
+        ///
+        /// ## 为什么这个字段让"加一个域"变成真正的加接口
+        ///
+        /// 域只需要在这里填一句"我要干什么、为什么"，框架会负责：
+        ///   - 落到 `IntentBoard`（窗口能看到"即将要做"）
+        ///   - 发给所有出口（JSONL 文件 / 日志 / 将来的 HTTP）
+        ///   - 按成败把状态推进到 `Done` / `Failed`
+        ///
+        /// → **域自己完全不认识 UI、文件、IPC**；而端口那一侧也不用认识任何具体域。
+        ///   这就是用户要的"加/撤一个功能只需要加接口"。
+        ///
+        /// 留 `null` = 本轮没有什么要对玩家说的（框架不会硬造一条）。
+        /// </summary>
+        public AiIntent Intent;
 
         // 食物域专用的诊断字段（其它域可以留空，不影响）
         public GameReadings Readings;
@@ -307,6 +325,11 @@ namespace FoodControl.Game
                     if (inner != null)
                     {
                         inner.DomainId = domain.Id;
+
+                        // ★ 意图 → 看板：框架**统一**做这件事，域自己不认识 UI/IPC。
+                        //   （域只是在结果里填了一条 `Intent`；见 `DomainCycleResult.Intent`。）
+                        PublishIntent(domain, inner);
+
                         r = inner;
                         if (r.DidWork) TotalCycles++;
                     }
@@ -331,9 +354,42 @@ namespace FoodControl.Game
             return results;
         }
 
-        /// <summary>把一批结果拼成一行日志/摘要。</summary>
-        public static string Summarize(List<DomainCycleResult> results)
+        /// <summary>
+        /// **把域声明的意图发到看板上**（框架统一做，域不需要认识看板/UI/IPC）。
+        ///
+        /// 状态推进规则：
+        ///   - 域没填 `Intent` → 什么都不做（**不硬造**一条"无事可做"的记录）
+        ///   - 域填了但没声明状态 → 默认 `Planned`（= "即将要做"那一栏）
+        ///   - 域说 `DidWork == true` → `Done`
+        ///   - 域报错了 → `Failed`（带上错误，别让它静默消失）
+        ///
+        /// ⚠ 刻意**不**把 `DidWork == false` 当成 `Done`：
+        ///   "打算做但因为守卫没做"和"做完了"是两件不同的事，
+        ///   混在一起会让窗口骗人（这正是项目铁律要防的那类问题）。
+        /// </summary>
+        private static void PublishIntent(INeedDomain domain, DomainCycleResult result)
         {
+            if (result == null || result.Intent == null) return;
+
+            AiIntent intent = result.Intent;
+            if (string.IsNullOrEmpty(intent.DomainId)) intent.DomainId = domain != null ? domain.Id : "unknown";
+            if (string.IsNullOrEmpty(intent.Summary)) intent.Summary = "（域没有说明要做什么）";
+
+            AiIntent stored = IntentBoard.Add(intent);
+
+            if (!string.IsNullOrEmpty(result.Error))
+            {
+                IntentBoard.SetState(stored, IntentState.Failed, "本域报错：" + result.Error, intent.Tick);
+            }
+            else if (result.DidWork && stored.State == IntentState.Planned)
+            {
+                IntentBoard.SetState(stored, IntentState.Done, "已执行", intent.Tick);
+            }
+            // 其余情况保持域自己声明的状态（Planned = 还在"即将要做"那一栏，这是有意的）
+        }
+
+        /// <summary>把一批结果拼成一行日志/摘要。</summary>
+        public static string Summarize(List<DomainCycleResult> results)        {
             if (results == null || results.Count == 0) return "（没有注册任何域）";
             var parts = new List<string>();
             for (int i = 0; i < results.Count; i++)

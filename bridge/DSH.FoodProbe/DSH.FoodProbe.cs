@@ -4136,6 +4136,352 @@ namespace DSH.FoodProbe
             }
         }
 
+        // ==================================================================
+        // 「AI 托管开关」与「意图流」—— 用户 2026-10-03 要的局内开关 + 意图窗口，
+        // 这里给出**外部可调、可读**的那一半（UI 那一半在 mod 的 IntentWindow.cs）。
+        //
+        // 为什么必须从探针走一遍：mod 的按钮是**玩家**点的，脚本点不到；
+        // 而"托管关了 AI 真的不动手"这件事必须能被**自动断言**。
+        // ==================================================================
+
+        [Tool("foodprobe/takeover",
+            Description = "★ 读/切『AI 托管』开关（auto/off/manual/toggle/cycle/status）。"
+                + "关掉后 mod 的自动闭环会停下，并留下『被否决』的意图记录。会改 mod 状态。")]
+        public object Takeover(
+            [ToolParameter(Description = "auto=开 / off=关 / manual=仅测试钩子 / toggle / cycle / status(默认)")]
+            string mode = "status")
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+
+            var ctl = FindType(asm, "TakeoverController");
+            if (ctl == null) return new { success = false, message = "找不到 FoodControl.Game.TakeoverController（mod 版本太旧？）" };
+
+            string m = string.IsNullOrEmpty(mode) ? "status" : mode.Trim().ToLowerInvariant();
+            string action = "（只读）";
+
+            try
+            {
+                switch (m)
+                {
+                    case "status":
+                        break;
+                    case "auto":
+                        action = (string)CallStatic(ctl, "SetMode", Enum.Parse(FindType(asm, "TakeoverMode"), "Auto", true), "probe");
+                        break;
+                    case "off":
+                        action = (string)CallStatic(ctl, "SetMode", Enum.Parse(FindType(asm, "TakeoverMode"), "Off", true), "probe");
+                        break;
+                    case "manual":
+                        action = (string)CallStatic(ctl, "SetMode", Enum.Parse(FindType(asm, "TakeoverMode"), "Manual", true), "probe");
+                        break;
+                    case "toggle":
+                        action = (string)CallStatic(ctl, "Toggle", "probe");
+                        break;
+                    case "cycle":
+                        action = (string)CallStatic(ctl, "CycleMode", "probe");
+                        break;
+                    default:
+                        return new { success = false, message = "不认识的 mode：" + mode + "（可用：status/auto/off/manual/toggle/cycle）" };
+                }
+
+                object modeVal = GetStaticField(ctl, "Mode");
+                string modeName = modeVal == null ? "?" : modeVal.ToString();
+                object vetoed = GetStaticField(ctl, "VetoedCount");
+                string lastBy = GetStaticField(ctl, "LastChangedBy") as string;
+                object lastTick = GetStaticField(ctl, "LastChangedTick");
+                string statusLine = null;
+                try { statusLine = (string)CallStatic(ctl, "StatusLine"); } catch { }
+
+                return new
+                {
+                    success = true,
+                    mode = modeName,
+                    isOn = string.Equals(modeName, "Auto", StringComparison.OrdinalIgnoreCase),
+                    vetoedCount = vetoed,
+                    lastChangedBy = lastBy,
+                    lastChangedTick = lastTick,
+                    statusLine,
+                    action,
+                    note = "★ isOn=false 时 mod 的自动闭环不会动手；"
+                         + "每次被拦都会往意图流写一条 Vetoed（带原因）。"
+                         + "看 foodprobe/intents。",
+                };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message, stack = e.StackTrace };
+            }
+        }
+
+        [Tool("foodprobe/intents",
+            Description = "★★ 读『AI 打算做什么』的意图流（pending=即将做 / recent=最近 / selftest=自检）。只读。")]
+        public object Intents(
+            [ToolParameter(Description = "pending（默认，即将要做）/ recent（最近发生）/ selftest（逻辑自检）")]
+            string which = "pending",
+            [ToolParameter(Description = "最多返回几条，默认 20")] int limit = 20,
+            [ToolParameter(Description = "只要 seq 大于它的（增量轮询用），默认 0 = 全部")] int sinceSeq = 0)
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+
+            var board = FindType(asm, "IntentBoard");
+            var ipc = FindType(asm, "IntentIpc");
+            if (board == null) return new { success = false, message = "找不到 FoodControl.Game.IntentBoard" };
+
+            try
+            {
+                if (string.Equals(which, "selftest", StringComparison.OrdinalIgnoreCase))
+                    return IntentBoardSelfTest(asm, board, ipc);
+
+                IEnumerable list;
+                if (string.Equals(which, "recent", StringComparison.OrdinalIgnoreCase))
+                    list = CallStatic(board, "Recent", limit <= 0 ? 20 : limit) as IEnumerable;
+                else
+                    list = CallStatic(board, "Pending") as IEnumerable;
+
+                var items = new List<object>();
+                var raw = new List<string>();
+                int max = limit <= 0 ? 20 : limit;
+
+                if (list != null)
+                {
+                    foreach (var o in list)
+                    {
+                        if (o == null) continue;
+                        var t = o.GetType();
+                        int seq = GetIntField(t, o, "Seq");
+                        if (seq <= sinceSeq) continue;
+                        items.Add(DescribeIntent(o));
+                        raw.Add(ipc != null ? (string)CallStatic(ipc, "IntentJson", o) : null);
+                        if (items.Count >= max) break;
+                    }
+                }
+
+                string path = null;
+                try { path = (string)GetStaticProperty(ipc, "IntentPath"); } catch { }
+
+                return new
+                {
+                    success = true,
+                    which = which,
+                    count = items.Count,
+                    sinceSeq,
+                    intents = items,
+                    json = raw,
+                    filePath = path,
+                    fileExists = !string.IsNullOrEmpty(path) && System.IO.File.Exists(path),
+                    note = "★ pending = 还没到终态的（Planned/Running）—— 这就是『即将要做什么』。"
+                         + "外部进程也可以直接读 filePath（jsonl，一行一条，跳过 # 开头）。",
+                };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message, stack = e.StackTrace };
+            }
+        }
+
+        /// <summary>把一条 AiIntent 变成匿名对象（**只读字段**，不改 mod 状态）</summary>
+        private static object DescribeIntent(object o)
+        {
+            var t = o.GetType();
+            return new
+            {
+                seq = GetIntField(t, o, "Seq"),
+                tick = GetIntField(t, o, "Tick"),
+                day = GetIntField(t, o, "Day"),
+                domain = GetStrField(t, o, "DomainId"),
+                kind = GetStrField(t, o, "Kind"),
+                state = GetStrField(t, o, "State"),
+                summary = GetStrField(t, o, "Summary"),
+                reason = GetStrField(t, o, "Reason"),
+                target = GetStrField(t, o, "Target"),
+                source = GetStrField(t, o, "Source"),
+                result = GetStrField(t, o, "Result"),
+                updatedTick = GetIntField(t, o, "UpdatedTick"),
+            };
+        }
+
+        private static int GetIntField(Type t, object o, string name)
+        {
+            try
+            {
+                var f = t.GetField(name, ANY_ALL);
+                if (f == null) return 0;
+                object v = f.GetValue(o);
+                return v == null ? 0 : Convert.ToInt32(v);
+            }
+            catch { return 0; }
+        }
+
+        private static string GetStrField(Type t, object o, string name)
+        {
+            try
+            {
+                var f = t.GetField(name, ANY_ALL);
+                if (f == null) return null;
+                object v = f.GetValue(o);
+                return v == null ? null : v.ToString();
+            }
+            catch { return null; }
+        }
+
+        private static object GetStaticProperty(Type t, string name)
+        {
+            if (t == null) return null;
+            try
+            {
+                var p = t.GetProperty(name, ANY_STATIC);
+                return p == null ? null : p.GetValue(null, null);
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// **意图流自检**：不动游戏世界，只驱动 `IntentBoard` 本身，验证
+        /// ① 能登记 ② `Pending()` 只含未终态 ③ 状态推进正确 ④ JSON 序列化不炸 ⑤ 环形缓冲会裁剪。
+        ///
+        /// ⚠ 会**清空**当前意图记录（所以它是测试工具，不是只读工具）。
+        /// </summary>
+        private object IntentBoardSelfTest(Assembly asm, Type board, Type ipc)
+        {
+            var steps = new List<object>();
+            int pass = 0, fail = 0;
+            Action<string, bool, string> chk = (name, ok, detail) =>
+            {
+                if (ok) pass++; else fail++;
+                steps.Add(new { name, ok, detail });
+            };
+
+            try { CallStatic(board, "Reset"); } catch { }
+
+            var kindType = FindType(asm, "IntentKind");
+            var stateType = FindType(asm, "IntentState");
+            if (kindType == null || stateType == null)
+                return new { success = false, message = "找不到 IntentKind / IntentState" };
+
+            object planned = Enum.Parse(stateType, "Planned", true);
+            object running = Enum.Parse(stateType, "Running", true);
+            object done = Enum.Parse(stateType, "Done", true);
+            object notifyKind = Enum.Parse(kindType, "Notify", true);
+            object buildKind = Enum.Parse(kindType, "BuildTemplate", true);
+
+            // ① 登记两条
+            object a = CallStatic(board, "Report", "selftest", notifyKind, "打算做 A", "因为 A", "目标A", planned, 100, 1);
+            object b = CallStatic(board, "Report", "selftest", buildKind, "打算做 B", "因为 B", "目标B", planned, 101, 1);
+            chk("能登记意图", a != null && b != null, "a=" + (a != null) + " b=" + (b != null));
+            chk("seq 自增且唯一",
+                a != null && b != null
+                && GetIntField(a.GetType(), a, "Seq") != GetIntField(b.GetType(), b, "Seq"),
+                "a.seq=" + (a != null ? GetIntField(a.GetType(), a, "Seq") : -1)
+                + " b.seq=" + (b != null ? GetIntField(b.GetType(), b, "Seq") : -1));
+
+            // ② Pending 含两条
+            int pend = CountEnum(board, "Pending");
+            chk("★ Pending 含这两条（=『即将要做』）", pend == 2, "Pending=" + pend);
+
+            // ③ 一条变 Running → 仍在 Pending（"正在做"也属于"还没做完"）
+            CallStatic(board, "SetState", a, running, "开始执行", 102);
+            pend = CountEnum(board, "Pending");
+            chk("★ Running 仍在 Pending", pend == 2, "Pending=" + pend);
+
+            // ④ 一条变 Done → 离开 Pending
+            CallStatic(board, "SetState", b, done, "已完成", 103);
+            pend = CountEnum(board, "Pending");
+            chk("★ Done 离开 Pending", pend == 1, "Pending=" + pend);
+
+            // ⑤ Recent 能读到
+            int recent = CountEnum(board, "Recent", 10);
+            chk("Recent 能读到记录", recent >= 2, "Recent=" + recent);
+
+            // ⑥ JSON 序列化（一条）+ 不炸
+            string oneJson = null;
+            try { oneJson = (string)CallStatic(ipc, "IntentJson", b); } catch (Exception e) { oneJson = "EX:" + e.Message; }
+            chk("★ 单条意图能序列化成 JSON", oneJson != null && oneJson.StartsWith("{") && oneJson.Contains("\"seq\""),
+                oneJson);
+
+            // ⑦ 批量 JSON
+            string pendingJson = null;
+            try { pendingJson = (string)CallStatic(ipc, "PendingJson"); } catch (Exception e) { pendingJson = "EX:" + e.Message; }
+            chk("★ PendingJson 是合法数组形状", pendingJson != null && pendingJson.StartsWith("["), pendingJson);
+
+            // ⑧ 窗口文本（纯函数）
+            List<string> lines = null;
+            try
+            {
+                object r = CallStatic(board, "LinesForUi", "（自检）托管状态", 8, 12);
+                lines = r as List<string>;
+            }
+            catch (Exception) { }
+            chk("★ LinesForUi 产出可显示的文本", lines != null && lines.Count > 3,
+                lines == null ? "null" : lines.Count + " 行，首行=" + (lines.Count > 0 ? lines[0] : ""));
+
+            // ⑨ Vetoed 要带原因（铁律：没做成的分支必须能说出为什么）
+            object v = CallStatic(board, "Report", "selftest", notifyKind, "被拦下的动作", "开关关着", "", planned, 104, 1);
+            CallStatic(board, "SetState", v, Enum.Parse(stateType, "Vetoed", true), "AI 托管已关闭", 105);
+            chk("Vetoed 记下原因", v != null && !string.IsNullOrEmpty(GetStrField(v.GetType(), v, "Result")),
+                v == null ? "null" : GetStrField(v.GetType(), v, "Result"));
+
+            // ⑩ 环形缓冲会裁剪（把容量临时改小，防内存无限涨）
+            int oldCap = GetIntStatic(board, "Capacity");
+            try
+            {
+                SetIntStatic(board, "Capacity", 16);
+                for (int i = 0; i < 60; i++)
+                    CallStatic(board, "Report", "selftest", notifyKind, "填充 " + i, "", "", planned, 200 + i, 2);
+                int all = CountEnum(board, "All");
+                chk("★ 超过容量会被裁剪（不会无限涨）", all <= 20, "All=" + all + "（容量 16，允许少量余量）");
+            }
+            finally
+            {
+                SetIntStatic(board, "Capacity", oldCap);
+                try { CallStatic(board, "Reset"); } catch { }
+            }
+
+            return new
+            {
+                success = true,
+                which = "selftest",
+                passed = pass,
+                failed = fail,
+                steps,
+                note = "★ 这个自检**会清空**意图记录（测试用）。它验证的是看板逻辑，不动游戏世界。",
+            };
+        }
+
+        private static int CountEnum(Type t, string method, params object[] args)
+        {
+            try
+            {
+                var r = CallStatic(t, method, args) as IEnumerable;
+                if (r == null) return -1;
+                int n = 0;
+                foreach (var _ in r) n++;
+                return n;
+            }
+            catch { return -1; }
+        }
+
+        private static int GetIntStatic(Type t, string field)
+        {
+            try
+            {
+                var f = t.GetField(field, ANY_STATIC);
+                return f == null ? 0 : Convert.ToInt32(f.GetValue(null));
+            }
+            catch { return 0; }
+        }
+
+        private static void SetIntStatic(Type t, string field, int value)
+        {
+            try
+            {
+                var f = t.GetField(field, ANY_STATIC);
+                if (f != null) f.SetValue(null, value);
+            }
+            catch { }
+        }
+
         [Tool("foodprobe/materials",
             Description = "数一下手上能用于建造的建材（按 def 分堆）—— S4「按现有资源选材质」的输入。只读。")]
         public object Materials()

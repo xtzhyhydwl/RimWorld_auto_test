@@ -358,42 +358,26 @@ namespace FoodControl.Game
 
         // ------------------------------------------------------------------
         // 最小 JSON 原语
+        //
+        // ⚠ 2026-10-03：实现已搬到 `Json`（公开），这里**只做委托**。
+        //   原因（DRY 审计）：同仓库里出现过 4 套语义各不相同的转义实现，
+        //   而"要写 JSON"的新模块只能靠抄私有方法或手拼字符串。
+        //   行为**逐字不变**（转义规则与数字格式一改，下游解析脚本就会炸）。
         // ------------------------------------------------------------------
 
         private static void KV(StringBuilder sb, ref bool first, string key, string rawValue)
         {
-            if (!first) sb.Append(',');
-            first = false;
-            sb.Append('"').Append(Escape(key)).Append("\":").Append(rawValue);
+            Json.KV(sb, ref first, key, rawValue);
         }
 
         private static string Q(string s)
         {
-            if (s == null) return "\"\"";
-            return "\"" + Escape(s) + "\"";
+            return Json.Q(s);
         }
 
         private static string Escape(string s)
         {
-            if (string.IsNullOrEmpty(s)) return "";
-            var sb = new StringBuilder(s.Length + 8);
-            for (int i = 0; i < s.Length; i++)
-            {
-                char c = s[i];
-                switch (c)
-                {
-                    case '"': sb.Append("\\\""); break;
-                    case '\\': sb.Append("\\\\"); break;
-                    case '\n': sb.Append("\\n"); break;
-                    case '\r': sb.Append("\\r"); break;
-                    case '\t': sb.Append("\\t"); break;
-                    default:
-                        if (c < ' ') sb.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
-                        else sb.Append(c);
-                        break;
-                }
-            }
-            return sb.ToString();
+            return Json.Escape(s);
         }
 
         /// <summary>
@@ -402,31 +386,17 @@ namespace FoodControl.Game
         /// </summary>
         private static string N(double v)
         {
-            if (double.IsNaN(v) || double.IsInfinity(v)) return "null";
-            double r = Math.Round(v, 4);
-            if (r == 0) r = 0;   // 消掉 -0
-            return r.ToString("0.####", CultureInfo.InvariantCulture);
+            return Json.N(v);
         }
 
         private static string DoubleArray(double[] arr)
         {
-            if (arr == null || arr.Length == 0) return "[]";
-            var sb = new StringBuilder(arr.Length * 8);
-            sb.Append('[');
-            for (int i = 0; i < arr.Length; i++)
-            {
-                if (i > 0) sb.Append(',');
-                sb.Append(N(arr[i]));
-            }
-            sb.Append(']');
-            return sb.ToString();
+            return Json.DoubleArray(arr);
         }
 
         private static string Join(string a, string b)
         {
-            if (string.IsNullOrEmpty(a)) return b != null ? b : "";
-            if (string.IsNullOrEmpty(b)) return a;
-            return a + " | " + b;
+            return Json.Join(a, b);
         }
     }
 }

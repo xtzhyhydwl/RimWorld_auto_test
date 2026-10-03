@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs>
+
+  <!--
+    「AI 托管」主按钮（主按钮栏最下面那一排）。
+
+    ★ 为什么用 MainButtonDef 而不是自己画一个浮动按钮：
+      - 它天然在正确的位置、跟随 UI 缩放、走原版的提示与热键体系
+      - 玩家的"灵活开关"就落在**他已经熟悉的地方**，不用学新东西
+
+    ★ 交互（实现见 `IntentWindow.cs` 的 `MainButtonWorker_Takeover`）：
+        左键 = 切换 AI 托管（开 ↔ 关）
+        右键 = 打开/关闭「AI 在做什么」窗口
+        中键 = 三态循环（自动 → 关 → 手动 → 自动），给测试用
+
+    ⚠ 图标用 RimWorld **原版自带**的贴图（`UI/Commands/...`），刻意不新增素材依赖 ——
+      贴图找不到时按钮会画成空白框，那种问题很难查。
+      要换图标就把 `texturePath` 换掉（这正是"加接口就行"）。
+
+    ⚠ `buttonVisible` 必须写 true：原版 `MainButtonWorker.get_Visible()`（**非 virtual**，
+      IL 已确证）只读这个字段，所以**可见性只能靠 XML 控**，覆写代码是没用的。
+  -->
+  <MainButtonDef>
+    <defName>FoodControl_Takeover</defName>
+    <label>AI托管</label>
+    <description>左键：切换 AI 是否替你运营殖民地。右键：打开「AI 在做什么」窗口。</description>
+    <workerClass>FoodControl.Game.MainButtonWorker_Takeover</workerClass>
+    <texturePath>UI/Commands/OpenLog</texturePath>
+    <order>90</order>
+    <buttonVisible>true</buttonVisible>
+    <validWithoutMap>false</validWithoutMap>
+    <minimized>false</minimized>
+  </MainButtonDef>
+
+</Defs>
