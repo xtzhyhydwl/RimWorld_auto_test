@@ -1,0 +1,397 @@
+using System;
+using System.Collections.Generic;
+
+namespace FoodControl.Core
+{
+    /// <summary>一次待放的蓝图：某个格子上放某个 Def（可能与样板里的"角色"不同 Def）。</summary>
+    public sealed class PlannedBlueprint
+    {
+        /// <summary>地图上的格索引</summary>
+        public int CellIndex;
+        public int X;
+        public int Z;
+
+        /// <summary>样板里的角色代号</summary>
+        public char Symbol;
+
+        /// <summary>角色名（wall/door/bed/light…）</summary>
+        public string RoleName = "";
+
+        /// <summary>最终选中的 Def 名</summary>
+        public string DefName = "";
+
+        /// <summary>旋转（0..3），只对需要朝向的东西有意义</summary>
+        public int Rotation;
+
+        public override string ToString()
+        {
+            return string.Format("{0}({1},{2}) {3}->{4}", RoleName, X, Z, Symbol, DefName);
+        }
+    }
+
+    /// <summary>放样板时的"没找到可用 Def"记录 —— 不整个放弃，而是留空并说明。</summary>
+    public sealed class UnresolvedSlot
+    {
+        public int X;
+        public int Z;
+        public char Symbol;
+        public string RoleName = "";
+        /// <summary>为什么没放（比如"候选都没库存" / "格子上有东西挡住"）</summary>
+        public string Reason = "";
+
+        public override string ToString()
+        {
+            return string.Format("({0},{1}) {2}：{3}", X, Z, RoleName, Reason);
+        }
+    }
+
+    /// <summary>把样板解析成"每格放什么"的结果。</summary>
+    public sealed class TemplatePlacement
+    {
+        public string TemplateId = "";
+        /// <summary>放到地图上时，样板左上角对应的原点是这个</summary>
+        public int OriginX;
+        public int OriginZ;
+        public int Rotation;
+        public bool Mirrored;
+
+        public List<PlannedBlueprint> Blueprints = new List<PlannedBlueprint>();
+        public List<UnresolvedSlot> Unresolved = new List<UnresolvedSlot>();
+
+        /// <summary>各角色的计划格数（校验用）</summary>
+        public Dictionary<string, int> PlannedByRole = new Dictionary<string, int>();
+
+        public int WallCount
+        {
+            get { return CountRole("wall"); }
+        }
+
+        public int DoorCount
+        {
+            get { return CountRole("door"); }
+        }
+
+        public int CountRole(string roleName)
+        {
+            int n;
+            return PlannedByRole.TryGetValue(roleName, out n) ? n : 0;
+        }
+
+        public int TotalSlots
+        {
+            get { return Blueprints.Count + Unresolved.Count; }
+        }
+
+        public override string ToString()
+        {
+            return string.Format("样板 {0} @({1},{2}) rot={3} mir={4}：已定 {5} 格，未解决 {6} 格",
+                TemplateId, OriginX, OriginZ, Rotation, Mirrored, Blueprints.Count, Unresolved.Count);
+        }
+    }
+
+    /// <summary>某格能不能放（由游戏层判定后填进来）。tiles 按模板尺寸给出。</summary>
+    public sealed class PlacementGrid
+    {
+        public int Width;
+        public int Height;
+
+        /// <summary>该格能不能放（地表可承重 + 没被占）</summary>
+        public bool[] CanPlace = new bool[0];
+
+        /// <summary>该格是墙类/实体（放门/墙时这里被占没关系，因为要拆掉重建）</summary>
+        public bool[] BlockedBySolid = new bool[0];
+
+        public bool InBounds(int x, int z)
+        {
+            return x >= 0 && z >= 0 && x < Width && z < Height;
+        }
+
+        public int Index(int x, int z)
+        {
+            return z * Width + x;
+        }
+
+        public bool IsPlaceable(int x, int z)
+        {
+            if (!InBounds(x, z)) return false;
+            int i = Index(x, z);
+            return i >= 0 && i < CanPlace.Length && CanPlace[i];
+        }
+    }
+
+    /// <summary>
+    /// **从样板算出"每格放什么"**。纯逻辑，可离线测试。
+    ///
+    /// ## 它解决的核心问题
+    ///
+    /// 用户的要求是「**不必百分百还原，只要物块对得上**」：
+    /// 样板里的床槽可以用任何床、光源槽可以用任何光源。
+    /// 所以这一步要做的是**角色 → 具体 Def 的解析**，而且要考虑：
+    ///   - 候选 Def 有没有**库存**（没料放了也建不成）
+    ///   - 该格**能不能放**（地表/占用）
+    ///
+    /// ## 三条"不放弃"原则（都是用户场景决定的）
+    ///
+    /// 1. **单格失败不拖垮整体**：某个床槽找不到可用床 → 那个格子留空并记录，
+    ///    其余照放。样板大（13×13）时"因为一个床没料就整间不盖"是荒唐的。
+    /// 2. **墙/门优先**：它们是"房子成不成立"的关键。如果料到后面不够，
+    ///    宁可少放家具，也要保证外墙和门放完（否则盖出来是个漏风的壳）。
+    /// 3. **旋转/镜像要能表达**：同一份样板放在不同朝向的地形上。
+    /// </summary>
+    public static class TemplatePlacer
+    {
+        /// <summary>
+        /// 解析一份样板，产出逐格计划。
+        /// </summary>
+        /// <param name="tpl">样板（已旋转/镜像处理过的最终形态）</param>
+        /// <param name="grid">放置点的可放性（尺寸与 tpl 一致）</param>
+        /// <param name="originX">样板左上角在地图上的 x</param>
+        /// <param name="originZ">同上 z</param>
+        /// <param name="available">当前可用的材料/物品数量：defName -> 数量</param>
+        /// <param name="rotation">记录用途（实际旋转已在 tpl 里做好）</param>
+        /// <param name="mirrored">记录用途</param>
+        public static TemplatePlacement Plan(
+            BuildTemplate tpl,
+            PlacementGrid grid,
+            int originX,
+            int originZ,
+            Dictionary<string, int> available,
+            int rotation,
+            bool mirrored)
+        {
+            var result = new TemplatePlacement
+            {
+                TemplateId = tpl != null ? tpl.Id : "",
+                OriginX = originX,
+                OriginZ = originZ,
+                Rotation = rotation,
+                Mirrored = mirrored,
+            };
+            if (tpl == null || grid == null) return result;
+
+            tpl.NormalizeSize();
+
+            // 已用掉的量（同一种 Def 在多个槽位上要分摊库存）
+            var used = new Dictionary<string, int>();
+
+            // ★ 两遍：先墙/门（房子的骨架），再家具。
+            //   理由见类注释第 2 条：料不够时宁可少家具，也要先把壳立起来。
+            PlanPass(tpl, grid, originX, originZ, available, used, result, true);
+            PlanPass(tpl, grid, originX, originZ, available, used, result, false);
+
+            return result;
+        }
+
+        private static void PlanPass(
+            BuildTemplate tpl, PlacementGrid grid, int originX, int originZ,
+            Dictionary<string, int> available, Dictionary<string, int> used,
+            TemplatePlacement result, bool structuralPass)
+        {
+            for (int z = 0; z < tpl.Height; z++)
+            {
+                for (int x = 0; x < tpl.Width; x++)
+                {
+                    char sym = tpl.SymbolAt(x, z);
+                    if (sym == '\0') continue;
+
+                    TemplateRole role;
+                    if (!tpl.Roles.TryGetValue(sym, out role)) continue;
+
+                    bool isStructural = role.IsWallLike || role.IsDoorLike;
+                    if (structuralPass != isStructural) continue;   // 这一遍不管它
+
+                    int mx = originX + x;
+                    int mz = originZ + z;
+
+                    // ① 能不能放
+                    if (!grid.IsPlaceable(x, z))
+                    {
+                        result.Unresolved.Add(new UnresolvedSlot
+                        {
+                            X = mx, Z = mz, Symbol = sym, RoleName = role.Name,
+                            Reason = "该格放不下（地表不可承重 或 已被占用）",
+                        });
+                        continue;
+                    }
+
+                    // ② 逐个候选 Def 试：有货吗？
+                    string chosen = null;
+                    string why = null;
+                    for (int i = 0; i < role.Accepts.Count; i++)
+                    {
+                        string def = role.Accepts[i];
+                        int have;
+                        if (!available.TryGetValue(def, out have)) have = 0;
+                        int alreadyUsed;
+                        if (!used.TryGetValue(def, out alreadyUsed)) alreadyUsed = 0;
+
+                        if (have - alreadyUsed > 0)
+                        {
+                            chosen = def;
+                            break;
+                        }
+                        if (why == null)
+                            why = "候选 " + def + " 库存 0";
+                    }
+
+                    if (chosen == null)
+                    {
+                        result.Unresolved.Add(new UnresolvedSlot
+                        {
+                            X = mx, Z = mz, Symbol = sym, RoleName = role.Name,
+                            Reason = role.Accepts.Count == 0
+                                ? "角色没有配置任何候选 Def"
+                                : ("所有候选都没货（" + why + "）"),
+                        });
+                        continue;
+                    }
+
+                    // ③ 记账
+                    int u;
+                    used[chosen] = used.TryGetValue(chosen, out u) ? u + 1 : 1;
+
+                    string rn;
+                    result.Blueprints.Add(new PlannedBlueprint
+                    {
+                        CellIndex = grid.Index(x, z),
+                        X = mx, Z = mz,
+                        Symbol = sym,
+                        RoleName = role.Name,
+                        DefName = chosen,
+                    });
+
+                    rn = role.Name ?? "";
+                    int c;
+                    result.PlannedByRole[rn] = result.PlannedByRole.TryGetValue(rn, out c) ? c + 1 : 1;
+                }
+            }
+        }
+
+        /// <summary>
+        /// **找一处能放下这份样板的位置**（纯几何，不碰游戏）。
+        ///
+        /// 判据：样板的**每一个非空格**都必须在 `canPlace[x][z]` 为 true
+        /// （即地表能承重、且没被别的东西占）。
+        /// 空的格不要求 —— 因为样板里"空地"本来就允许是任何东西。
+        ///
+        /// 返回 null 表示没找到。**搜索顺序**：从距离场值最小（离基地最近）的地方开始，
+        /// 所以传入的 distField 决定了"优先盖在哪"。
+        /// </summary>
+        public static bool FindSite(
+            BuildTemplate tpl,
+            PlacementGrid mapGrid,
+            int tplOriginX, int tplOriginZ,
+            double[] distField, int mapWidth,
+            out double avgDistance)
+        {
+            avgDistance = double.MaxValue;
+            if (tpl == null || mapGrid == null) return false;
+            tpl.NormalizeSize();
+
+            if (tplOriginX < 0 || tplOriginZ < 0) return false;
+            if (tplOriginX + tpl.Width > mapGrid.Width) return false;
+            if (tplOriginZ + tpl.Height > mapGrid.Height) return false;
+
+            double sum = 0;
+            int n = 0;
+
+            for (int z = 0; z < tpl.Height; z++)
+            {
+                for (int x = 0; x < tpl.Width; x++)
+                {
+                    char sym = tpl.SymbolAt(x, z);
+                    if (sym == '\0') continue;                 // 样板里是空地 —— 不要求
+
+                    if (!mapGrid.IsPlaceable(tplOriginX + x, tplOriginZ + z)) return false;
+
+                    if (distField != null)
+                    {
+                        int mi = (tplOriginZ + z) * mapWidth + (tplOriginX + x);
+                        if (mi >= 0 && mi < distField.Length)
+                        {
+                            double d = distField[mi];
+                            if (double.IsInfinity(d)) return false;   // 走不到
+                            sum += d;
+                            n++;
+                        }
+                    }
+                }
+            }
+
+            avgDistance = n > 0 ? sum / n : 0;
+            return true;
+        }
+
+        /// <summary>
+        /// 在整张图上滑窗找**最好的**放置点（离基地最近的可行位置）。
+        /// 纯几何，可离线测试。
+        /// </summary>
+        public static bool FindBestSite(
+            BuildTemplate tpl,
+            PlacementGrid mapGrid,
+            double[] distField,
+            int mapWidth,
+            int mapHeight,
+            BuildSiteOptions opts,
+            out int bestX, out int bestZ, out double bestAvgDist)
+        {
+            bestX = bestZ = -1;
+            bestAvgDist = double.MaxValue;
+            if (tpl == null || mapGrid == null) return false;
+            tpl.NormalizeSize();
+
+            int step = (opts != null && opts.SearchStep > 0) ? opts.SearchStep : 1;
+            double maxDist = opts != null ? opts.MaxDistanceFromBase : 120.0;
+            bool found = false;
+
+            for (int z = 0; z + tpl.Height <= mapHeight; z += step)
+            {
+                for (int x = 0; x + tpl.Width <= mapWidth; x += step)
+                {
+                    double avg;
+                    if (!FindSite(tpl, mapGrid, x, z, distField, mapWidth, out avg)) continue;
+                    if (avg > maxDist) continue;
+
+                    if (avg < bestAvgDist)
+                    {
+                        bestAvgDist = avg;
+                        bestX = x;
+                        bestZ = z;
+                        found = true;
+                    }
+                }
+            }
+
+            return found;
+        }
+
+        /// <summary>
+        /// **整份样板一次放下去需要多少料**（按角色的首选 Def 算）。
+        /// 可用来在放之前判断"料够不够一趟做完"。
+        /// </summary>
+        public static Dictionary<string, int> RequiredMaterials(BuildTemplate tpl)
+        {
+            var need = new Dictionary<string, int>();
+            if (tpl == null) return need;
+            tpl.NormalizeSize();
+
+            for (int z = 0; z < tpl.Height; z++)
+            {
+                for (int x = 0; x < tpl.Width; x++)
+                {
+                    char sym = tpl.SymbolAt(x, z);
+                    if (sym == '\0') continue;
+
+                    TemplateRole role;
+                    if (!tpl.Roles.TryGetValue(sym, out role)) continue;
+                    if (role.Accepts.Count == 0) continue;
+
+                    string first = role.Accepts[0];
+                    int n;
+                    need[first] = need.TryGetValue(first, out n) ? n + 1 : 1;
+                }
+            }
+            return need;
+        }
+    }
+}

@@ -24,6 +24,7 @@ public static class CoreTests
         RunStockpileTests();
         RunBuildSiteTests();
         RunTemplateTests();
+        RunTemplatePlacerTests();
 
         Console.WriteLine();
         Console.WriteLine(string.Format("=== 通过 {0} / 失败 {1} ===", _pass, _fail));
@@ -1107,6 +1108,142 @@ public static class CoreTests
         threw = false;
         try { TemplateJson.Read(TemplateJson.Write(empty)); } catch (Exception) { threw = true; }
         True("空样板不该在序列化往返时抛异常", !threw);
+    }
+
+    // ---------------- 样板放置（角色 → 具体 Def） ----------------
+
+    private static PlacementGrid MakePlacementGrid(int w, int h, bool allPlaceable)
+    {
+        int n = w * h;
+        var g = new PlacementGrid { Width = w, Height = h, CanPlace = new bool[n], BlockedBySolid = new bool[n] };
+        for (int i = 0; i < n; i++) g.CanPlace[i] = allPlaceable;
+        return g;
+    }
+
+    private static void RunTemplatePlacerTests()
+    {
+        Console.WriteLine();
+        Console.WriteLine("-- TemplatePlacer（样板 → 逐格蓝图计划） --");
+
+        BuildTemplate t = MakeSmallTemplate();     // 5x5：15 墙 + 1 门 + 1 床 + 1 光源
+        var grid = MakePlacementGrid(20, 20, true);
+        double[] dist = MakeDistField(20, 20, 10, 10);
+
+        // ── 1. 料充足：所有槽位都该解析出来 ──
+        var stock = new Dictionary<string, int>
+        {
+            { "Wall", 100 }, { "Door", 10 }, { "Bed", 10 }, { "DoubleBed", 10 }, { "TorchLamp", 10 },
+        };
+        TemplatePlacement p = TemplatePlacer.Plan(t, grid, 5, 5, stock, 0, false);
+        Eq("料充足：槽位总数 = 18（15墙+1门+1床+1光源）", p.TotalSlots, 18);
+        Eq("料充足：全部解析成功", p.Blueprints.Count, 18);
+        Eq("料充足：没有未解决项", p.Unresolved.Count, 0);
+        Eq("墙 15", p.WallCount, 15);
+        Eq("门 1", p.DoorCount, 1);
+        Eq("床 1", p.CountRole("bed"), 1);
+        Eq("光源 1", p.CountRole("light"), 1);
+
+        // 坐标要落到正确的绝对位置
+        bool foundDoorAt = false;
+        for (int i = 0; i < p.Blueprints.Count; i++)
+        {
+            PlannedBlueprint b = p.Blueprints[i];
+            if (b.RoleName == "door" && b.X == 5 + 4 && b.Z == 5 + 3) foundDoorAt = true;
+        }
+        True("★ 门的绝对坐标正确（原点 (5,5) + 样板内 (4,3)）", foundDoorAt);
+
+        // ── 2. ★ 料不够时：先保墙/门，家具可以丢 ──
+        var poorStock = new Dictionary<string, int>
+        {
+            { "Wall", 100 }, { "Door", 10 },      // 有墙有门
+            // 完全没有床和光源
+        };
+        TemplatePlacement p2 = TemplatePlacer.Plan(t, grid, 0, 0, poorStock, 0, false);
+        Eq("★ 料不够：墙仍然全放（15）", p2.WallCount, 15);
+        Eq("★ 料不够：门仍然全放（1）", p2.DoorCount, 1);
+        Eq("★ 料不够：床放不了（0）", p2.CountRole("bed"), 0);
+        Eq("★ 料不够：光源放不了（0）", p2.CountRole("light"), 0);
+        Eq("★ 料不够：未解决 2 项（床+光源）", p2.Unresolved.Count, 2);
+        // 未解决项要给出理由
+        bool reasonOk = p2.Unresolved.Count > 0 && p2.Unresolved[0].Reason.Length > 0;
+        True("★ 未解决项带理由（不是静默丢弃）", reasonOk,
+            p2.Unresolved.Count > 0 ? p2.Unresolved[0].Reason : "没有未解决项");
+
+        // ── 3. ★ 库存分摊：床只有 1 个，但有两个床槽 → 只放一个 ──
+        var twoBeds = MakeSmallTemplate();
+        twoBeds.Rows[1] = "WBB.W";          // 两个床槽
+        twoBeds.Rows[2] = "W...W";          // 去掉光源
+        TemplatePlacement p3 = TemplatePlacer.Plan(twoBeds, grid, 0, 0,
+            new Dictionary<string, int> { { "Wall", 100 }, { "Door", 10 }, { "Bed", 1 } }, 0, false);
+        Eq("★ 库存分摊：只有 1 个床 → 只放 1 个床槽", p3.CountRole("bed"), 1);
+        Eq("★ 库存分摊：另一个床槽进未解决", p3.Unresolved.Count, 1);
+
+        // ── 4. ★ 候选顺序：优先用 accepts 里靠前的 ──
+        var pickFirst = TemplatePlacer.Plan(t, grid, 0, 0,
+            new Dictionary<string, int> { { "Wall", 100 }, { "Door", 10 }, { "Bed", 5 }, { "DoubleBed", 5 }, { "TorchLamp", 5 } },
+            0, false);
+        string bedDef = null;
+        for (int i = 0; i < pickFirst.Blueprints.Count; i++)
+            if (pickFirst.Blueprints[i].RoleName == "bed") bedDef = pickFirst.Blueprints[i].DefName;
+        Eq("★ 床槽用了 accepts 首位的 Bed（不是 DoubleBed）", bedDef, "Bed");
+
+        // 首位没货时应该退到第二位
+        var pickSecond = TemplatePlacer.Plan(t, grid, 0, 0,
+            new Dictionary<string, int> { { "Wall", 100 }, { "Door", 10 }, { "DoubleBed", 5 }, { "TorchLamp", 5 } },
+            0, false);
+        string bedDef2 = null;
+        for (int i = 0; i < pickSecond.Blueprints.Count; i++)
+            if (pickSecond.Blueprints[i].RoleName == "bed") bedDef2 = pickSecond.Blueprints[i].DefName;
+        Eq("★ Bed 没货时退到 DoubleBed（\"床可以是别的床\"）", bedDef2, "DoubleBed");
+
+        // ── 5. ★ 可放性：某些格放不下 → 那些槽位进未解决，其余照放 ──
+        var blocked = MakePlacementGrid(20, 20, true);
+        blocked.CanPlace[blocked.Index(0, 0)] = false;      // 样板左上角（一堵墙）
+        TemplatePlacement p5 = TemplatePlacer.Plan(t, blocked, 0, 0, stock, 0, false);
+        Eq("★ 有 1 格放不下 → 未解决 1 项", p5.Unresolved.Count, 1);
+        Eq("★ 其余 17 格照放（不因一格失败而整体放弃）", p5.Blueprints.Count, 17);
+        bool placeReason = p5.Unresolved[0].Reason.IndexOf("放不下") >= 0;
+        True("★ 放不下的理由写清楚了", placeReason, p5.Unresolved[0].Reason);
+
+        // ── 6. ★ 空地的格不要求可放（样板里的 '.' 可以是任何东西）──
+        var onlyWallBlocked = MakePlacementGrid(20, 20, true);
+        onlyWallBlocked.CanPlace[onlyWallBlocked.Index(2, 2)] = false;   // 样板 (2,2) 是空地
+        TemplatePlacement p6 = TemplatePlacer.Plan(t, onlyWallBlocked, 0, 0, stock, 0, false);
+        Eq("★ 空地被占不影响放置（不要求空地可放）", p6.Unresolved.Count, 0);
+
+        // ── 7. 选址：找到离基地最近的可放点 ──
+        int sx, sz; double sd;
+        bool found = TemplatePlacer.FindBestSite(t, grid, dist, 20, 20,
+            new BuildSiteOptions { SearchStep = 1, MaxDistanceFromBase = 100 }, out sx, out sz, out sd);
+        True("找得到放置点", found);
+        if (found)
+        {
+            // 基地在 (10,10)，样板 5x5，最优左上角应该在 (8,8)
+            True("★ 选址结果贴近基地（(8,8) 附近）", Math.Abs(sx - 8) <= 1 && Math.Abs(sz - 8) <= 1,
+                "选到 (" + sx + "," + sz + ")，平均距离 " + sd.ToString("F1"));
+        }
+
+        // 可放的地太小 → 找不到
+        var tiny = MakePlacementGrid(20, 20, false);
+        for (int x = 0; x < 4; x++) for (int z = 0; z < 3; z++) tiny.CanPlace[tiny.Index(x, z)] = true;
+        int tx, tz; double td;
+        bool foundTiny = TemplatePlacer.FindBestSite(t, tiny, dist, 20, 20,
+            new BuildSiteOptions { SearchStep = 1, MaxDistanceFromBase = 100 }, out tx, out tz, out td);
+        True("★ 可放区域装不下样板时 → 返回找不到（不硬塞）", !foundTiny);
+
+        // ── 8. 整份样板要多少料 ──
+        Dictionary<string, int> need = TemplatePlacer.RequiredMaterials(t);
+        Eq("整份样板需要 Wall 15", need.ContainsKey("Wall") ? need["Wall"] : 0, 15);
+        Eq("整份样板需要 Door 1", need.ContainsKey("Door") ? need["Door"] : 0, 1);
+        Eq("整份样板需要 Bed 1", need.ContainsKey("Bed") ? need["Bed"] : 0, 1);
+        Eq("整份样板需要 TorchLamp 1", need.ContainsKey("TorchLamp") ? need["TorchLamp"] : 0, 1);
+
+        // ── 9. 边界 ──
+        var nullGrid = TemplatePlacer.Plan(t, null, 0, 0, stock, 0, false);
+        Eq("grid 为 null 时不炸，返回空计划", nullGrid.Blueprints.Count, 0);
+        var nullTpl = TemplatePlacer.Plan(null, grid, 0, 0, stock, 0, false);
+        Eq("样板为 null 时不炸", nullTpl.Blueprints.Count, 0);
+        Eq("空样板要 0 材料", TemplatePlacer.RequiredMaterials(new BuildTemplate()).Count, 0);
     }
 
     // ---------------- 工具 ----------------
