@@ -162,36 +162,58 @@ namespace FoodControl.Game
 
                 int day = CalendarDay(map);
 
-                // ── ① 每日一次的家务（允许物资等），与决策时段无关 ──
-                //    放在时段判断**之前**：家务活没理由等到 8 点，而且新殖民地往往是半夜开局的。
+                // ── ① 每日一次：按优先级跑各"需求域" ──
+                //
+                // 放在时段判断**之前**，因为域自己会在 `OnDayStart` 里做家务
+                // （比如"允许所有物资"），那类事没理由等到 8 点 ——
+                // 而且新殖民地往往是半夜开局的。
+                //
+                // ⚠ 域之间的异常由 `NeedCoordinator` 逐个隔离，这里再包一层兜底。
+                int hour = GenLocalDate.HourOfDay(map);
                 try
                 {
-                    SetupActionResult setup = ColonySetup.Tick(map, day);
-                    if (setup != null && setup.Changed > 0)
+                    DomainContext ctx = BuildContext(map, day, hour);
+                    List<DomainCycleResult> results = NeedCoordinator.RunAllDomains(ctx);
+                    string summary = NeedCoordinator.Summarize(results);
+                    // 只在真的有域动手了才打日志，避免每天刷一行废话
+                    bool anyWork = false;
+                    for (int i = 0; i < results.Count; i++) if (results[i].DidWork) anyWork = true;
+                    if (anyWork)
                     {
-                        try { Log.Message("[FoodControl] 初始化：" + setup); } catch (Exception) { }
+                        try { Log.Message("[FoodControl] " + summary); } catch (Exception) { }
                     }
                 }
                 catch (Exception e)
                 {
-                    try { Log.Error("[FoodControl] 初始化异常（已吞掉）：" + e); } catch (Exception) { }
+                    try { Log.Error("[FoodControl] 域协调器异常（已吞掉）：" + e); } catch (Exception) { }
                 }
-
-                // ── ② 每日决策闭环（受时段限制）──
-                int hour = GenLocalDate.HourOfDay(map);
-                if (hour < DecisionHourFrom || hour > DecisionHourTo) return;
-
-                if (day == _lastRunDay) return;         // 今天已经跑过了
-                _lastRunDay = day;
-
-                CycleResult cr = RunCycle(map, "auto");
-                try { Log.Message("[FoodControl] " + cr.Summary); } catch (Exception) { }
             }
             catch (Exception e)
             {
                 // 到这里为止任何异常都只记日志，绝不外抛
                 try { Log.Error("[FoodControl] GameComponentTick 异常（已吞掉，不影响游戏）：" + e); } catch (Exception) { }
             }
+        }
+
+        /// <summary>
+        /// 组装一次域调用的共享上下文（公共量只算一次，避免各域重复读游戏）。
+        /// </summary>
+        public DomainContext BuildContext(Map map, int day, int hour)
+        {
+            var ctx = new DomainContext
+            {
+                Map = map,
+                Day = day,
+                Hour = hour,
+                Policy = PolicySettings,
+                Calibration = CalibrationSettings,
+                SiteOptions = SiteOptions,
+            };
+
+            try { ctx.Season = GenLocalDate.Season(map).ToString(); } catch (Exception) { }
+            try { ctx.CropDef = ResolveCropDef(PolicySettings.PreferredPlantDefName); } catch (Exception) { }
+
+            return ctx;
         }
 
         // ------------------------------------------------------------------
@@ -373,7 +395,7 @@ namespace FoodControl.Game
                 result.Day = readings.Year * 60 + readings.DayOfYear;
                 result.Season = readings.Season;
                 result.Ok = true;
-                result.Summary = Summarize(readings, state, decision, exec, plan);
+                result.Summary = SummarizeCycle(readings, state, decision, exec, plan);
 
                 Telemetry.Write(readings, state, plan, decision, exec, source, "");
             }
@@ -480,7 +502,10 @@ namespace FoodControl.Game
             return GenLocalDate.Year(map) * 60 + GenLocalDate.DayOfYear(map);
         }
 
-        private static string Summarize(
+        /// <summary>
+        /// 一行摘要。**public** 是因为 `FoodDomain` 要用它（S2 重构后闭环搬到了域里）。
+        /// </summary>
+        public static string SummarizeCycle(
             GameReadings readings, FoodState state, FoodDecision decision, ExecutionResult exec, PlotPlan plan)
         {
             if (readings == null || decision == null)

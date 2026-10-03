@@ -38,6 +38,18 @@ namespace FoodControl.Game
             : base(content)
         {
             Instance = this;
+
+            // 注册内置的"需求域"（S2 起闭环由 NeedCoordinator 统一调度）。
+            // ⚠ 注册是**幂等**的：游戏可能重新加载程序集，重复注册会被忽略，
+            //   不会导致同一个域跑两遍。
+            try
+            {
+                NeedCoordinator.RegisterBuiltIns();
+            }
+            catch (Exception e)
+            {
+                try { Log.Error("[FoodControl] 注册需求域失败（已吞掉）：" + e); } catch (Exception) { }
+            }
         }
 
         /// <summary>
