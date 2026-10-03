@@ -21,6 +21,7 @@ public static class CoreTests
         RunProjectionTests();
         RunPolicyTests();
         RunSiteSelectionTests();
+        RunStockpileTests();
 
         Console.WriteLine();
         Console.WriteLine(string.Format("=== 通过 {0} / 失败 {1} ===", _pass, _fail));
@@ -448,6 +449,149 @@ public static class CoreTests
         True("质心算得出", okc);
         Eq("  质心 x", cx, 15);
         Eq("  质心 z", cz, 15);
+    }
+
+    // ---------------- 储藏区选址 ----------------
+
+    /// <summary>造一个"从基地中心出发的欧氏距离场"当测试输入（真实场景里是带地形代价的 BFS）。</summary>
+    private static double[] MakeDistField(int w, int h, int cx, int cz)
+    {
+        var d = new double[w * h];
+        for (int z = 0; z < h; z++)
+            for (int x = 0; x < w; x++)
+                d[z * w + x] = Math.Sqrt((double)(x - cx) * (x - cx) + (double)(z - cz) * (z - cz));
+        return d;
+    }
+
+    private static void RunStockpileTests()
+    {
+        Console.WriteLine();
+        Console.WriteLine("-- StockpilePlanner（储藏区选址） --");
+
+        const int W = 120, H = 120;
+        double[] dist = MakeDistField(W, H, 60, 60);
+        var opts = new StockpilePlannerOptions
+        {
+            ClusterCount = 2,
+            MaxDistanceFromBase = 120,
+            MinCellsPerCluster = 9,
+            MaxCellsPerCluster = 400,
+        };
+
+        // ── 场景：两堆资源，一堆在左上、一堆在右下，彼此很远 ──
+        var cands = new List<StockpileCandidate>();
+        // 左上资源堆（20,20）附近 5×5
+        for (int x = 18; x < 23; x++)
+            for (int z = 18; z < 23; z++)
+                cands.Add(new StockpileCandidate { CellIndex = z * W + x, ResourceWeight = 10 });
+        // 右下资源堆（100,100）附近 5×5
+        for (int x = 98; x < 103; x++)
+            for (int z = 98; z < 103; z++)
+                cands.Add(new StockpileCandidate { CellIndex = z * W + x, ResourceWeight = 10 });
+
+        List<StockpileCluster> clusters = StockpilePlanner.Plan(dist, cands, W, opts);
+        Eq("分出 2 个簇", clusters.Count, 2);
+
+        if (clusters.Count == 2)
+        {
+            // ★ 核心断言：聚类必须按**地理聚拢**，而不是按"到基地的距离"分环。
+            //   如果按距离分环，两堆资源会被切成"近环"和"远环"，
+            //   每簇内部会同时含有左上和右下的点 —— 那就不对了。
+            //
+            // ⚠ 注意不要假设簇的顺序：`Plan` 返回值是按 Score 排序的，
+            //   而两堆资源关于基地对称（(20,20) 与 (100,100) 到 (60,60) 距离相同），
+            //   所以谁在前是任意的。**断言"分处对角象限"而不是"哪个是哪个"**。
+            StockpileCluster a = clusters[0], b = clusters[1];
+            int ax = (a.MinX + a.MaxX) / 2, az = (a.MinZ + a.MaxZ) / 2;
+            int bx = (b.MinX + b.MaxX) / 2, bz = (b.MinZ + b.MaxZ) / 2;
+            bool diagonal =
+                (ax < 60 && az < 60 && bx > 60 && bz > 60) ||
+                (bx < 60 && bz < 60 && ax > 60 && az > 60);
+            True("★ 两个簇分处对角象限（按地理聚拢，不是按基地距离分环）", diagonal,
+                "簇A 中心=(" + ax + "," + az + ")  簇B 中心=(" + bx + "," + bz + ")");
+
+            // 每个簇应该只含一堆资源（25 格）
+            True("★ 每簇恰好覆盖一堆资源（25 格）",
+                a.Area == 25 && b.Area == 25,
+                "A=" + a.Area + " B=" + b.Area);
+
+            // 紧凑：5×5 的方块，包围盒 5×5 = 25，填充率应为 1
+            Near("方块填充率 = 1.0（规整矩形）", a.FillRatio, 1.0, 1e-9);
+            True("包围盒是 5×5", a.BBoxWidth == 5 && a.BBoxHeight == 5,
+                a.BBoxWidth + "x" + a.BBoxHeight);
+        }
+
+        // ── ★ 可复现性：同样的输入必须给出完全相同的结果 ──
+        //    这是能写断言的前提。K-means 用了固定种子的自实现 LCG，
+        //    如果哪天有人换成 System.Random，这条会挂。
+        List<StockpileCluster> again = StockpilePlanner.Plan(dist, cands, W, opts);
+        bool same = again.Count == clusters.Count;
+        if (same)
+        {
+            for (int i = 0; i < clusters.Count; i++)
+            {
+                if (again[i].Cells.Count != clusters[i].Cells.Count
+                    || again[i].MinX != clusters[i].MinX
+                    || again[i].MinZ != clusters[i].MinZ)
+                {
+                    same = false;
+                    break;
+                }
+            }
+        }
+        True("★ 可复现：同样输入两次调用结果完全一致", same);
+
+        // ── 距离权重：两个簇规模相同时，离基地近的应该评分更高 ──
+        //
+        // ⚠ 这里必须**故意造出距离不同**的两个簇。
+        //   最初我用了 (20,20) 与 (100,100) —— 它们关于基地 (60,60) **对称**，
+        //   到基地距离完全相同，于是评分相同，断言必然失败（那是对的行为，测试写错了）。
+        var asymCands = new List<StockpileCandidate>();
+        for (int x = 55; x < 60; x++)          // 近：基地旁边
+            for (int z = 55; z < 60; z++)
+                asymCands.Add(new StockpileCandidate { CellIndex = z * W + x, ResourceWeight = 1 });
+        for (int x = 110; x < 115; x++)        // 远：地图另一侧
+            for (int z = 110; z < 115; z++)
+                asymCands.Add(new StockpileCandidate { CellIndex = z * W + x, ResourceWeight = 1 });
+
+        List<StockpileCluster> asym = StockpilePlanner.Plan(dist, asymCands, W, opts);
+        Eq("不对称场景也分出 2 簇", asym.Count, 2);
+        if (asym.Count == 2)
+        {
+            StockpileCluster c0 = asym[0], c1 = asym[1];
+            True("★ 离基地近的簇平均距离确实更小",
+                Math.Min(c0.AvgDistanceToBase, c1.AvgDistanceToBase) < 10,
+                "距 " + c0.AvgDistanceToBase.ToString("F1") + " / " + c1.AvgDistanceToBase.ToString("F1"));
+            True("★ 同规模下离基地近的簇评分更高",
+                (c0.AvgDistanceToBase < c1.AvgDistanceToBase) == (c0.Score > c1.Score),
+                "近者分 " + (c0.AvgDistanceToBase < c1.AvgDistanceToBase ? c0.Score : c1.Score).ToString("F1")
+                + " vs 远者分 " + (c0.AvgDistanceToBase < c1.AvgDistanceToBase ? c1.Score : c0.Score).ToString("F1"));
+        }
+
+        // ── 边界：空输入 ──
+        Eq("空候选 → 返回空列表",
+            StockpilePlanner.Plan(dist, new List<StockpileCandidate>(), W, opts).Count, 0);
+        Eq("候选为 null → 不炸",
+            StockpilePlanner.Plan(dist, null, W, opts).Count, 0);
+        Eq("距离场为 null → 不炸",
+            StockpilePlanner.Plan(null, cands, W, opts).Count, 0);
+
+        // ── 边界：全部超出最大距离 → 一个都不选 ──
+        var farOpts = new StockpilePlannerOptions { ClusterCount = 2, MaxDistanceFromBase = 5 };
+        Eq("全部超出最大距离 → 空结果",
+            StockpilePlanner.Plan(dist, cands, W, farOpts).Count, 0);
+
+        // ── 边界：太小的簇判负 ──
+        var tiny = new List<StockpileCandidate>
+        {
+            new StockpileCandidate { CellIndex = 10 * W + 10, ResourceWeight = 1 },
+            new StockpileCandidate { CellIndex = 10 * W + 11, ResourceWeight = 1 },
+        };
+        var bigMin = new StockpilePlannerOptions { ClusterCount = 1, MinCellsPerCluster = 9 };
+        List<StockpileCluster> tinyRes = StockpilePlanner.Plan(dist, tiny, W, bigMin);
+        True("只有 2 格时被判负（低于 MinCellsPerCluster=9）",
+            tinyRes.Count == 0 || tinyRes[0].Score == double.NegativeInfinity,
+            "簇数 " + tinyRes.Count + (tinyRes.Count > 0 ? " 分=" + tinyRes[0].Score : ""));
     }
 
     // ---------------- 工具 ----------------
