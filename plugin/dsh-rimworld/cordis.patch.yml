@@ -1,0 +1,4 @@
+# dsh-rimworld 的 bundle 层：只声明行，配置留给 profile 的 cordis.patch.yml 覆盖。
+# （profile 的 patch 层在每个 bundle 层之后应用，同 id 的行会整段替换 config。）
+- id: rimworld
+  name: dsh-rimworld

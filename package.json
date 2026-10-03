@@ -1,0 +1,17 @@
+{
+  "name": "rimworld-auto-test",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "RimWorld <-> AI agent closed-loop automated testing bridge (GABP client + launcher + smoke suite)",
+  "scripts": {
+    "start": "node src/cli.js start",
+    "stop": "node src/cli.js stop",
+    "status": "node src/cli.js status",
+    "tools": "node src/cli.js tools",
+    "smoke": "node src/cli.js smoke"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

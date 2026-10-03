@@ -1,0 +1,23 @@
+# ── 隔离测试环境（游戏运行时数据，很大且可重建）──
+profiles/
+
+# ── 测试产物（报告、截图、缓存的调试动作树）──
+runs/
+
+# ── 依赖与构建产物 ──
+node_modules/
+bridge/**/bin/
+bridge/**/obj/
+bridge/**/*.dll
+bridge/**/*.pdb
+
+# ── 调研中间产物 ──
+.research/
+tmp/
+
+# ── 编辑器/系统 ──
+.vs/
+.vscode/
+*.user
+Thumbs.db
+desktop.ini

@@ -1,0 +1,17 @@
+{
+  "name": "dsh-rimworld",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Drive and test a real RimWorld 1.6 session from DSH: launch an isolated instance, talk GABP to RimBridgeServer, run smoke suites.",
+  "main": "lib/index.js",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-tools": "*"
+  }
+}
