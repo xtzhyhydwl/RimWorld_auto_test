@@ -79,6 +79,7 @@ namespace FoodControl.Core
                 if (r.IsWallLike) sb.Append(", \"isWallLike\": true");
                 if (r.IsDoorLike) sb.Append(", \"isDoorLike\": true");
                 if (r.IsFurniture) sb.Append(", \"isFurniture\": true");
+                if (r.NeedsStuff) sb.Append(", \"needsStuff\": true");
                 sb.Append(" }");
                 if (i < roleKeys.Count - 1) sb.Append(",");
                 sb.Append("\n");
@@ -182,6 +183,7 @@ namespace FoodControl.Core
                         role.IsWallLike = GetBool(rm, "isWallLike", false);
                         role.IsDoorLike = GetBool(rm, "isDoorLike", false);
                         role.IsFurniture = GetBool(rm, "isFurniture", false);
+                        role.NeedsStuff = GetBool(rm, "needsStuff", false);
 
                         object acceptsObj;
                         if (rm.TryGetValue("accepts", out acceptsObj))

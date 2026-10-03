@@ -49,16 +49,28 @@ const DEFAULT_ACCEPTS = {
   furniture: [],                                   // 未知家具：留空，让用户填
 };
 
+/**
+ * **角色 → 附加标记**（决定放置时怎么判"有没有货"）。
+ *
+ * ⚠ `needsStuff` 是**踩过坑才有的区分**：
+ *   - **墙/门：由材料建成** → `needsStuff: true`。
+ *     "库存里有没有 Wall"是**无意义的问题** —— Wall 不是物品，是由木头/钢建的。
+ *   - **床/灯：多数是成品** → `needsStuff: false`。
+ *     "库存里有没有 Bed 这个物品"**才有意义**（1 个 Bed 物品 → 1 张床蓝图）。
+ *
+ *   我最初把两者混为一谈，拿 `"Wall"` 去查库存 → 永远 0
+ *   → 所有墙槽判"没货" → 48 个槽位全放不下。
+ */
 const ROLE_FLAGS = {
-  wall: { isWallLike: true },
-  door: { isDoorLike: true },
-  bed: { isFurniture: true },
-  light: { isFurniture: true },
-  table: { isFurniture: true },
-  seat: { isFurniture: true },
-  storage: { isFurniture: true },
-  workbench: { isFurniture: true },
-  furniture: { isFurniture: true },
+  wall: { isWallLike: true, needsStuff: true },
+  door: { isDoorLike: true, needsStuff: true },
+  bed: { isFurniture: true, needsStuff: false },
+  light: { isFurniture: true, needsStuff: false },
+  table: { isFurniture: true, needsStuff: true },       // 桌子也是材料建的
+  seat: { isFurniture: true, needsStuff: true },        // 凳子多数是材料建的
+  storage: { isFurniture: true, needsStuff: true },     // 架子是材料建的
+  workbench: { isFurniture: true, needsStuff: true },   // 工作台是材料建的
+  furniture: { isFurniture: true, needsStuff: true },   // 未知家具：保守按"要材料"
 };
 
 function parseArgs(argv) {
@@ -170,8 +182,16 @@ async function main() {
 
   if (flags.raw) {
     // 从已保存的扫描结果转换（离线，不需要游戏在跑）
-    capture = JSON.parse(fs.readFileSync(path.resolve(WS, String(flags.raw)), 'utf8'));
-    if (capture.result) capture = capture.result;   // 允许直接存桥接原始返回
+    const raw = JSON.parse(fs.readFileSync(path.resolve(WS, String(flags.raw)), 'utf8'));
+    // 兼容几种包装：桥接原始返回 {result:{...}}、自测存的 {cap:{...}, tpl:{...}}、或直接就是扫描结果
+    capture = raw;
+    if (capture.trimmedRows === undefined && capture.result) capture = capture.result;
+    if (capture.trimmedRows === undefined && capture.cap) capture = capture.cap;
+    if (capture.trimmedRows === undefined) {
+      throw new Error(
+        '这个文件里找不到 trimmedRows。它可能不是 capture_grid 的结果。\n' +
+        '  顶层键：' + Object.keys(raw).join(', '));
+    }
     console.log(`从 ${flags.raw} 读入扫描结果`);
   } else {
     if (!id) {

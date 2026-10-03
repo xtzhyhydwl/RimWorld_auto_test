@@ -978,10 +978,10 @@ public static class CoreTests
                 "W...D",
                 "WWWWW",
             },        };
-        t.Roles['W'] = new TemplateRole { Symbol = 'W', Name = "wall", Accepts = new List<string> { "Wall" }, IsWallLike = true };
-        t.Roles['D'] = new TemplateRole { Symbol = 'D', Name = "door", Accepts = new List<string> { "Door" }, IsDoorLike = true };
-        t.Roles['B'] = new TemplateRole { Symbol = 'B', Name = "bed", Accepts = new List<string> { "Bed", "DoubleBed" }, IsFurniture = true };
-        t.Roles['L'] = new TemplateRole { Symbol = 'L', Name = "light", Accepts = new List<string> { "TorchLamp" }, IsFurniture = true };
+        t.Roles['W'] = new TemplateRole { Symbol = 'W', Name = "wall", Accepts = new List<string> { "Wall" }, IsWallLike = true, NeedsStuff = true };
+        t.Roles['D'] = new TemplateRole { Symbol = 'D', Name = "door", Accepts = new List<string> { "Door" }, IsDoorLike = true, NeedsStuff = true };
+        t.Roles['B'] = new TemplateRole { Symbol = 'B', Name = "bed", Accepts = new List<string> { "Bed", "DoubleBed" }, IsFurniture = true, NeedsStuff = false };
+        t.Roles['L'] = new TemplateRole { Symbol = 'L', Name = "light", Accepts = new List<string> { "TorchLamp" }, IsFurniture = true, NeedsStuff = false };
         t.NormalizeSize();
         return t;
     }
@@ -1155,19 +1155,24 @@ public static class CoreTests
         // ── 2. ★ 料不够时：先保墙/门，家具可以丢 ──
         var poorStock = new Dictionary<string, int>
         {
-            { "Wall", 100 }, { "Door", 10 },      // 有墙有门
-            // 完全没有床和光源
+            // ★ **故意什么库存都没有** —— 这正是游戏里抓出 bug 的那组数据。
+            //   墙/门是**由材料建成**的（needsStuff），所以"库存里有没有 Wall"是无意义的问题；
+            //   床/灯是成品，库存里没有就真的放不了。
         };
         TemplatePlacement p2 = TemplatePlacer.Plan(t, grid, 0, 0, poorStock, 0, false);
-        Eq("★ 料不够：墙仍然全放（15）", p2.WallCount, 15);
-        Eq("★ 料不够：门仍然全放（1）", p2.DoorCount, 1);
-        Eq("★ 料不够：床放不了（0）", p2.CountRole("bed"), 0);
-        Eq("★ 料不够：光源放不了（0）", p2.CountRole("light"), 0);
-        Eq("★ 料不够：未解决 2 项（床+光源）", p2.Unresolved.Count, 2);
-        // 未解决项要给出理由
+        Eq("★★ 库存全空时墙仍然全放（墙是由材料建的，不查 Wall 库存）", p2.WallCount, 15);
+        Eq("★★ 库存全空时门仍然全放", p2.DoorCount, 1);
+        Eq("★ 成品（床）没货 → 放不了", p2.CountRole("bed"), 0);
+        Eq("★ 成品（光源）没货 → 放不了", p2.CountRole("light"), 0);
+        Eq("★ 未解决 2 项（床+光源）", p2.Unresolved.Count, 2);
         bool reasonOk = p2.Unresolved.Count > 0 && p2.Unresolved[0].Reason.Length > 0;
         True("★ 未解决项带理由（不是静默丢弃）", reasonOk,
             p2.Unresolved.Count > 0 ? p2.Unresolved[0].Reason : "没有未解决项");
+        // 需要材料的角色必须被标出来（供游戏层挑 stuff）
+        bool wallNeedsStuff = false;
+        for (int i = 0; i < p2.Blueprints.Count; i++)
+            if (p2.Blueprints[i].RoleName == "wall") wallNeedsStuff = p2.Blueprints[i].NeedsStuff;
+        True("★★ 墙蓝图被标记为 needsStuff（游戏层据此挑木/钢/石）", wallNeedsStuff);
 
         // ── 3. ★ 库存分摊：床只有 1 个，但有两个床槽 → 只放一个 ──
         var twoBeds = MakeSmallTemplate();
@@ -1210,6 +1215,28 @@ public static class CoreTests
         onlyWallBlocked.CanPlace[onlyWallBlocked.Index(2, 2)] = false;   // 样板 (2,2) 是空地
         TemplatePlacement p6 = TemplatePlacer.Plan(t, onlyWallBlocked, 0, 0, stock, 0, false);
         Eq("★ 空地被占不影响放置（不要求空地可放）", p6.Unresolved.Count, 0);
+
+        // ── 6b. ★★ 回归：`Plan` 必须按**地图绝对坐标**判断可放性 ──
+        //
+        // 这是游戏里抓出来的一个真 bug：`Plan` 最初传了**模板局部坐标**去查
+        // 一个**地图尺寸**的网格 → 它检查了地图左上角，而不是真实站点
+        // → 48 个槽位全部误判"放不下"。
+        // 离线测试当时全绿，因为测试的网格小、"左上角"恰好也是可放的 —— 测错了地方。
+        //
+        // 这个测试**故意**把"地图原点附近"设成不可放、而"真实站点"设成可放，
+        // 这样局部/绝对混用就必然失败。
+        {
+            var tricky = MakePlacementGrid(40, 40, false);     // 整张网格默认不可放
+            // 只把真实站点 (20,20)..(24,24) 设成可放
+            for (int x = 20; x < 25; x++)
+                for (int z = 20; z < 25; z++)
+                    tricky.CanPlace[tricky.Index(x, z)] = true;
+
+            TemplatePlacement pt = TemplatePlacer.Plan(t, tricky, 20, 20, stock, 0, false);
+            Eq("★★ 站点在 (20,20) 而非原点时，槽位仍能全部解析（绝对坐标回归）",
+                pt.Blueprints.Count, 18);
+            Eq("★★ 且没有未解决项", pt.Unresolved.Count, 0);
+        }
 
         // ── 7. 选址：找到离基地最近的可放点 ──
         int sx, sz; double sd;

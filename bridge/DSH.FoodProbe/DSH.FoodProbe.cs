@@ -113,6 +113,404 @@ namespace DSH.FoodProbe
 
         // ── 工具 ─────────────────────────────────────────────────────
 
+        // ── 建筑样板：读样板库 / 触发样板建造 ────────────────────────
+
+        [Tool("foodprobe/templates",
+            Description = "读游戏内的建筑样板库（从 mod 目录的 templates/*.json 加载）。只读。")]
+        public object Templates()
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+
+            var lib = FindType(asm, "TemplateLibrary");
+            if (lib == null) return new { success = false, message = "找不到 TemplateLibrary" };
+
+            try
+            {
+                var ids = CallStatic(lib, "Ids");
+                var loadedFrom = CallStatic(lib, "LoadedFrom");
+                var errors = CallStatic(lib, "Errors");
+                var describe = CallStatic(lib, "Describe");
+
+                var idList = new List<string>();
+                if (ids is System.Collections.IEnumerable en)
+                    foreach (var x in en) if (x != null) idList.Add(x.ToString());
+
+                var errList = new List<string>();
+                if (errors is System.Collections.IEnumerable en2)
+                    foreach (var x in en2) if (x != null) errList.Add(x.ToString());
+
+                var details = new List<object>();
+                for (int i = 0; i < idList.Count && i < 20; i++)
+                {
+                    var t = CallStatic(lib, "Get", idList[i]);
+                    if (t == null) continue;
+                    try
+                    {
+                        var tp = t.GetType();
+                        object w = tp.GetProperty("Width")?.GetValue(t, null);
+                        object h = tp.GetProperty("Height")?.GetValue(t, null);
+                        var rowsObj = tp.GetProperty("Rows")?.GetValue(t, null);
+                        int rowCount = 0;
+                        if (rowsObj is System.Collections.IEnumerable re)
+                            foreach (var _ in re) rowCount++;
+                        details.Add(new { id = idList[i], width = w, height = h, rows = rowCount });
+                    }
+                    catch (Exception) { }
+                }
+
+                return new
+                {
+                    success = true,
+                    count = idList.Count,
+                    ids = idList.ToArray(),
+                    loadedFrom = loadedFrom == null ? null : loadedFrom.ToString(),
+                    errors = errList.ToArray(),
+                    describe = describe == null ? null : describe.ToString(),
+                    details,
+                    note = "count = 0 说明没找到样板目录（应该是 <mod>/templates/*.json）。"
+                         + "没样板时住处域会走程序化兜底。",
+                };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = "读样板库失败：" + e.Message };
+            }
+        }
+
+        [Tool("foodprobe/run_template_build",
+            Description = "让 mod 立刻跑一次样板建造（从 templates/ 抄一份盖出来）。force=true 绕过\"已有住处\"守卫（测试用）。会改地图。")]
+        public object RunTemplateBuild(
+            [ToolParameter(Description = "true = 强制盖一间，绕过\"已有住处/蓝图\"守卫（测试专用）")] bool force = false)
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+            var comp = FindType(asm, "FoodControlGameComponent");
+            if (comp == null) return new { success = false, message = "找不到 FoodControlGameComponent" };
+
+            try
+            {
+                string methodName = force ? "RunTemplateBuildForced" : "RunTemplateBuildNow";
+                var r = CallStatic(comp, methodName);
+                if (r == null)
+                {
+                    return new
+                    {
+                        success = false,
+                        message = "没有 " + methodName + "()。现有静态方法："
+                            + string.Join(", ", comp.GetMethods(ANY_STATIC).Select(m => m.Name).Distinct().ToArray()),
+                    };
+                }
+                return new { success = true, forced = force, result = r.ToString() };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message, exception = e.GetType().FullName };
+            }
+        }
+
+        [Tool("foodprobe/reset_domain_runs",
+            Description = "重置域协调器的'今天跑过'记录，让所有域能立刻再跑一次（测试用）。")]
+        public object ResetDomainRuns()
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+            var comp = FindType(asm, "FoodControlGameComponent");
+            if (comp == null) return new { success = false, message = "找不到 FoodControlGameComponent" };
+            try
+            {
+                var r = CallStatic(comp, "ResetDomainRunDays");
+                return new { success = r != null, result = r == null ? "没有 ResetDomainRunDays()" : r.ToString() };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message };
+            }
+        }
+
+        [Tool("foodprobe/template_plan_debug",
+            Description = "诊断：把一份样板解析成逐格计划，但**不真的放**。列出各角色、库存、选址、前几条未解决原因。只读。")]
+        public object TemplatePlanDebug(
+            [ToolParameter(Description = "样板 id；省略则用第一份")] string templateId = null)
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            var lib = FindType(asm, "TemplateLibrary");
+            var dom = FindType(asm, "TemplateBuildDomain");
+            if (lib == null) return new { success = false, message = "找不到 TemplateLibrary" };
+            if (dom == null) return new { success = false, message = "找不到 TemplateBuildDomain" };
+
+            try
+            {
+                object tpl = null;
+                if (!string.IsNullOrEmpty(templateId)) tpl = CallStatic(lib, "Get", templateId);
+                if (tpl == null)
+                {
+                    var all = CallStatic(lib, "All");
+                    if (all is System.Collections.IEnumerable en)
+                        foreach (var x in en) { tpl = x; break; }
+                }
+                if (tpl == null) return new { success = false, message = "样板库里没有样板" };
+
+                var tp = tpl.GetType();
+                var id = tp.GetProperty("Id")?.GetValue(tpl, null)?.ToString();
+                var w = tp.GetProperty("Width")?.GetValue(tpl, null);
+                var h = tp.GetProperty("Height")?.GetValue(tpl, null);
+
+                // roles 表
+                var rolesObj = tp.GetProperty("Roles")?.GetValue(tpl, null);
+                var roleInfo = new List<object>();
+                if (rolesObj is System.Collections.IEnumerable ren)
+                {
+                    foreach (var kv in ren)
+                    {
+                        if (kv == null) continue;
+                        var kt = kv.GetType();
+                        var key = kt.GetProperty("Key")?.GetValue(kv, null);
+                        var val = kt.GetProperty("Value")?.GetValue(kv, null);
+                        if (val == null) continue;
+                        var vt = val.GetType();
+                        var rname = vt.GetProperty("Name")?.GetValue(val, null)?.ToString();
+                        var acceptsObj = vt.GetProperty("Accepts")?.GetValue(val, null);
+                        var accepts = new List<string>();
+                        if (acceptsObj is System.Collections.IEnumerable aen)
+                            foreach (var a in aen) if (a != null) accepts.Add(a.ToString());
+                        roleInfo.Add(new
+                        {
+                            symbol = key?.ToString(),
+                            name = rname,
+                            accepts = accepts.ToArray(),
+                        });
+                    }
+                }
+
+                // 库存（走 mod 自己的判据）
+                var avail = CallStatic(dom, "CountAvailableBuildables", map);
+                var availList = new List<object>();
+                if (avail is System.Collections.IDictionary ad)
+                {
+                    foreach (System.Collections.DictionaryEntry e in ad)
+                        availList.Add(new { def = e.Key?.ToString(), count = e.Value });
+                }
+
+                // 站点 + 放置网格
+                object gridObj = null, distObj = null;
+                var args = new object[] { map, null, null };
+                var m = dom.GetMethod("BuildPlacementGrid", ANY_STATIC);
+                bool gridOk = false;
+                if (m != null)
+                {
+                    var arr = new object[] { map, null, null };
+                    var r = m.Invoke(null, arr);
+                    gridOk = r is bool && (bool)r;
+                    gridObj = arr[1];
+                    distObj = arr[2];
+                }
+
+                // 前若干格的"能不能放"抽样
+                var gridSamples = new List<object>();
+                if (gridObj != null)
+                {
+                    var gt = gridObj.GetType();
+                    var canPlace = gt.GetProperty("CanPlace")?.GetValue(gridObj, null) as bool[];
+                    var gw = (int)(gt.GetProperty("Width")?.GetValue(gridObj, null) ?? 0);
+                    if (canPlace != null)
+                    {
+                        int trueN = 0;
+                        for (int i = 0; i < canPlace.Length; i++) if (canPlace[i]) trueN++;
+                        gridSamples.Add(new { totalCells = canPlace.Length, placeableCells = trueN });
+                    }
+                }
+
+                // 直接调 TemplatePlacer.Plan 看未解决原因
+                // （通过 Core 类型的静态方法反射调用）
+                var placerT = FindType(asm, "TemplatePlacer");
+                object planObj = null;
+                var unresolved = new List<string>();
+                if (placerT != null && gridObj != null)
+                {
+                    // 先找站点
+                    var siteM = placerT.GetMethod("FindBestSite", ANY_STATIC);
+                    var bsOptsT = FindType(asm, "BuildSiteOptions");
+                    object bsOpts = bsOptsT != null ? Activator.CreateInstance(bsOptsT) : null;
+                    if (siteM != null && bsOpts != null)
+                    {
+                        var siteArgs = new object[] { tpl, gridObj, distObj, map.Size.x, map.Size.z, bsOpts, 0, 0, 0.0 };
+                        var found = siteM.Invoke(null, siteArgs);
+                        if (found is bool && (bool)found)
+                        {
+                            int sx = (int)siteArgs[6], sz = (int)siteArgs[7];
+                            var planM = placerT.GetMethod("Plan", ANY_STATIC);
+                            var dict = new Dictionary<string, int>();
+                            if (avail is System.Collections.IDictionary ad2)
+                                foreach (System.Collections.DictionaryEntry e in ad2)
+                                    dict[e.Key.ToString()] = Convert.ToInt32(e.Value);
+                            planObj = planM.Invoke(null, new object[] { tpl, gridObj, sx, sz, dict, 0, false });
+
+                            if (planObj != null)
+                            {
+                                var pt = planObj.GetType();
+                                var unres = pt.GetProperty("Unresolved")?.GetValue(planObj, null);
+                                if (unres is System.Collections.IEnumerable uen)
+                                {
+                                    int c = 0;
+                                    foreach (var u in uen)
+                                    {
+                                        if (c++ >= 6) break;
+                                        unresolved.Add(u?.ToString() ?? "?");
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            unresolved.Add("FindBestSite 返回 false（找不到能放下的地方）");
+                        }
+                    }
+                }
+
+                return new
+                {
+                    success = true,
+                    templateId = id,
+                    size = new { w, h },
+                    roles = roleInfo,
+                    availableMaterials = availList,
+                    gridOk,
+                    grid = gridSamples,
+                    unresolvedSample = unresolved,
+                    note = "这条工具**不真的放**，只报告中间量。"
+                         + "看 availableMaterials 是否为空、roles 的 accepts 是什么、"
+                         + "unresolvedSample 的失败原因。",
+                };
+            }
+            catch (Exception e)
+            {
+                return new
+                {
+                    success = false,
+                    message = "诊断失败：" + e.Message,
+                    exception = e.GetType().FullName,
+                    stack = e.StackTrace,
+                };
+            }
+        }
+
+        [Tool("foodprobe/stockpile_filters",
+            Description = "★ 回读每片储藏区的 filter：收不收尸体/垃圾/正常物资。用于验证\"丢弃区 vs 生活区\"真的生效。只读。")]
+        public object StockpileFilters()
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            // 找出"尸体"和"有毒垃圾"的代表 Def（存在才用）
+            var probeDefs = new List<KeyValuePair<string, ThingDef>>();
+            string[] cats = new string[] { "Corpses", "Corpse", "ToxicWaste", "Waste" };
+            var categoryNames = new List<string>();
+            for (int i = 0; i < cats.Length; i++)
+            {
+                try
+                {
+                    var c = DefDatabase<ThingCategoryDef>.GetNamedSilentFail(cats[i]);
+                    if (c != null) categoryNames.Add(c.defName);
+                }
+                catch { }
+            }
+
+            // 从"尸体类别"里挑一个真实 def 当探针
+            ThingDef corpseProbe = null;
+            try
+            {
+                var corpses = DefDatabase<ThingCategoryDef>.GetNamedSilentFail("Corpses");
+                if (corpses != null && corpses.childThingDefs != null && corpses.childThingDefs.Count > 0)
+                    corpseProbe = corpses.childThingDefs[0];
+            }
+            catch { }
+            if (corpseProbe == null)
+            {
+                // 退路：常见尸体 def 名
+                string[] tries = new string[] { "Corpse_Human", "Human_Corpse", "Corpse" };
+                for (int i = 0; i < tries.Length && corpseProbe == null; i++)
+                    corpseProbe = DefDatabase<ThingDef>.GetNamedSilentFail(tries[i]);
+            }
+            if (corpseProbe != null) probeDefs.Add(new KeyValuePair<string, ThingDef>("尸体代表:" + corpseProbe.defName, corpseProbe));
+
+            ThingDef wasteProbe = null;
+            string[] wasteTries = new string[] { "ToxicWastepack", "ToxicWaste" };
+            for (int i = 0; i < wasteTries.Length && wasteProbe == null; i++)
+                wasteProbe = DefDatabase<ThingDef>.GetNamedSilentFail(wasteTries[i]);
+            if (wasteProbe != null) probeDefs.Add(new KeyValuePair<string, ThingDef>("垃圾代表:" + wasteProbe.defName, wasteProbe));
+
+            ThingDef woodProbe = DefDatabase<ThingDef>.GetNamedSilentFail("WoodLog");
+            if (woodProbe != null) probeDefs.Add(new KeyValuePair<string, ThingDef>("正常物资:WoodLog", woodProbe));
+
+            var zonesOut = new List<object>();
+            try
+            {
+                foreach (var z in map.zoneManager.AllZones)
+                {
+                    var sp = z as Zone_Stockpile;
+                    if (sp == null) continue;
+
+                    var accepts = new List<object>();
+                    for (int i = 0; i < probeDefs.Count; i++)
+                    {
+                        bool ok = false;
+                        try { ok = sp.settings?.filter != null && sp.settings.filter.Allows(probeDefs[i].Value); }
+                        catch { }
+                        accepts.Add(new { probe = probeDefs[i].Key, accepts = ok });
+                    }
+
+                    // 判定：不收正常物资 ⇒ 丢弃区
+                    bool acceptsWood = false;
+                    if (woodProbe != null)
+                    {
+                        try { acceptsWood = sp.settings?.filter != null && sp.settings.filter.Allows(woodProbe); }
+                        catch { }
+                    }
+                    bool acceptsCorpse = false;
+                    if (corpseProbe != null)
+                    {
+                        try { acceptsCorpse = sp.settings?.filter != null && sp.settings.filter.Allows(corpseProbe); }
+                        catch { }
+                    }
+
+                    int cells = 0;
+                    try { cells = sp.cells != null ? sp.cells.Count : 0; } catch { }
+
+                    zonesOut.Add(new
+                    {
+                        zoneId = sp.ID,
+                        cells,
+                        kind = !acceptsWood ? "丢弃区(只收脏东西)" : (acceptsCorpse ? "⚠ 生活区但收尸体" : "生活区(不收脏东西)"),
+                        acceptsWood,
+                        acceptsCorpse,
+                        probes = accepts,
+                    });
+                }
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message };
+            }
+
+            return new
+            {
+                success = true,
+                zoneCount = zonesOut.Count,
+                corpseCategoryFound = categoryNames.ToArray(),
+                corpseProbeDef = corpseProbe?.defName,
+                wasteProbeDef = wasteProbe?.defName,
+                zones = zonesOut,
+                note = "判定：不收正常物资(WoodLog) ⇒ 丢弃区。"
+                     + "生活区**必须** acceptsCorpse=false（这是用户指出的缺陷："
+                     + "允许所有的储藏区会把尸体搬进生活区）。",
+            };
+        }
+
         [Tool("foodprobe/health", Description = "自检：FoodControl mod 加载了吗、内部类型和静态入口在不在。只读。")]
         public object Health()
         {

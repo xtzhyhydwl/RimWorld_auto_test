@@ -17,15 +17,34 @@ namespace FoodControl.Core
         /// <summary>角色名（wall/door/bed/light…）</summary>
         public string RoleName = "";
 
-        /// <summary>最终选中的 Def 名</summary>
+        /// <summary>最终选中的**建筑 Def** 名（盖什么：Wall / Door / Bed…）</summary>
         public string DefName = "";
+
+        /// <summary>
+        /// 这个建筑**要不要用建造材料（stuff）**。
+        ///
+        /// ⚠ 这是踩过坑才加的一个区分：**样板里的 `accepts` 是"建筑 Def"，不是"材料"**。
+        ///   `accepts: ["Wall"]` 的意思是"这里盖一面墙"，而墙**由木头/钢/石头建成** ——
+        ///   材料不在样板里，由游戏层按库存挑。
+        ///
+        ///   我最初把两者混为一谈，拿 `"Wall"` 去查库存 → 永远查到 0
+        ///   → 所有墙槽都判"没货" → 48 个槽位全放不下。
+        /// </summary>
+        public bool NeedsStuff;
+
+        /// <summary>
+        /// 如果**不需要 stuff**（床/灯这类本身就是成品），那就必须库存里
+        /// 有**这个 Def 的物品**才能盖（比如 1 个 `Bed` 物品 → 1 张床蓝图）。
+        /// </summary>
+        public bool NeedsDefAsItem;
 
         /// <summary>旋转（0..3），只对需要朝向的东西有意义</summary>
         public int Rotation;
 
         public override string ToString()
         {
-            return string.Format("{0}({1},{2}) {3}->{4}", RoleName, X, Z, Symbol, DefName);
+            return string.Format("{0}({1},{2}) {3}->{4}{5}", RoleName, X, Z, Symbol, DefName,
+                NeedsStuff ? " +stuff" : (NeedsDefAsItem ? " (as item)" : ""));
         }
     }
 
@@ -60,6 +79,18 @@ namespace FoodControl.Core
 
         /// <summary>各角色的计划格数（校验用）</summary>
         public Dictionary<string, int> PlannedByRole = new Dictionary<string, int>();
+
+        /// <summary>
+        /// **诊断**：每一格"被怎么处理了"的分类计数。
+        /// 排查"为什么全解决不了"时，这个字典是第一现场。
+        /// </summary>
+        public Dictionary<string, int> SkippedByReason = new Dictionary<string, int>();
+
+        /// <summary>
+        /// **诊断**：`PlanPass` 实际看到的前几条槽位数据（局部坐标 → 绝对坐标 → 可放结论）。
+        /// 排查"全都放不下"时，这个列表能直接证明它到底查了哪些格。
+        /// </summary>
+        public List<string> PassSamples = new List<string>();
 
         public int WallCount
         {
@@ -174,12 +205,39 @@ namespace FoodControl.Core
             // 已用掉的量（同一种 Def 在多个槽位上要分摊库存）
             var used = new Dictionary<string, int>();
 
+            // ★ 诊断：统计"为什么某些格被跳过"。
+            //   没有这个统计时，"48 个槽位全解决不了"会毫无线索 —— 我排查时就在这里卡住过。
+            result.SkippedByReason = new Dictionary<string, int>();
+            for (int z = 0; z < tpl.Height; z++)
+            {
+                for (int x = 0; x < tpl.Width; x++)
+                {
+                    char sym = tpl.SymbolAt(x, z);
+                    if (sym == '\0') { Bump(result, "空地（样板里就是 '.'）"); continue; }
+                    TemplateRole r;
+                    if (!tpl.Roles.TryGetValue(sym, out r))
+                    {
+                        Bump(result, "代号 '" + sym + "' 不在 Roles 表里");
+                        continue;
+                    }
+                    Bump(result, "会用角色 " + r.Name + "（'" + sym + "'）");
+                }
+            }
+
             // ★ 两遍：先墙/门（房子的骨架），再家具。
             //   理由见类注释第 2 条：料不够时宁可少家具，也要先把壳立起来。
             PlanPass(tpl, grid, originX, originZ, available, used, result, true);
             PlanPass(tpl, grid, originX, originZ, available, used, result, false);
 
             return result;
+        }
+
+        private static void Bump(TemplatePlacement r, string key)
+        {
+            if (r == null || key == null) return;
+            if (r.SkippedByReason == null) r.SkippedByReason = new Dictionary<string, int>();
+            int n;
+            r.SkippedByReason[key] = r.SkippedByReason.TryGetValue(key, out n) ? n + 1 : 1;
         }
 
         private static void PlanPass(
@@ -204,22 +262,48 @@ namespace FoodControl.Core
                     int mz = originZ + z;
 
                     // ① 能不能放
-                    if (!grid.IsPlaceable(x, z))
+                    //
+                    // ⚠ **必须用地图绝对坐标（mx,mz），不能用模板局部坐标（x,z）**。
+                    //   `PlacementGrid` 是**整张地图**尺寸的，`IsPlaceable` 的入参是地图坐标。
+                    //   我最初传了局部坐标 → 它去查了**地图左上角**那一片能不能放，
+                    //   而不是真实站点 → 48 个槽位全部误判为"放不下"
+                    //   （而 `FindBestSite` 传的是 `tplOriginX + x`，所以它成功 —— 两边不一致才暴露出来）。
+                    if (!grid.IsPlaceable(mx, mz))
                     {
+                        if (result.PassSamples.Count < 12)
+                        {
+                            result.PassSamples.Add(string.Format(
+                                "'{0}'({1},{2})→({3},{4}) 否 structuralPass={5} isStructural={6}",
+                                sym, x, z, mx, mz, structuralPass, isStructural));
+                        }
                         result.Unresolved.Add(new UnresolvedSlot
                         {
                             X = mx, Z = mz, Symbol = sym, RoleName = role.Name,
-                            Reason = "该格放不下（地表不可承重 或 已被占用）",
+                            Reason = string.Format("该格 ({0},{1}) 放不下（地表不可承重 或 已被占用）", mx, mz),
                         });
                         continue;
                     }
 
-                    // ② 逐个候选 Def 试：有货吗？
+                    // ② 挑建筑 Def —— **以及分清"它要不要材料"**
+                    //
+                    // ⚠ 这是踩过坑的地方（见 PlannedBlueprint.NeedsStuff 的注释）：
+                    //   墙/门是**由材料建成**的（stuff），所以"库存里有没有 Wall"是无意义的问题；
+                    //   而床/灯多数是**成品**，"库存里有没有 Bed"才有意义。
+                    //   两种角色的"有没有货"判据完全不同，不能混。
                     string chosen = null;
                     string why = null;
                     for (int i = 0; i < role.Accepts.Count; i++)
                     {
                         string def = role.Accepts[i];
+                        if (role.NeedsStuff)
+                        {
+                            // 需要材料：**不检查这个 Def 的库存**（它不是物品），
+                            // 材料够不够由游戏层挑 stuff 时判断
+                            chosen = def;
+                            break;
+                        }
+
+                        // 成品：库存里要有这个 Def 的物品
                         int have;
                         if (!available.TryGetValue(def, out have)) have = 0;
                         int alreadyUsed;
@@ -230,8 +314,7 @@ namespace FoodControl.Core
                             chosen = def;
                             break;
                         }
-                        if (why == null)
-                            why = "候选 " + def + " 库存 0";
+                        if (why == null) why = "候选 " + def + " 库存 0";
                     }
 
                     if (chosen == null)
@@ -246,18 +329,23 @@ namespace FoodControl.Core
                         continue;
                     }
 
-                    // ③ 记账
-                    int u;
-                    used[chosen] = used.TryGetValue(chosen, out u) ? u + 1 : 1;
+                    // ③ 记账（只对"成品"角色扣库存；需材料的角色不扣）
+                    if (!role.NeedsStuff)
+                    {
+                        int u;
+                        used[chosen] = used.TryGetValue(chosen, out u) ? u + 1 : 1;
+                    }
 
                     string rn;
                     result.Blueprints.Add(new PlannedBlueprint
                     {
-                        CellIndex = grid.Index(x, z),
+                        CellIndex = grid.Index(mx, mz),
                         X = mx, Z = mz,
                         Symbol = sym,
                         RoleName = role.Name,
                         DefName = chosen,
+                        NeedsStuff = role.NeedsStuff,
+                        NeedsDefAsItem = !role.NeedsStuff,
                     });
 
                     rn = role.Name ?? "";

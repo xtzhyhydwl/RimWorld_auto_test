@@ -165,8 +165,9 @@ namespace FoodControl.Game
         public static void RegisterBuiltIns()
         {
             Register(new FoodDomain());
-            Register(new StockpileDomain());   // 排在食物之后（Priority 20）
-            Register(new ShelterDomain());     // 排在储藏区之后（Priority 30），低频
+            Register(new StockpileDomain());      // Priority 20
+            Register(new TemplateBuildDomain());  // Priority 25 —— **样板优先**
+            Register(new ShelterDomain());        // Priority 30 —— 没样板时的程序化兜底
         }
 
         /// <summary>测试用：把"按天去重"清掉，让下一轮重新跑。</summary>

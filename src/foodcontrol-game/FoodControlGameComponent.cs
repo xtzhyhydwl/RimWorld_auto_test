@@ -285,6 +285,93 @@ namespace FoodControl.Game
         /// <summary>给测试钩子复用的单例（真实调度走协调器各自 new；这里只为手动触发）</summary>
         private static StockpileDomain _stockpileForManualRun;
 
+        /// <summary>样板建造域的测试单例</summary>
+        private static TemplateBuildDomain _templateBuildForManualRun;
+
+        /// <summary>
+        /// **静态测试钩子**：立刻跑一次样板建造（忽略"每 N 天"的调度）。
+        ///
+        /// 与 `RunStockpileNow` 同理：正常节奏是每 2 个游戏日一次，
+        /// 测试如果只能等真实调度会很慢且不好定位。
+        /// </summary>
+        public static string RunTemplateBuildNow()
+        {
+            return RunTemplateBuildImpl(false);
+        }
+
+        /// <summary>
+        /// **静态测试钩子**：强制盖一间（绕过"已有住处就跳过"的守卫）。
+        ///
+        /// 为什么需要它：debug 开局**自带墙和门**，所以守卫会正确地拒绝盖房 ——
+        /// 导致"样板 → 蓝图"这条路**根本验不到**。
+        /// 守卫本身没错，是测试需要一个绕过它的入口。
+        ///
+        /// ⚠ **只在测试钩子里生效**，生产调度路径永远走非强制版本。
+        /// </summary>
+        public static string RunTemplateBuildForced()
+        {
+            return RunTemplateBuildImpl(true);
+        }
+
+        private static string RunTemplateBuildImpl(bool force)
+        {
+            try
+            {
+                Map map = Verse.Find.CurrentMap;
+                if (map == null) return "没有当前地图";
+                if (_templateBuildForManualRun == null)
+                    _templateBuildForManualRun = new TemplateBuildDomain();
+
+                // 强制模式：临时打开 ForceBuild，跑完恢复（避免影响后续生产调度）
+                bool prev = TemplateBuildDomain.ForceBuild;
+                if (force) TemplateBuildDomain.ForceBuild = true;
+
+                DomainContext ctx = (Instance != null)
+                    ? Instance.BuildContext(map, CalendarDay(map), GenLocalDate.HourOfDay(map))
+                    : new DomainContext
+                    {
+                        Map = map,
+                        Day = CalendarDay(map),
+                        Hour = GenLocalDate.HourOfDay(map),
+                        Policy = new PolicyConfig(),
+                        Calibration = new Calibration(),
+                        SiteOptions = new SiteSelectionOptions(),
+                        CropDef = ResolveCropDef("Plant_Rice"),
+                    };
+
+                DomainCycleResult r;
+                try
+                {
+                    r = _templateBuildForManualRun.RunCycle(ctx);
+                }
+                finally
+                {
+                    TemplateBuildDomain.ForceBuild = prev;
+                }
+
+                return r == null ? "返回 null" : r.Summary;
+            }
+            catch (Exception e)
+            {
+                try { Log.Error("[FoodControl] RunTemplateBuildNow 异常：" + e); } catch (Exception) { }
+                return "RunTemplateBuildNow 异常：" + e.Message;
+            }
+        }
+
+        /// <summary>**静态测试钩子**：重置域调度记录，让下次能立刻再跑。</summary>
+        public static string ResetDomainRunDays()
+        {
+            try
+            {
+                NeedCoordinator.ResetDayTracking();
+                return "已重置域调度记录（下次 AnyDomainDue 会认为今天都没跑过）";
+            }
+            catch (Exception e)
+            {
+                return "重置失败：" + e.Message;
+            }
+        }
+
         /// <summary>
         /// **静态测试钩子**：立刻跑一次储藏区域（**忽略"每 N 天"的调度**）。
         ///

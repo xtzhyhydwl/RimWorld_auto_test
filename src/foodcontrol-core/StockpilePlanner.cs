@@ -74,9 +74,10 @@ namespace FoodControl.Core
         }
     }
 
+    /// <summary>储藏区选址的可调参数。</summary>
     public sealed class StockpilePlannerOptions
     {
-        /// <summary>要划几个储藏区</summary>
+        /// <summary>要划几个储藏区（聚类簇数）</summary>
         public int ClusterCount = 2;
 
         /// <summary>单个储藏区的最大格数（RimWorld 里储藏区太大反而不方便）</summary>
@@ -99,6 +100,136 @@ namespace FoodControl.Core
 
         /// <summary>K-means 最大迭代次数</summary>
         public int MaxIterations = 30;
+    }
+
+    /// <summary>边缘丢弃区的位置（一个规整的方框）。</summary>
+    public sealed class EdgeDumpSite
+    {
+        /// <summary>方框左下角（地图坐标）</summary>
+        public int X;
+        public int Z;
+        public int Size;
+
+        /// <summary>贴的是哪条边（"left"/"right"/"top"/"bottom"/"corner"）</summary>
+        public string Edge = "";
+
+        /// <summary>方框内实际可放的格数（用来确认"够大"）</summary>
+        public int PlaceableCells;
+
+        public override string ToString()
+        {
+            return string.Format("边缘丢弃区 {0}x{0} @({1},{2}) 贴 {3} 边，可放 {4} 格",
+                Size, X, Z, Edge, PlaceableCells);
+        }
+    }
+
+    /// <summary>
+    /// **边缘丢弃区选址**：直接在地图边缘找一个规整方框。
+    ///
+    /// ## 为什么不需要复杂算法（用户 2026-10-03 的原话）
+    ///
+    /// > 「放垃圾的地方就是在地图，你可以直接找一个，比如说最左边、最右边、最上边、
+    /// >  最下边或者说四个角。直接靠着最边边画一个比较大的方框啊，
+    /// >  就可能你画一个 10 乘 10，直接结束了，就**不用管了**。」
+    ///
+    /// 这条把问题**大幅简化**了：丢弃区**不需要**"贴着资源"（那里的东西本来就该被丢掉），
+    /// 也**不需要**精细选址（离基地远反而更好）。所以：
+    ///
+    /// - **不参与 K-means 聚类**（那套是为"贴着资源的生活区"设计的）
+    /// - 直接从边缘往里找一块够大的空地就行
+    ///
+    /// 这也解释了先前"用聚类同时产生活区 + 丢弃区"为什么会出问题：
+    /// **两者需要的选址标准完全不同**，硬塞进同一个算法就会互相干扰。
+    /// </summary>
+    public static class EdgeDumpPlanner
+    {
+        /// <summary>
+        /// 沿四条边找一个够大的方框。
+        /// </summary>
+        /// <param name="grid">可放性网格（整张地图）</param>
+        /// <param name="mapW">地图宽</param>
+        /// <param name="mapH">地图高</param>
+        /// <param name="size">想要的边长（默认 10）</param>
+        /// <param name="inset">离地图边缘留几格（0 = 紧贴边缘）</param>
+        /// <param name="minPlaceableRatio">方框内可放格的最低比例</param>
+        public static EdgeDumpSite Find(
+            PlacementGrid grid, int mapW, int mapH,
+            int size, int inset, double minPlaceableRatio)
+        {
+            if (grid == null || mapW <= 0 || mapH <= 0) return null;
+            if (size < 3) size = 3;
+            if (size > mapW || size > mapH) return null;
+            if (inset < 0) inset = 0;
+            if (minPlaceableRatio <= 0) minPlaceableRatio = 0.6;
+
+            int need = (int)Math.Ceiling(size * size * minPlaceableRatio);
+
+            // 四条边上的候选起点（沿边滑动）。靠边优先，所以每条边**从边缘往中间**、
+            // 并且**先试角落**（角落最不碍事）。
+            var starts = new List<int[]>();
+
+            int lo = inset;
+            int hiW = mapW - size - inset;
+            int hiH = mapH - size - inset;
+            if (hiW < lo || hiH < lo) return null;
+
+            // 四角优先
+            starts.Add(new int[] { lo, lo });
+            starts.Add(new int[] { hiW, lo });
+            starts.Add(new int[] { lo, hiH });
+            starts.Add(new int[] { hiW, hiH });
+
+            // 再沿四条边从中间向外扫
+            int midX = Math.Max(lo, Math.Min(hiW, (mapW - size) / 2));
+            int midZ = Math.Max(lo, Math.Min(hiH, (mapH - size) / 2));
+            int step = Math.Max(1, size / 2);
+
+            for (int x = lo; x <= hiW; x += step) { starts.Add(new int[] { x, lo }); starts.Add(new int[] { x, hiH }); }
+            for (int z = lo; z <= hiH; z += step) { starts.Add(new int[] { lo, z }); starts.Add(new int[] { hiW, z }); }
+            starts.Add(new int[] { midX, lo });
+            starts.Add(new int[] { midX, hiH });
+            starts.Add(new int[] { lo, midZ });
+            starts.Add(new int[] { hiW, midZ });
+
+            EdgeDumpSite best = null;
+            var seen = new HashSet<long>();
+
+            for (int i = 0; i < starts.Count; i++)
+            {
+                int sx = starts[i][0], sz = starts[i][1];
+                long key = ((long)sx << 32) ^ (uint)sz;
+                if (!seen.Add(key)) continue;
+                if (sx < 0 || sz < 0 || sx + size > mapW || sz + size > mapH) continue;
+
+                int placeable = 0;
+                bool ok = true;
+                for (int dz = 0; dz < size && ok; dz++)
+                {
+                    for (int dx = 0; dx < size; dx++)
+                    {
+                        if (grid.IsPlaceable(sx + dx, sz + dz)) placeable++;
+                        else if (placeable + (size * size - (dz * size + dx)) < need) { ok = false; break; }
+                    }
+                }
+                if (placeable < need) continue;
+
+                // 判定贴哪条边
+                string edge;
+                bool left = sx == lo, right = sx == hiW, bottom = sz == lo, top = sz == hiH;
+                if ((left || right) && (bottom || top)) edge = "corner";
+                else if (left) edge = "left";
+                else if (right) edge = "right";
+                else if (bottom) edge = "bottom";
+                else if (top) edge = "top";
+                else edge = "near-edge";
+
+                var site = new EdgeDumpSite { X = sx, Z = sz, Size = size, Edge = edge, PlaceableCells = placeable };
+                if (best == null || placeable > best.PlaceableCells) best = site;
+                if (placeable == size * size) return site;   // 全可放，直接采用
+            }
+
+            return best;
+        }
     }
 
     /// <summary>

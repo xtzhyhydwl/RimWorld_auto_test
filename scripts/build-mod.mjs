@@ -48,6 +48,9 @@ const GAME_DIR = path.join(WS, 'src', 'foodcontrol-game');
 const OUT_DIR = path.join(WS, 'tmp', 'foodcontrol-game');
 const DEPLOY_DIR = path.join(WS, 'mods', 'FoodControl', '1.6', 'Assemblies');
 
+/** mod 的内容根目录（junction 目标），样板要同步到这里 */
+const MOD_DIR = path.join(WS, 'mods', 'FoodControl');
+
 const CORE_DLL = path.join(OUT_DIR, 'FoodControl.Core.dll');
 /**
  * Game 层的产物**故意叫 `FoodControl.dll`**（程序集名 = 文件名）。
@@ -243,6 +246,52 @@ async function main() {
     }
     console.log('\n⚠ 正在运行的游戏不会热加载 DLL —— 要重启实例才生效。');
     console.log('  （`<游戏>\\Mods\\FoodControl` 是 junction，物理文件就在工作区 mods/ 下）');
+
+    // ── 顺便同步建筑样板 ──
+    //
+    // 为什么要同步：`TemplateLibrary`（游戏内）从 **mod 自己的目录** 读样板，
+    // 即 `<游戏>/Mods/FoodControl/templates/*.json`；
+    // 而样板受 git 管理、住在仓库根的 `templates/`。junction 打通后拷过去即可见。
+    //
+    // ⚠ 只拷 `*.json`，**默认不删**目标目录里的其他 json ——
+    //   免得把临时试验的样板清掉。要清理得显式加 `--prune`。
+    syncTemplates(argv.includes('--prune'));
+  }
+}
+
+/**
+ * 把仓库根 `templates/` 同步到 mod 目录。
+ * @param {boolean} prune 是否删除目标目录里"源里没有"的 json
+ */
+function syncTemplates(prune) {
+  const src = path.join(WS, 'templates');
+  const dst = path.join(MOD_DIR, 'templates');
+
+  if (!fs.existsSync(src)) {
+    console.log('\n模板同步：仓库里没有 templates/ 目录，跳过');
+    return;
+  }
+
+  fs.mkdirSync(dst, { recursive: true });
+  const files = fs.readdirSync(src).filter((f) => f.endsWith('.json'));
+  for (const f of files) {
+    fs.copyFileSync(path.join(src, f), path.join(dst, f));
+  }
+
+  let pruned = 0;
+  if (prune) {
+    for (const f of fs.readdirSync(dst)) {
+      if (!f.endsWith('.json')) continue;
+      if (!fs.existsSync(path.join(src, f))) {
+        fs.unlinkSync(path.join(dst, f));
+        pruned++;
+      }
+    }
+  }
+
+  console.log(`\n模板同步：${files.length} 份 json → ${path.relative(WS, dst)}${pruned ? `（清理了 ${pruned} 份）` : ''}`);
+  if (files.length === 0) {
+    console.log('  ⚠ 一份样板都没有 —— 住处域会走"程序化兜底"路径（盖 13x13 方块房）');
   }
 }
 

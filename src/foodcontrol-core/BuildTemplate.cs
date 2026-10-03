@@ -36,6 +36,20 @@ namespace FoodControl.Core
         /// <summary>是不是家具（放室内，不参与封闭性）</summary>
         public bool IsFurniture;
 
+        /// <summary>
+        /// 这个建筑**要不要建造材料（stuff）**。
+        ///
+        /// ⚠ 关键区分（踩过坑）：**`Accepts` 是"建筑 Def"，不是"材料"**。
+        ///   - 墙/门：**由材料建成** → `NeedsStuff = true`。
+        ///     "库存里有没有 Wall"是**无意义的问题**（Wall 不是物品，是由木头/钢建的）。
+        ///   - 床/灯：多数是**成品** → `NeedsStuff = false`。
+        ///     "库存里有没有 Bed 这个物品"**才有意义**（1 个 Bed 物品 → 1 张床蓝图）。
+        ///
+        ///   我最初把两者混为一谈，拿 `"Wall"` 去查库存 → 永远 0
+        ///   → 所有墙槽判"没货" → 48 个槽位全放不下。
+        /// </summary>
+        public bool NeedsStuff;
+
         public TemplateRole Clone()
         {
             return new TemplateRole
@@ -46,6 +60,7 @@ namespace FoodControl.Core
                 IsWallLike = IsWallLike,
                 IsDoorLike = IsDoorLike,
                 IsFurniture = IsFurniture,
+                NeedsStuff = NeedsStuff,
             };
         }
     }

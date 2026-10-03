@@ -1197,6 +1197,30 @@ namespace FoodControl.Game
         /// 我们照抄这个顺序，行为就和玩家手点一致 —— **不是**我们在乱删东西，
         /// 而是"在这里盖房子"本来就意味着"先清场"。
         /// </summary>
+        /// <summary>
+        /// **公开的逐格放置原语**：放一个建筑蓝图（先清场 → 先查合法性 → 再放）。
+        ///
+        /// 为什么要把私有的 `TryPlace` 暴露出来：样板路径（`TemplateBuildDomain`）
+        /// 需要**一模一样的放置纪律**（尤其是"先查再放"和"清场"这两步，
+        /// 它们都是踩过坑才有的），而不该另写一份。
+        /// 重复实现这类逻辑是本项目出 bug 的主要来源之一。
+        /// </summary>
+        public static bool TryPlacePublic(
+            Map map, BuildableDef def, IntVec3 c, Rot4 rot, ThingDef stuff, PlacementReport pr)
+        {
+            return TryPlace(map, def, c, rot, stuff, pr);
+        }
+
+        /// <summary>清掉某格上挡路的可拆除物（供样板路径复用）</summary>
+        public static void WipeFootprintPublic(Map map, BuildableDef def, IntVec3 c, Rot4 rot)
+        {
+            try { WipeFootprint(map, def, c, rot); }
+            catch (Exception e)
+            {
+                try { Log.Warning("[FoodControl] WipeFootprint 失败（忽略）：" + e.Message); } catch (Exception) { }
+            }
+        }
+
         private static bool TryPlace(
             Map map, BuildableDef def, IntVec3 c, Rot4 rot, ThingDef stuff, PlacementReport pr)
         {
