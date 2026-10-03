@@ -1127,10 +1127,36 @@ namespace DSH.FoodProbe
                             if (!bpByBuildDef.ContainsKey(buildDef)) bpByBuildDef[buildDef] = 0;
                             bpByBuildDef[buildDef]++;
 
-                            // ⚠ Verse.Thing.stuff 是 protected —— 读公开的 Thing.Stuff（实测 CS1061 踩过）
-                            string stuffName = bp.Stuff != null ? bp.Stuff.defName : "(无)";
+                            // ★ 材质要读 `Blueprint_Build.stuffToUse`（公开方法 `EntityToBuildStuff()`），
+                            //   **不是** `Thing.Stuff`！
+                            //   实测踩过：读 `bp.Stuff` 全是 null → byStuff 显示 "(无)"，
+                            //   于是"蓝图到底用什么料"完全看不出来（元数据：Blueprint_Build 有
+                            //   `public ThingDef stuffToUse` 字段 + `public ThingDef EntityToBuildStuff()`）。
+                            string stuffName = "(无)";
+                            try
+                            {
+                                var sp = bp.EntityToBuildStuff();
+                                if (sp != null) stuffName = sp.defName;
+                            }
+                            catch { }
                             if (!bpByStuff.ContainsKey(stuffName)) bpByStuff[stuffName] = 0;
                             bpByStuff[stuffName]++;
+
+                            // 顺便把"这个蓝图总共要哪些料"读出来（TotalMaterialCost）
+                            var costSample = new List<object>();
+                            try
+                            {
+                                var cost = bp.TotalMaterialCost();
+                                if (cost != null)
+                                {
+                                    foreach (var c in cost)
+                                    {
+                                        if (c == null || c.thingDef == null) continue;
+                                        costSample.Add(new { def = c.thingDef.defName, count = c.count });
+                                    }
+                                }
+                            }
+                            catch { }
 
                             if (bpSamples.Count < Math.Max(maxSamples, 8))
                             {
@@ -1141,6 +1167,7 @@ namespace DSH.FoodProbe
                                     buildsDef = buildDef,
                                     stuff = stuffName,
                                     isDoorBlueprint = bp is Blueprint_Door,
+                                    materialCost = costSample,
                                     faction = bp.Faction != null ? bp.Faction.Name : null,
                                 });
                             }
@@ -1150,13 +1177,20 @@ namespace DSH.FoodProbe
                         if (t is Frame)
                         {
                             frames++;
+                            string frameStuff = "(无)";
+                            try
+                            {
+                                var fs = t.Stuff;
+                                if (fs != null) frameStuff = fs.defName;
+                            }
+                            catch { }
                             if (frameSamples.Count < 6)
                             {
                                 frameSamples.Add(new
                                 {
                                     x = t.Position.x, z = t.Position.z,
                                     def = t.def.defName,
-                                    stuff = t.Stuff != null ? t.Stuff.defName : null,
+                                    stuff = frameStuff,
                                 });
                             }
                             continue;
@@ -1446,61 +1480,136 @@ namespace DSH.FoodProbe
         }
 
         /// <summary>
-        /// 查 `TerrainGrid.SetTerrain` 有没有被别的 mod **Harmony patch** 过。
+        /// 查 `TerrainGrid.SetTerrain` / `Designator_Build.DesignateSingleCell` 等有没有被
+        /// **别的 mod Harmony patch** 过。
         ///
         /// 为什么要查这个：IL 说"地形直接改"，实测说"产生了蓝图"。
-        /// 除了我自己 IL 读反之外，第二个可能是 **Harmony patch 改写了几何**。
+        /// 除了"我自己 IL 读反"之外，第二个可能是 **Harmony patch 改写了行为**。
         /// 这个工具把 patch 列表打出来，一眼就能排除/坐实。
+        ///
+        /// ⚠ 用**反射**而不是硬引用 `HarmonyLib`：Harmony 的那个 `0Harmony.dll`
+        ///   不在游戏的 `Managed\` 里（由 brrainz.harmony 提供，版本还随工坊更新变），
+        ///   硬引用会给探针编译引入一个"版本对不上就编不过"的隐形依赖。
+        ///   反射只多几十行，但**部署前不需要找到那个 DLL**。
         /// </summary>
         public static object PatchesImpl()
         {
             var rows = new List<object>();
             var errors = new List<string>();
 
-            var targets = new object[]
+            // ① 找到 HarmonyLib.Harmony 类型
+            Type harmonyType = null;
+            foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
             {
-                new { t = typeof(TerrainGrid), m = "SetTerrain" },
-                new { t = typeof(TerrainGrid), m = "SetFoundation" },
-                new { t = typeof(Designator_Build), m = "DesignateSingleCell" },
-                new { t = typeof(GenConstruct), m = "PlaceBlueprintForBuild" },
-                new { t = typeof(GenConstruct), m = "CanPlaceBlueprintAt_NewTemp" },
+                try
+                {
+                    if (a.GetName().Name != "0Harmony") continue;
+                    harmonyType = a.GetType("HarmonyLib.Harmony", false);
+                    if (harmonyType != null) break;
+                }
+                catch { }
+            }
+            if (harmonyType == null)
+            {
+                return new
+                {
+                    success = false,
+                    message = "程序集 0Harmony 未加载（没有别的 mod 用 Harmony）—— "
+                            + "那就更说明'IL 说改地形、实测出蓝图'只可能是**我自己 IL 读反了**。",
+                };
+            }
+
+            MethodInfo getAll = harmonyType.GetMethod(
+                "GetAllPatchedMethods", BindingFlags.Public | BindingFlags.Static);
+            MethodInfo getInfo = harmonyType.GetMethod(
+                "GetPatchInfo", BindingFlags.Public | BindingFlags.Static);
+            if (getAll == null || getInfo == null)
+                return new { success = false, message = "Harmony 版本不兼容：找不到 GetAllPatchedMethods/GetPatchInfo" };
+
+            IEnumerable patched = null;
+            try { patched = getAll.Invoke(null, null) as IEnumerable; }
+            catch (Exception e) { return new { success = false, message = "GetAllPatchedMethods 失败：" + e.Message }; }
+            if (patched == null) return new { success = false, message = "GetAllPatchedMethods 返回 null" };
+
+            var list = new List<MethodBase>();
+            foreach (var o in patched) { var mb = o as MethodBase; if (mb != null) list.Add(mb); }
+
+            var targets = new List<object[]>
+            {
+                new object[] { typeof(TerrainGrid), "SetTerrain" },
+                new object[] { typeof(TerrainGrid), "SetFoundation" },
+                new object[] { typeof(Designator_Build), "DesignateSingleCell" },
+                new object[] { typeof(Designator_Build), "CanDesignateCell" },
+                new object[] { typeof(GenConstruct), "PlaceBlueprintForBuild" },
+                new object[] { typeof(GenConstruct), "CanPlaceBlueprintAt_NewTemp" },
             };
 
             foreach (var tg in targets)
             {
-                var ty = (Type)tg.GetType().GetProperty("t").GetValue(tg, null);
-                var mn = (string)tg.GetType().GetProperty("m").GetValue(tg, null);
+                var ty = (Type)tg[0];
+                var mn = (string)tg[1];
+                string label = ty.Name + "." + mn;
                 try
                 {
-                    var all = HarmonyLib.Harmony.GetAllPatchedMethods();
-                    var hit = all.FirstOrDefault(mm =>
-                        mm.DeclaringType == ty && mm.Name == mn);
+                    MethodBase hit = null;
+                    for (int i = 0; i < list.Count; i++)
+                    {
+                        MethodBase mb = list[i];
+                        if (mb.DeclaringType == ty && mb.Name == mn) { hit = mb; break; }
+                    }
                     if (hit == null)
                     {
-                        rows.Add(new { target = ty.Name + "." + mn, patched = false, owners = new string[0] });
+                        rows.Add(new { target = label, patched = false, owners = new string[0] });
                         continue;
                     }
-                    var info = HarmonyLib.Harmony.GetPatchInfo(hit);
+
+                    object info = getInfo.Invoke(null, new object[] { hit });
                     var owners = new List<string>();
-                    foreach (var p in info.Prefixes) owners.Add("prefix:" + p.owner);
-                    foreach (var p in info.Postfixes) owners.Add("postfix:" + p.owner);
-                    foreach (var p in info.Transpilers) owners.Add("transpiler:" + p.owner);
-                    foreach (var p in info.Finalizers) owners.Add("finalizer:" + p.owner);
-                    rows.Add(new { target = ty.Name + "." + mn, patched = owners.Count > 0, owners = owners.ToArray() });
+                    if (info != null)
+                    {
+                        Type it = info.GetType();
+                        string[] kinds = new string[] { "Prefixes", "Postfixes", "Transpilers", "Finalizers" };
+                        for (int k = 0; k < kinds.Length; k++)
+                        {
+                            var p = it.GetProperty(kinds[k]);
+                            if (p == null) continue;
+                            var coll = p.GetValue(info, null) as IEnumerable;
+                            if (coll == null) continue;
+                            foreach (var pt in coll)
+                            {
+                                if (pt == null) continue;
+                                var op = pt.GetType().GetField("owner");
+                                string owner = op != null ? (op.GetValue(pt) as string) : "?";
+                                owners.Add(kinds[k].Substring(0, kinds[k].Length - 2).ToLowerInvariant() + ":" + owner);
+                            }
+                        }
+                    }
+                    rows.Add(new { target = label, patched = owners.Count > 0, owners = owners.ToArray() });
                 }
                 catch (Exception e)
                 {
-                    errors.Add(ty.Name + "." + mn + ": " + e.Message);
+                    errors.Add(label + ": " + e.Message);
                 }
+            }
+
+            int patchedCount = 0;
+            foreach (var r in rows)
+            {
+                var p = r.GetType().GetProperty("patched");
+                if (p != null && (bool)p.GetValue(r, null)) patchedCount++;
             }
 
             return new
             {
                 success = true,
+                harmonyLoaded = true,
+                totalPatchedMethodsInGame = list.Count,
+                ourTargetsPatched = patchedCount,
                 patchedMethods = rows,
                 errors,
-                note = "如果 TerrainGrid.SetTerrain / Designator_Build.DesignateSingleCell 都没被 patch，"
-                     + "那'IL 说改地形、实测出蓝图'就只可能是**我自己 IL 读反了**（见 IlDump 的 off-by-one）。",
+                note = "我们的六个目标方法里 patchedCount 若为 0，"
+                     + "那'IL 说改地形、实测出蓝图'就只能是**我自己 IL 读反了**"
+                     + "（已定位：IlDump 的 ShortInlineBrTarget off-by-one，已修）。",
             };
         }
 
@@ -1509,6 +1618,43 @@ namespace DSH.FoodProbe
         public object Patches()
         {
             return PatchesImpl();
+        }
+
+        /// <summary>
+        /// 排查用的读操作开关：给"数地图上的东西"这类**必须前后一致**的测量用。
+        ///
+        /// 为什么需要它（本轮实测抓到的一个测量陷阱）：
+        ///   我在"放蓝图之前"记一次数量、"之后"再记一次，然后算增量。
+        ///   但小人**在这两次之间一直在建造** —— 蓝图会被变成 `Frame` 再从地图上消失，
+        ///   于是 `before` 和 `after` 根本不是同一个世界状态，增量算出来是 +0 甚至负数。
+        ///   ⇒ 测量期间必须把游戏**暂停**（`TickManager.Paused = true`），
+        ///     让两次读数落在同一个静止状态上。
+        /// </summary>
+        public static object SetPausedImpl(bool paused)
+        {
+            try
+            {
+                var tm = Find.TickManager;
+                if (tm == null) return new { success = false, message = "没有 TickManager" };
+                // ⚠ `TickManager.Paused` 是 **get-only**（写它 CS0200，实测踩过）。
+                //   `get_Paused` 的 IL：`curTimeSpeed == Paused(0) || ForcePaused`。
+                //   所以暂停/恢复要改 **`CurTimeSpeed`**（public get+set），值是 `Verse.TimeSpeed`。
+                if (paused) tm.CurTimeSpeed = TimeSpeed.Paused;
+                else if (tm.CurTimeSpeed == TimeSpeed.Paused) tm.CurTimeSpeed = TimeSpeed.Normal;
+                return new { success = true, paused = tm.Paused, curTimeSpeed = tm.CurTimeSpeed.ToString() };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message };
+            }
+        }
+
+        [Tool("foodprobe/set_paused",
+            Description = "暂停/恢复游戏，给'先后必须一致'的测量用（小人建造会让蓝图数在两次读之间变化）。")]
+        public object SetPaused(
+            [ToolParameter(Description = "true = 暂停，false = 恢复")] bool paused = true)
+        {
+            return SetPausedImpl(paused);
         }
 
         // ── mod 内部的一次性初始化钩子 ─────────────────────────────────
@@ -1680,6 +1826,13 @@ namespace DSH.FoodProbe
             [ToolParameter(Description = "on 或 off，默认 off")] string mode = "off")
         {
             return CallModStatic("SetShelterForce", "set_shelter_force", mode);
+        }
+
+        [Tool("foodprobe/shelter_report",
+            Description = "★S4：读 mod 最近一次住处域的详细记账 JSON（我们放了几个蓝图、材质、户型、被拒原因）。只读。")]
+        public object ShelterReport()
+        {
+            return CallModStatic("ShelterReportJson", "shelter_report");
         }
 
         [Tool("foodprobe/inspect_shelter",

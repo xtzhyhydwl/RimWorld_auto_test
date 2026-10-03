@@ -393,9 +393,22 @@ namespace FoodControl.Game
         }
 
         /// <summary>
+        /// **静态测试钩子**：最近一次住处域的详细记账 JSON（0 参数，探针直接调）。
+        ///
+        /// 它回答"**我们自己放了几个**"；地图上"**实际有几个**"由桥接的
+        /// `foodprobe/list_buildings` 独立回读。两个数一比就知道差额从哪来 ——
+        /// 这正是我看到"48 面墙蓝图 vs 23 面墙户型"时缺的那条信息。
+        /// </summary>
+        public static string ShelterReportJson()
+        {
+            try { return ShelterDomain.LastReportJson; }
+            catch (Exception e) { return "{\"error\":\"" + e.Message.Replace("\"", "'") + "\"}"; }
+        }
+
+        /// <summary>
         /// **静态测试钩子（只读）**：把住处域"这一轮会怎么盖"算出来，**绝不动地图**。
         ///
-        /// 为什么需要它：真放蓝图是不可逆的（地图上会多 24 个蓝图）。
+        /// 为什么需要它：真放蓝图是不可逆的（地图上会多几十个蓝图）。
         /// 测试可以先用它确认户型/材质合理，再决定要不要真放。
         /// </summary>
         public static string InspectShelterNow()
@@ -413,11 +426,64 @@ namespace FoodControl.Game
         }
 
         /// <summary>
-        /// **静态测试钩子（取证用）**：打开/关闭"用 designator 铺地板"这条实验路径。
+        /// **静态测试钩子（测试专用）**：忽略"已有住处/已有蓝图"的守卫，强制盖一间。
         ///
-        /// 参数是 1 个字符串："on" / "off"。
-        /// 打开后**下一次**住处域跑的时候会真的用 `Designator_Build(TerrainDef)` 铺地板，
-        /// 用来在游戏里证明「这条路是直接改地形，不是放蓝图」。
+        /// 为什么必须有它：**debug 开局自带 662 面墙 + 28 扇门**，
+        /// 正常守卫会正确地拒绝动手 —— 守卫没错，但验收就永远看不到那 23+1 个蓝图。
+        /// 这个钩子把 `ForceOverride` 打开跑一轮，**跑完一定关回去**。
+        /// </summary>
+        public static string RunShelterNowForce()
+        {
+            bool old = ShelterDomain.ForceOverride;
+            try
+            {
+                Map map = Verse.Find.CurrentMap;
+                if (map == null) return "没有当前地图";
+
+                if (_shelterForManualRun == null) _shelterForManualRun = new ShelterDomain();
+
+                ShelterDomain.ForceOverride = true;
+                ShelterDomain.ResetPlacedFlag();
+
+                DomainContext ctx = BuildManualContext(map);
+                DomainCycleResult r = _shelterForManualRun.RunCycle(ctx);
+
+                return "[force] " + (r == null ? "返回 null" : r.Summary);
+            }
+            catch (Exception e)
+            {
+                try { Log.Error("[FoodControl] RunShelterNowForce 异常：" + e); } catch (Exception) { }
+                return "RunShelterNowForce 异常：" + e.Message;
+            }
+            finally
+            {
+                ShelterDomain.ForceOverride = old;      // ★ 无论如何都关回去（生产路径不许留着）
+            }
+        }
+
+        /// <summary>**静态测试钩子（测试专用）**：开关 `ShelterDomain.ForceOverride`（"on"/"off"）。</summary>
+        public static string SetShelterForce(string mode)
+        {
+            try
+            {
+                bool on = !string.IsNullOrEmpty(mode)
+                    && (mode == "on" || mode == "true" || mode == "1");
+                ShelterDomain.ForceOverride = on;
+                if (on) ShelterDomain.ResetPlacedFlag();
+                return "ShelterDomain.ForceOverride=" + ShelterDomain.ForceOverride;
+            }
+            catch (Exception e)
+            {
+                return "SetShelterForce 异常：" + e.Message;
+            }
+        }
+
+        /// <summary>
+        /// **静态测试钩子**：开关地板蓝图（"on"/"off"）。
+        ///
+        /// ⚠ 实测确证地板**有**蓝图形态（`TerrainDefOf.WoodPlankFloor.blueprintDef`
+        /// == `Blueprint_WoodPlankFloor`），所以生产默认是 **on**。
+        /// 这个开关留给测试做"关掉地板"的对照。
         /// </summary>
         public static string SetShelterFloorPath(string mode)
         {
@@ -426,9 +492,8 @@ namespace FoodControl.Game
                 bool on = !string.IsNullOrEmpty(mode)
                     && (mode == "on" || mode == "true" || mode == "1");
                 ShelterDomain.BuildFloor = on;
-                ShelterDomain.AllowInstantTerrainFloor = on;
-                return "地板路径 BuildFloor=" + ShelterDomain.BuildFloor
-                    + " AllowInstantTerrainFloor=" + ShelterDomain.AllowInstantTerrainFloor;
+                return "ShelterDomain.BuildFloor=" + ShelterDomain.BuildFloor
+                    + "（地板走 GenConstruct.PlaceBlueprintForBuild）";
             }
             catch (Exception e)
             {
@@ -442,7 +507,8 @@ namespace FoodControl.Game
             try
             {
                 NeedCoordinator.ResetDayTracking();
-                return "已清空按天去重记录（住处域今天可以再跑）";
+                ShelterDomain.ResetPlacedFlag();
+                return "已清空按天去重记录 + 住处'盖过'标记（住处域今天可以再跑）";
             }
             catch (Exception e)
             {

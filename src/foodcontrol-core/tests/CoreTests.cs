@@ -622,7 +622,8 @@ public static class CoreTests
         const int W = 80, H = 80;
         BuildabilityMap grid = MakeBuildMap(W, H, true);
         double[] dist = MakeDistField(W, H, 40, 40);
-        var opts = new BuildSiteOptions { Size = 7, MaxDistanceFromBase = 60, ComfortableDistance = 20 };
+        // 默认 Size=13 / 四边各一扇门（用户拍板："13 乘 13" + "四个边的中心留门"）
+        var opts = new BuildSiteOptions { Size = 13, MaxDistanceFromBase = 60, ComfortableDistance = 20 };
 
         BuildingPlan plan = BuildSitePlanner.Plan(grid, dist, opts);
         True("选出了建房位置", plan != null);
@@ -630,16 +631,38 @@ public static class CoreTests
 
         Console.WriteLine("       " + plan);
 
-        // ── 户型几何 ──
-        // 7×7 的方形房：外圈 24 格墙/门，内部 5×5 = 25 格
-        Eq("边长 = 7", plan.Size, 7);
-        Eq("墙 + 门 = 外圈 24 格", plan.WallCells.Count + plan.DoorCells.Count, 24);
-        Eq("恰好 1 扇门", plan.DoorCells.Count, 1);
-        Eq("内部 25 格地板", plan.FloorCells.Count, 25);
-        Eq("内部 25 格空地", plan.InteriorCells.Count, 25);
+        // ── 户型几何（13×13）──
+        // 外圈 = 13*4 - 4 = 48 格；四边中心各 1 扇门 = 4；剩墙 44；内部 11×11 = 121
+        Eq("边长 = 13", plan.Size, 13);
+        Eq("墙 + 门 = 外圈 48 格", plan.WallCells.Count + plan.DoorCells.Count, 48);
+        Eq("★ 恰好 4 扇门（四边中心各一）", plan.DoorCells.Count, 4);
+        Eq("★ 剩下 44 面墙", plan.WallCells.Count, 44);
+        Eq("内部 121 格地板", plan.FloorCells.Count, 121);
+        Eq("内部 121 格空地", plan.InteriorCells.Count, 121);
+
+        // ── ★ 四个方向都有门（用户明确指出的问题：只有一扇门 = 只从一个方向可进）──
+        {
+            int maxX = plan.X + plan.Size - 1, maxZ = plan.Z + plan.Size - 1;
+            bool hasN = false, hasE = false, hasS = false, hasW = false;
+            int mid = plan.Size / 2;
+            foreach (int di in plan.DoorCells)
+            {
+                int dx = di % W, dz = di / W;
+                if (dz == maxZ && dx == plan.X + mid) hasN = true;
+                if (dx == maxX && dz == plan.Z + mid) hasE = true;
+                if (dz == plan.Z && dx == plan.X + mid) hasS = true;
+                if (dx == plan.X && dz == plan.Z + mid) hasW = true;
+            }
+            True("★★ 四个方向都有门（北）", hasN, "北门");
+            True("★★ 四个方向都有门（东）", hasE, "东门");
+            True("★★ 四个方向都有门（南）", hasS, "南门");
+            True("★★ 四个方向都有门（西）", hasW, "西门");
+            True("★★ 四扇门分别落在四条边的**中点**", hasN && hasE && hasS && hasW,
+                "mid=" + mid + " 房=(" + plan.X + "," + plan.Z + ")..(" + maxX + "," + maxZ + ")");
+        }
 
         // ── 门的存在性（四边全封死 = 小人进不去）──
-        True("★ 有门（不是全封闭的盒子）", plan.DoorCells.Count == 1,
+        True("★ 有门（不是全封闭的盒子）", plan.DoorCells.Count > 0,
             "门数 " + plan.DoorCells.Count);
 
         // 门外那格必须在地基之外
@@ -668,7 +691,8 @@ public static class CoreTests
         True("墙/门/地板互不重叠", !overlap);
 
         // ── 位置偏好：应该靠近基地 ──
-        double dToBase = Math.Sqrt(Math.Pow(plan.X + 3 - 40, 2) + Math.Pow(plan.Z + 3 - 40, 2));
+        // （13×13 的房子中心在 plan.X+6 / plan.Z+6）
+        double dToBase = Math.Sqrt(Math.Pow(plan.X + 6 - 40, 2) + Math.Pow(plan.Z + 6 - 40, 2));
         True("选的位置靠近基地（中心距 < 40）", dToBase < 40,
             "中心距 " + dToBase.ToString("F1") + " 格");
 
@@ -677,23 +701,23 @@ public static class CoreTests
         Eq("全不可盖 → 返回 null", BuildSitePlanner.Plan(barren, dist, opts), null);
 
         // ── 挡路太多的地方要跳过 ──
-        // 造一张只有右下角一小块可盖的图
+        // 造一张只有右下角一小块可盖的图（够放 13×13）
         BuildabilityMap patchy = MakeBuildMap(W, H, false);
-        for (int x = 70; x < 78; x++)
-            for (int z = 70; z < 78; z++)
+        for (int x = 66; x < 80; x++)
+            for (int z = 66; z < 80; z++)
                 patchy.Buildable[z * W + x] = true;
         BuildingPlan patchPlan = BuildSitePlanner.Plan(patchy, dist, opts);
         True("只造出一块可盖地时能选到它", patchPlan != null,
             patchPlan == null ? "返回 null" : patchPlan.ToString());
         if (patchPlan != null)
         {
-            True("选在可盖的那一块（x≥70）", patchPlan.X >= 70, "X=" + patchPlan.X);
+            True("选在可盖的那一块（x≥66）", patchPlan.X >= 66, "X=" + patchPlan.X);
         }
 
-        // ── 门朝向可配置 ──
+        // ── 单门模式仍可用（DoorSides 只给一条边）──
         for (int side = 0; side <= 3; side++)
         {
-            var so = new BuildSiteOptions { Size = 7, DoorSide = side };
+            var so = new BuildSiteOptions { Size = 13, DoorSides = new int[] { side } };
             BuildingPlan sp = BuildSitePlanner.Plan(grid, dist, so);
             bool ok = sp != null && sp.DoorCells.Count == 1;
             // 门应该落在对应的边上
@@ -707,12 +731,12 @@ public static class CoreTests
                     (side == 1 && dx == maxX) ||
                     (side == 2 && dz == sp.Z) ||
                     (side == 3 && dx == sp.X);
-                True("门朝向 " + side + " 时门在对应边上", onSide,
+                True("单门模式 DoorSides={" + side + "} 时门在对应边上", onSide,
                     "门=(" + dx + "," + dz + ") 房=(" + sp.X + "," + sp.Z + ")..(" + maxX + "," + maxZ + ")");
             }
             else
             {
-                True("门朝向 " + side + " 时门在对应边上", false, "没生成户型");
+                True("单门模式 DoorSides={" + side + "} 时门在对应边上", false, "没生成户型");
             }
         }
 
@@ -720,7 +744,13 @@ public static class CoreTests
         // 把基地中心放到地图角落，房子会被推到边缘
         double[] cornerDist = MakeDistField(W, H, 0, 0);
         BuildingPlan cornerPlan = BuildSitePlanner.Plan(grid, cornerDist,
-            new BuildSiteOptions { Size = 7, DoorSide = 3, RequireOutsideAccess = true, MaxDistanceFromBase = 20 });
+            new BuildSiteOptions
+            {
+                Size = 13,
+                DoorSides = new int[] { 3 },      // 只开西门：贴 x=0 时门外必越界
+                RequireOutsideAccess = true,
+                MaxDistanceFromBase = 20,
+            });
         // 门朝西(-x) 时，如果房子贴着 x=0，门外就出界了 → 应该被拒
         if (cornerPlan != null)
         {
@@ -732,6 +762,33 @@ public static class CoreTests
         {
             True("★ 贴边时不会把门开到地图外（RequireOutsideAccess 生效）", true,
                 "该配置下没有可行位置（也算正确拒绝）");
+        }
+
+        // ── ★ 四门模式下，任一门被堵（门外不可通行）就不该选那个位置 ──
+        //    造一张图：除了"北门外那一格"之外全可通行
+        {
+            BuildabilityMap blockedNorth = MakeBuildMap(W, H, true);
+            // 先正常选一次拿到位置，再把该位置的北门外那格封死，重选应当换位置或返回 null
+            BuildingPlan p1 = BuildSitePlanner.Plan(grid, dist, opts);
+            if (p1 != null)
+            {
+                int nOutX = p1.X + p1.Size / 2;
+                int nOutZ = p1.Z + p1.Size;          // 北门外那一格
+                if (nOutX >= 0 && nOutX < W && nOutZ >= 0 && nOutZ < H)
+                {
+                    blockedNorth.MoveCost[nOutZ * W + nOutX] = 0;    // 封死
+                    BuildabilityMap g2 = MakeBuildMap(W, H, true);
+                    g2.MoveCost[nOutZ * W + nOutX] = 0;
+                    BuildingPlan p2 = BuildSitePlanner.Plan(g2, dist, opts);
+                    bool moved = p2 == null
+                        || p2.X != p1.X || p2.Z != p1.Z
+                        || (p2.X + p2.Size / 2) != nOutX
+                        || (p2.Z + p2.Size != nOutZ);
+                    True("★ 四门模式：某扇门外走不通时会换位置（四门都要能出去）",
+                        moved, p1 == null ? "p1=null" : ("p1=(" + p1.X + "," + p1.Z + ") p2="
+                            + (p2 == null ? "null" : "(" + p2.X + "," + p2.Z + ")")));
+                }
+            }
         }
     }
 

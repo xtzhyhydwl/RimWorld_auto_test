@@ -174,6 +174,10 @@ namespace FoodControl.Game
         {
             if (!Enabled || ctx == null) return false;
 
+            // ⚠ `ForceOverride`（测试专用）也要在这里生效：否则"已经盖过"之后，
+            //   连"今天要不要跑"这道门都过不去，force 钩子就白设了。
+            if (ForceOverride) return true;
+
             // 已有房子就别再来（这个判断很便宜：只看已有的墙/门/蓝图数量）
             if (!HasAnyShelter(ctx.Map) || MaxHouses > 1)
             {
@@ -210,8 +214,7 @@ namespace FoodControl.Game
             return false;
         }
 
-        /// <summary>
-        /// 本会话里**我们自己**放过至少一次住处蓝图。
+        /// <summary>本会话里**我们自己**放过至少一次住处蓝图。
         ///
         /// 用途只有两个：① 让 `ShouldRunToday` 的"已有住处"守卫只在**真的盖过**之后生效
         /// （否则会被 debug 开局自带的几百面墙误伤）；
@@ -231,6 +234,67 @@ namespace FoodControl.Game
         // 闭环
         // ------------------------------------------------------------------
 
+        /// <summary>
+        /// 最近一次放置的**详细记账**（JSON）。给测试**分清"我们放了几个"和"地图上有几个"**。
+        ///
+        /// 为什么需要它：我先前只看"地图上的总数"，看到 48 面墙蓝图对不上 23 面墙的户型，
+        /// 花了很多时间怀疑循环写重了。**把"我们放了多少"单独记一笔**，
+        /// 一眼就能看出差额是"别的东西也在放"还是"我们写重了"。
+        /// </summary>
+        public static string LastReportJson = "{\"note\":\"还没有跑过\"}";
+
+        private static string BuildReportJson(PlacementReport pr, BuildingPlan plan, MaterialChoice mat)
+        {
+            if (pr == null) return "{\"note\":\"没有记账\"}";
+            var sb = new System.Text.StringBuilder();
+            sb.Append("{");
+            sb.Append("\"wallsPlaced\":").Append(pr.WallsPlaced).Append(",");
+            sb.Append("\"doorsPlaced\":").Append(pr.DoorsPlaced).Append(",");
+            sb.Append("\"floorsPlaced\":").Append(pr.FloorsPlaced).Append(",");
+            sb.Append("\"wallBlueprintReadBack\":").Append(pr.WallBlueprintReadBack).Append(",");
+            sb.Append("\"doorBlueprintReadBack\":").Append(pr.DoorBlueprintReadBack).Append(",");
+            sb.Append("\"floorBlueprintReadBack\":").Append(pr.FloorBlueprintReadBack).Append(",");
+            sb.Append("\"totalBlueprintReadBack\":").Append(pr.TotalBlueprintReadBack).Append(",");
+            sb.Append("\"verified\":").Append(pr.Verified ? "true" : "false").Append(",");
+            sb.Append("\"floorPathTried\":").Append(pr.FloorPathTried ? "true" : "false").Append(",");
+            sb.Append("\"floorPathNote\":\"").Append(Esc(pr.FloorPathNote)).Append("\",");
+            sb.Append("\"rejectedCount\":").Append(pr.Rejected.Count).Append(",");
+            sb.Append("\"rejected\":[");
+            for (int i = 0; i < pr.Rejected.Count && i < 8; i++)
+            {
+                if (i > 0) sb.Append(",");
+                sb.Append("\"").Append(Esc(pr.Rejected[i])).Append("\"");
+            }
+            sb.Append("],");
+            if (plan != null)
+            {
+                sb.Append("\"plan\":{\"x\":").Append(plan.X).Append(",\"z\":").Append(plan.Z)
+                  .Append(",\"size\":").Append(plan.Size)
+                  .Append(",\"wallCells\":").Append(plan.WallCells.Count)
+                  .Append(",\"doorCells\":").Append(plan.DoorCells.Count)
+                  .Append(",\"floorCells\":").Append(plan.FloorCells.Count)
+                  .Append("},");
+            }
+            if (mat != null)
+            {
+                sb.Append("\"material\":{\"def\":\"").Append(Esc(mat.Def != null ? mat.Def.defName : ""))
+                  .Append("\",\"available\":").Append(mat.Available)
+                  .Append(",\"allowedForWall\":").Append(mat.AllowedForWall ? "true" : "false")
+                  .Append(",\"allowedForDoor\":").Append(mat.AllowedForDoor ? "true" : "false")
+                  .Append(",\"why\":\"").Append(Esc(mat.Why)).Append("\"},");
+            }
+            sb.Append("\"floorTerrainDef\":\"").Append(Esc(FloorTerrainDefName)).Append("\",");
+            sb.Append("\"buildFloor\":").Append(BuildFloor ? "true" : "false");
+            sb.Append("}");
+            return sb.ToString();
+        }
+
+        private static string Esc(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s.Replace("\\", "\\\\").Replace("\"", "'").Replace("\n", " ").Replace("\r", "");
+        }
+
         public DomainCycleResult RunCycle(DomainContext ctx)
         {
             var result = new DomainCycleResult { DomainId = Id };
@@ -243,6 +307,9 @@ namespace FoodControl.Game
                 //
                 // ⚠ `ForceOverride` 是**测试专用**（默认 false）：debug 开局自带几百面墙，
                 //   正常守卫会正确地拒绝动手，验收就永远看不到 23+1 个蓝图。
+                //   ⚠⚠ 它必须把**两条**守卫都绕过 —— 我第一版只绕了"已有住处"那条，
+                //   漏了"已有蓝图"那条，于是 force 路径在"上一轮留下的蓝图还在"时
+                //   照样被拒（实测第二次跑 delta=+0，白跑一轮验证）。
                 int existingWalls = CountOfDef(map, ThingDefOf.Wall);
                 int existingDoors = CountOfDef(map, ThingDefOf.Door);
                 int existingBPs = CountBlueprintBuilds(map);
@@ -335,21 +402,33 @@ namespace FoodControl.Game
                     return result;
                 }
 
-                // 料够不够：墙 + 门 各要 costStuffCount 个 stuff
+                // 料够不够：墙 + 门 各要 costStuffCount 个 stuff；地板按 TerrainDef 的 costStuffCount
+                //
+                // ⚠ 实测：地板蓝图**不带 stuff**（byStuff 显示 "(无)"），
+                //   它的用料走 `TerrainDef.costStuffCount`（木地板是 3）。
+                //   所以这里要**分开算**，不能把地板也按"墙的 stuff"算。
                 int needWall = plan.WallCells.Count * ThingDefOf.Wall.costStuffCount;
                 int needDoor = plan.DoorCells.Count * ThingDefOf.Door.costStuffCount;
-                int needFloor = plan.FloorCells.Count * FloorCostStuffOf();
+                int floorCostPerCell = FloorCostStuffOf();
+                int needFloor = plan.FloorCells.Count * floorCostPerCell;
                 int need = needWall + needDoor + (BuildFloor ? needFloor : 0);
 
-                if (material.Available < need)
+                if (material.Available < needWall + needDoor)
                 {
                     result.Ok = true;
                     result.DidWork = false;
                     result.Summary = string.Format(
-                        "材料不足：要 {0} 个 {1}（墙{2}+门{3}{4}），手上只有 {5}",
-                        need, material.Def.defName, needWall, needDoor,
-                        BuildFloor ? "+地板" + needFloor : "", material.Available);
+                        "材料不足：墙门要 {0} 个 {1}（墙{2}+门{3}），手上只有 {4}"
+                        + "（地板另需 {5} 个，未计）",
+                        needWall + needDoor, material.Def.defName, needWall, needDoor,
+                        material.Available, needFloor);
                     return result;
+                }
+                if (BuildFloor && material.Available < need)
+                {
+                    // 墙门够、地板不够 → **降级**：把墙门盖起来，地板先不放
+                    // （总比什么都不盖好；理由写进摘要，别静默）
+                    try { BuildFloor = false; } catch (Exception) { }
                 }
 
                 // ── ⑤ 放蓝图：先查再放，逐格回读 ──
@@ -359,18 +438,27 @@ namespace FoodControl.Game
                 int afterBPs = CountBlueprintBuilds(map);
                 int afterWallsBP = CountBlueprintOfBuildDef(map, ThingDefOf.Wall);
                 int afterDoorsBP = CountBlueprintOfBuildDef(map, ThingDefOf.Door);
+                TerrainDef floorDef = ResolveFloorTerrainDef();
+                int afterFloorsBP = floorDef != null ? CountBlueprintOfBuildDef(map, floorDef) : 0;
 
                 pr.WallBlueprintReadBack = afterWallsBP;
                 pr.DoorBlueprintReadBack = afterDoorsBP;
+                pr.FloorBlueprintReadBack = afterFloorsBP;
                 pr.TotalBlueprintReadBack = afterBPs;
 
                 bool okWalls = afterWallsBP >= pr.WallsPlaced;
                 bool okDoors = afterDoorsBP >= pr.DoorsPlaced;
-                pr.Verified = okWalls && okDoors && pr.WallsPlaced > 0 && pr.DoorsPlaced > 0;
+                bool okFloors = !pr.FloorPathTried || BuildFloor == false || afterFloorsBP >= pr.FloorsPlaced;
+                pr.Verified = okWalls && okDoors && okFloors && pr.WallsPlaced > 0 && pr.DoorsPlaced > 0;
+
+                if (pr.Verified) _placedOnce = true;
 
                 result.Ok = true;
-                result.DidWork = pr.WallsPlaced > 0 || pr.DoorsPlaced > 0;
+                result.DidWork = pr.WallsPlaced > 0 || pr.DoorsPlaced > 0 || pr.FloorsPlaced > 0;
                 result.Summary = Summarize(pr, plan, material, center);
+
+                // ★ 详细记账落一份 JSON（给测试分清"我们放了几个" vs "地图上有几个"）
+                LastReportJson = BuildReportJson(pr, plan, material);
 
                 try
                 {
@@ -757,8 +845,15 @@ namespace FoodControl.Game
             return CountThings(map, delegate(Thing t) { return t is Blueprint_Build; });
         }
 
-        /// <summary>数"某个建筑 def 的蓝图"（墙的蓝图 / 门的蓝图分开数）。</summary>
-        public static int CountBlueprintOfBuildDef(Map map, ThingDef buildDef)
+        /// <summary>
+        /// 数"某个建造目标 def 的蓝图"（墙 / 门 / 地板分开数）。
+        ///
+        /// ⚠ 参数类型必须是 **`BuildableDef`**，不能是 `ThingDef`：
+        ///   `Blueprint_Build.entityDefToBuild` 就是 `BuildableDef`，
+        ///   而**地板的目标是 `TerrainDef`**（不是 ThingDef）。
+        ///   实测踩过：写 `ThingDef` 会在传 `TerrainDef` 时 CS1503。
+        /// </summary>
+        public static int CountBlueprintOfBuildDef(Map map, BuildableDef buildDef)
         {
             if (buildDef == null) return 0;
             return CountThings(map, delegate(Thing t)
@@ -799,16 +894,20 @@ namespace FoodControl.Game
             PlacementReport pr, BuildingPlan plan, MaterialChoice material, ResolvedBaseCenter center)
         {
             return string.Format(
-                "盖 {0}×{0} 于 ({1},{2})，材质 {3}，墙 {4}/{5} 门 {6}/{7}，"
-                + "★回读 墙蓝图{8} 门蓝图{9} 总蓝图{10}，验证={11}；基地中心={12}@{13},{14}",
+                "盖 {0}×{0} 于 ({1},{2})，材质 {3}，墙 {4}/{5} 门 {6}/{7} 地板 {8}/{9}，"
+                + "★回读 墙蓝图{10} 门蓝图{11} 地板蓝图{12} 总蓝图{13}，验证={14}；"
+                + "基地中心={15}@{16},{17}{18}",
                 plan.Size, plan.X, plan.Z,
                 material.Def != null ? material.Def.defName : "?",
                 pr.WallsPlaced, plan.WallCells.Count,
                 pr.DoorsPlaced, plan.DoorCells.Count,
-                pr.WallBlueprintReadBack, pr.DoorBlueprintReadBack, pr.TotalBlueprintReadBack,
+                pr.FloorsPlaced, plan.FloorCells.Count,
+                pr.WallBlueprintReadBack, pr.DoorBlueprintReadBack, pr.FloorBlueprintReadBack,
+                pr.TotalBlueprintReadBack,
                 pr.Verified,
                 center != null ? center.Kind.ToString() : "?",
-                plan.X + plan.Size / 2, plan.Z + plan.Size / 2);
+                plan.X + plan.Size / 2, plan.Z + plan.Size / 2,
+                string.IsNullOrEmpty(pr.FloorPathNote) ? "" : " | " + pr.FloorPathNote);
         }
 
         // ------------------------------------------------------------------
@@ -868,12 +967,17 @@ namespace FoodControl.Game
             return 0;
         }
 
-        /// <summary>木地板一格要几个 stuff（TerrainDef 有 costStuffCount；读不到就按 1 估）。</summary>
+        /// <summary>
+        /// 一格地板要几个 stuff。**读 `TerrainDef.costStuffCount`**，不硬编码。
+        ///
+        /// ⚠ 地板蓝图本身**不带 stuff**（实测 byStuff 显示 "(无)"）——
+        ///   它的用料是"地形自己按 costStuffCount 算"，所以取料判断要单独走这里。
+        /// </summary>
         private static int FloorCostStuffOf()
         {
             try
             {
-                TerrainDef f = TerrainDefOf.WoodPlankFloor;
+                TerrainDef f = ResolveFloorTerrainDef();
                 if (f != null && f.costStuffCount > 0) return f.costStuffCount;
             }
             catch (Exception) { }
@@ -911,14 +1015,20 @@ namespace FoodControl.Game
                 int buildable = 0;
                 for (int i = 0; i < grid.Buildable.Length; i++) if (grid.Buildable[i]) buildable++;
 
+                TerrainDef floor = ResolveFloorTerrainDef();
+                int floorCost = FloorCostStuffOf();
+
                 return string.Format(
-                    "户型({0},{1}) {2}×{2} 墙{3} 门{4} 地板{5} 基地距{6:F0} 分{7:F1} | "
-                    + "可盖格{8}/{9} | 材质 {10} | 需要 stuff {11}",
+                    "户型({0},{1}) {2}×{2} 墙{3} 门{4} 地板{5}({6}) 基地距{7:F0} 分{8:F1} | "
+                    + "可盖格{9}/{10} | 材质 {11} | 需要 stuff {12}(墙门){13}(地板{14}格×{15})",
                     plan.X, plan.Z, plan.Size, plan.WallCells.Count, plan.DoorCells.Count,
-                    plan.FloorCells.Count, plan.AvgDistanceToBase, plan.Score,
+                    plan.FloorCells.Count, floor != null ? floor.defName : "无地板",
+                    plan.AvgDistanceToBase, plan.Score,
                     buildable, grid.Buildable.Length, mc != null ? mc.ToString() : "(无)",
                     plan.WallCells.Count * ThingDefOf.Wall.costStuffCount
-                        + plan.DoorCells.Count * ThingDefOf.Door.costStuffCount);
+                        + plan.DoorCells.Count * ThingDefOf.Door.costStuffCount,
+                    BuildFloor ? plan.FloorCells.Count * floorCost : 0,
+                    plan.FloorCells.Count, floorCost);
             }
             catch (Exception e)
             {

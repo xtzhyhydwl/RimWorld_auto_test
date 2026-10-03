@@ -44,6 +44,9 @@ async function build() {
   const managed = path.join(gameRoot(), 'RimWorldWin64_Data', 'Managed');
   const rbs = path.join(gameRoot(), 'Mods', 'RimBridgeServer', '1.6', 'Assemblies');
 
+  // ⚠ 刻意**不**引用 0Harmony.dll：`foodprobe/patches` 走**反射**查 Harmony patch。
+  //   原因：0Harmony.dll 不在游戏 `Managed\` 里（由 brrainz.harmony 提供，版本随工坊更新变），
+  //   硬引用会给探针引入一个"版本对不上就编不过"的隐形依赖。
   const refs = [
     path.join(managed, 'mscorlib.dll'),
     path.join(managed, 'System.dll'),
@@ -85,6 +88,7 @@ async function build() {
   console.log(`源文件: ${sources.length} 个`);
   for (const s of sources) console.log('  ' + path.relative(WS, s));
   console.log(`输出:   ${path.relative(WS, DLL)}`);
+  console.log(`HarmonyLib: 不引用（foodprobe/patches 走反射）`);
   console.log('（含 CompileProbe.cs：编得过 = 探针用到的游戏 API 签名都对）\n');
 
   const res = await capture(csc, args, { timeoutMs: 240_000 });

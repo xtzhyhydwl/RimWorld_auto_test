@@ -178,8 +178,12 @@ public static class CompileProbe
         {
             ThingDef bpDef = bp.def;
             ThingDef builds = bp.def.entityDefToBuild as ThingDef;
-            ThingDef bpStuff = bp.Stuff;                 // ⚠ 公开属性，不是 protected 的 stuff 字段
-            if (bpDef != null && builds != null && bpStuff != null) { }
+            // ⚠ 材质要读 `EntityToBuildStuff()`（= `Blueprint_Build.stuffToUse`），
+            //   读 `Thing.Stuff` 对蓝图永远是 null（实测踩过，会得出"蓝图没有材质"的错结论）
+            ThingDef bpStuff = bp.EntityToBuildStuff();
+            ThingDef namedProperty = bp.BuildDef;                  // == def.entityDefToBuild
+            List<ThingDefCountClass> cost = bp.TotalMaterialCost();
+            if (bpDef != null && builds != null && bpStuff != null && namedProperty != null && cost != null) { }
         }
         bool isDoorBp = bp is Blueprint_Door;            // Blueprint_Door : Blueprint_Build
         if (isDoorBp) { }
@@ -203,13 +207,35 @@ public static class CompileProbe
         TerrainDef tile = TerrainDefOf.PavedTile;
         if (floor == null || concrete == null || tile == null) return;
 
-        ThingDef floorBlueprint = floor.blueprintDef;    // 有 ⇒ 地板也有蓝图形态
+        ThingDef floorBlueprint = floor.blueprintDef;    // ★ 实测：== Blueprint_WoodPlankFloor（**不是 null**）
         ThingDef floorFrame = floor.frameDef;
         int floorCost = floor.costStuffCount;
         if (floorBlueprint != null || floorFrame != null || floorCost >= 0) { }
         // ⚠ 注意：这里**没有** floor.buildingDef —— 那个成员不存在
 
-        // 通用 designator 入口（能吃 TerrainDef）
+        // ★★ 地板也能走 GenConstruct（实测确认：放出来就是 Blueprint_WoodPlankFloor）
+        //    这一条是"地板到底能不能放蓝图"的**结论性**引用。
+        AcceptanceReport floorCan = GenConstruct.CanPlaceBlueprintAt(
+            floor, new IntVec3(10, 0, 13), Rot4.North, map,
+            true, null, null, null, false, false, false);
+        if (floorCan.Accepted && floorCan.Reason != null) { }
+
+        Blueprint_Build floorBp = GenConstruct.PlaceBlueprintForBuild(
+            floor, new IntVec3(10, 0, 13), map, Rot4.North,
+            Faction.OfPlayer, null, null, null, true);
+        if (floorBp != null)
+        {
+            // 地板蓝图的 entityDefToBuild 是 TerrainDef（不是 ThingDef！）
+            BuildableDef buildsWhat = floorBp.def.entityDefToBuild;
+            bool isTerrainTarget = buildsWhat is TerrainDef;
+            if (isTerrainTarget) { }
+        }
+
+        // 查地形（地板没有 Thing，只能读地形）
+        TerrainDef terrainNow = new IntVec3(10, 0, 13).GetTerrain(map);
+        if (terrainNow == floor) { }
+
+        // 通用 designator 入口（能吃 TerrainDef）—— 备用路，生产不用
         var des = new Designator_Build(floor);
         des.SetStuffDef(stuff);
         AcceptanceReport canDes = des.CanDesignateCell(new IntVec3(10, 0, 12));
@@ -217,8 +243,6 @@ public static class CompileProbe
         des.ResetStuffToDefault();
         ThingDef desStuff = des.StuffDef;                // Designator_Place.StuffDef（public get）
         if (desStuff != null) { }
-        // ⚠ 这里刻意**不**调 DesignateSingleCell：探针文件不许有副作用。
-        //   实机取证走 foodprobe/floor_path。
 
         // ---- 可盖性（喂 Core 的 BuildabilityMap）----
         IntVec3 c = new IntVec3(10, 0, 10);
@@ -278,6 +302,21 @@ public static class CompileProbe
         {
             if (mc.GetTerrain(map) == null) continue;
             break;
+        }
+
+        // ---- 测量一致性：暂停游戏（"前后两次读数必须在同一个静止状态"）----
+        //
+        // ⚠ `TickManager.Paused` 是 **get-only**（写它直接 CS0200，实测踩过）。
+        //   `Paused` 的 IL 是：`curTimeSpeed == Paused(0) || ForcePaused`。
+        //   所以要暂停/恢复必须改 **`CurTimeSpeed`**（public get+set），值是 `Verse.TimeSpeed`。
+        //   （`TickManager.Pause()` 是 private 的，`TogglePaused()` 不保证方向，都不好用。）
+        TickManager tm = Find.TickManager;
+        if (tm != null)
+        {
+            tm.CurTimeSpeed = TimeSpeed.Paused;      // 暂停
+            bool nowPaused = tm.Paused;
+            tm.CurTimeSpeed = TimeSpeed.Normal;      // 恢复
+            if (nowPaused) { }
         }
     }
 
