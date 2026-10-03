@@ -5,13 +5,33 @@
 
 ## 当前在做什么
 
-**基础设施已搭完并验证，准备开始正式的 mod 开发。**
+**用户决定做「生产自动化」mod，第一条线路：食物闭环。**
 
-下一步由用户决定：写哪个 mod。
+设计已完成，等用户拍板几个参数后进入实现。设计文档：
+[docs/生产自动化-设计.md](docs/生产自动化-设计.md)
+
+一句话形态：**感知（现有多少食物）→ 预测（未来 15 天每天多少）→ 决策（要不要动手）
+→ 执行（自动画种植区去种）→ 观测回流**。只有「决策」一层是可替换的，
+所以「上层用脚本还是 LLM」是局部改动。
+
+**下一步**：写 `DSH.FoodBridge` 伴生 DLL（感知必须靠它，桥接读不到 nutrition）。
 
 ---
 
 ## 已完成
+
+### 生产自动化 · 设计与侦察（2026-10-03）
+- [x] 需求讨论 + 设计文档：[docs/生产自动化-设计.md](docs/生产自动化-设计.md)
+- [x] 技术侦察（20 项实测）：[docs/食物自动化-技术侦察.md](docs/食物自动化-技术侦察.md)
+      + `runs/food-recon/summary.json`
+- [x] **关键结论**：桥接**读不到** nutrition / stackCount / ThingCategory，
+      **工作优先级也读不到** → 感知层与 P2 都必须写伴生 DLL
+- [x] 执行层好消息：`apply_architect_designator` 能用代码建种植区（只收 Gravel/Soil）；
+      狩猎可完全驱动；但**改作物只能走 UI**
+- [x] 时间实测 + 一个通用陷阱：[docs/时间推进实测.md](docs/时间推进实测.md)
+      - `play_for(Ultrafast)` ≈ **7110 tick/s** vs `step_game_ticks` ≈ **592**（快 12 倍）
+      - ⚠ **forcePause 窗口会让 `play_for` 静默跑 0 tick**（实测 `MainTabWindow_Menu`）
+- [x] 上述两条通用经验已回填 skill `rimworld-auto-test`
 
 ### 桥接与测试基础设施
 - [x] GABP v1 客户端（零依赖，`src/gabp.js`）
@@ -59,7 +79,15 @@
 
 ## 待办
 
-- [ ] **正式 mod 开发**（用户决定写什么）
+- [ ] **写 `DSH.FoodBridge` 伴生 DLL**（P1 的 blocking 前置，照 `bridge/DSH.CEBridge/` 范式）
+      - `food/summary`（食物总量 + 殖民者数 + 每日消耗）
+      - `food/plants`（在种作物：Def/格数/`growth` float/土壤肥力）
+      - `food/set_crop`（绕开「改作物只能走 UI」）
+      - 编译前**必须先停游戏**；「写 DLL 能解决」目前仍是**推断**，未编译验证过
+- [ ] 用户拍板：目标带数值 / 是否把狩猎放进 MVP / 作物是否固定水稻
+- [ ] 补做 `play_for` 的**反向对照**（用 `open_main_tab {mainTabId}` 重开 Menu 标签页，预期再次 0 tick）
+- [ ] 查清 Menu 标签页是谁打开的（`press_cancel` 已排除）
+- [ ] 测精确的**有效生长小时数**（晚上 Growth rate = 0%，影响预测器精度）
 - [ ] 补齐 CE 工具：`ce/set_traits`、`ce/set_age`、`ce/set_hediffs`、`ce/set_genes`
 - [ ] 打通 `Actions\Loaded Files For Mod`（现在只弹主菜单文字，疑似需要先选 mod）
 - [ ] 解决 `Add Hediff` 的效果确认方式（Health 面板有变化但文字匹配不命中）
@@ -80,13 +108,22 @@
 | **pawnId 有两种格式** | `Thing_115` 和 `Thing_Ratkin46626`，按尾部数字匹配 |
 | **`restore` 要清整棵子树** | 截父部位时子部位各自带 MissingBodyPart |
 | **DWM 隐形边框约 7px** | 判断窗口是否在屏内要留容差 |
+| **`play_for` 会静默跑 0 tick** | 有 `forcePause` 窗口开着时（实测 `MainTabWindow_Menu`）。长跑前先查 `get_ui_state.windowsForcePause`。`pause_game` **只暂停不解除** |
+| **`step_game_ticks` 的 `timeoutMs` 默认 10000** | 不显式传就 `timedout`，只推进几千 tick |
+| **`open_main_tab` / `close_main_tab` 参数名不同** | 前者 `mainTabId`，后者 `tabId` |
+| **桥接读不到 nutrition / 工作优先级** | 返回结构里就没这些字段，别硬凑，写伴生 DLL |
 
 ---
 
 ## 最近一次验证
 
+- **食物自动化技术侦察**：20 项实测通过，全程 0 次 `GABP_TIMEOUT`，桥接健康
+  （详见 `docs/食物自动化-技术侦察.md`；最要紧的 9 项未验证已列在报告里）
+- **时间推进速度**：`play_for` 7110 tick/s / `step_game_ticks` 592 tick/s（实测）
+- **`play_for` 秒退根因**：确认为 `forcePause` 窗口，关掉后 4 次复现稳定恢复（反向对照未做）
 - **冒烟测试**：9/9 通过（副屏 1600x900）
 - **鼠族身体编辑**：8/8 通过（`bodyDef=RK_Body_Ratkin`，65 部位 vs 人类 64）
 - 桥接工具数：**134**（125 原生 + 9 个自写 CE 工具）
 - mod 组合：13 项（鼠族套 + CE + 桥接 + 测试 mod）
-- 游戏实例：副屏运行中（重启会话后会退出，`node src/cli.js start` 恢复）
+- 游戏实例：副屏运行中（PID 39332；`node src/cli.js start` 恢复）
+

@@ -50,6 +50,37 @@ node src/cli.js tools | Select-String '工具总数'
 | `rimworld/search_debug_actions` 传短语 | 会挂死 | 只用**单个关键词**，如 `spawn` 而不是 `spawn pawn` |
 | `rimworld/get_camera_state` 无地图时 | NRE | 先确认 `hasCurrentGame=true` |
 | Doorstop 与 RimBridgeServer | 桥接完全起不来 | 启动时加 `--doorstop-enabled false`（仓库已默认） |
+| **`play_for` 秒退（`elapsedMs≈6`、0 tick）** | **某个 `forcePause` 窗口开着**（实测 `MainTabWindow_Menu`）每帧覆盖 unpause。此后**所有** `play_for` 全失败，换速度/`pause_game` 都救不回来 | 长跑前先查 `get_ui_state.windowsForcePause`，为 true 就先 `close_main_tab`。详见下节 |
+| `step_game_ticks` 只推进几千 tick | 工具级 `timeoutMs` **默认 10000**，不传就 `timedout` | **必须显式传大值**，如 `timeoutMs: 110000` |
+| 工作优先级 / 食物营养值读不到 | 桥接返回结构里**根本没有这些字段**（`things[]` 只 10 个键、Work 格子 `isChecked` 全 null） | 只能写 RimBridgeServer **伴生 DLL**，别在桥接层硬凑 |
+
+### ⚠ `play_for` 之前必须检查 forcePause（实测踩过，代价很大）
+
+`play_for` 会静默跑 **0 tick**，而它**不会**因此给你明确错误（只是报文里一句
+`"Game was paused externally after 3ms"`，`success` 有时还是 `true`）。
+
+```js
+// 长跑前的必做检查
+const ui = await call('rimworld/get_ui_state');
+if (ui.windowsForcePause) {
+  // forcePauseWindows 里通常有 RimWorld.MainTabWindow_Menu
+  await call('rimworld/close_main_tab', { tabId: 'main-tab:Menu' });   // 注意参数名是 tabId
+}
+await call('rimworld/play_for', { durationMs: 10000, speed: 'Ultrafast', forceRequestedSpeed: true });
+```
+
+- `close_main_tab` 收 **`tabId`**；`open_main_tab` 收 **`mainTabId`** —— 两者参数名不一样，别搞混。
+- `rimworld/pause_game` **只会暂停、不会解除暂停**（实测两次调用都是 `"Game paused"`），救不回来。
+
+### 两种推进时间的方式（实测速度）
+
+| 方式 | tick/s | 15 游戏天 | 用途 |
+| --- | --- | --- | --- |
+| `step_game_ticks` | **~592** | 25 分钟 | **精确断言**（返回 `advancedTicks` 可直接断言）；上限≈帧率 |
+| `set_time_speed(Ultrafast,boost)` + `play_for` | **~7100–7800** | **~2 分钟** | **长跑推天数**，快 12 倍 |
+
+两者都**不能信 `success`**，一律按 `advancedTicks` 累计计数
+（实测出现过 `success:false` 但 `advancedTicks=63200`）。
 
 ---
 
