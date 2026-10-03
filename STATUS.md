@@ -43,6 +43,43 @@
 | **探针真 bug 修复 + 离线回归测试** | [scripts/test-probe-parser.mjs](scripts/test-probe-parser.mjs) | ✅ 13/13，且验证过"抓得住 bug" |
 | 设计与踩坑记录 | [docs/样板语义层-设计与落地.md](docs/样板语义层-设计与落地.md) | ✅ |
 
+### ★ 本轮第二件：AI 托管开关 + 意图窗口 + 进程间通信（**框架，未部署**）
+
+用户要求：「局内做一个**是否让 AI 托管的小按钮**」「局内放一个窗口，把 **AI 打算做什么**
+打印出来，让人知道 AI 要做什么或**即将要做什么**」「也可以做**进程间通信**把内容发过去；
+**落点之后再看**，但结构要先定清楚」。
+
+| 产出 | 文件 | 说明 |
+| --- | --- | --- |
+| 意图模型（有生命周期：打算/正在/完成/失败/**被否决**） | [AiIntent.cs](src/foodcontrol-game/AiIntent.cs) | "即将要做"靠 `Planned` 这一栏 |
+| 意图看板（单一事实来源） | [IntentBoard.cs](src/foodcontrol-game/IntentBoard.cs) | 窗口/文件/探针读的是**同一份** |
+| 托管总开关（三态 + 否决留痕 + 存档） | [TakeoverController.cs](src/foodcontrol-game/TakeoverController.cs) | 闸门在 `GameComponentTick` **最前面** |
+| 局内按钮 + 「AI 在做什么」窗口 | [IntentWindow.cs](src/foodcontrol-game/IntentWindow.cs) + [Defs/MainButtonDefs.xml](mods/FoodControl/Defs/MainButtonDefs.xml) | 左键切托管 / 右键开窗口 / 中键三态 |
+| 进程间出口（日志 + **JSONL 文件** + HTTP 预留） | [IntentIpc.cs](src/foodcontrol-game/IntentIpc.cs) | `foodcontrol-intents.jsonl`，追加写、可 tail |
+| 域 → 框架的意图接口 | `DomainCycleResult.Intent`（[NeedDomain.cs](src/foodcontrol-game/NeedDomain.cs)） | ★ 域只填一个字段，其余全在框架 |
+| JSON 原语收口（DRY） | [Json.cs](src/foodcontrol-game/Json.cs) | Telemetry 的私有实现提成公开，**行为逐字不变** |
+| 探针：外部可调可读的那一半 | `foodprobe/takeover` / `foodprobe/intents` | `intents selftest` 有 10 条断言 |
+| 设计文档 | [docs/AI托管与意图窗口-设计.md](docs/AI托管与意图窗口-设计.md) | 含 IL 确证的 UI 挂点结论 |
+
+**★ 本轮的第二条 IL 确证结论（写码前别猜）**：
+```
+MainButtonWorker.get_Visible()  → 非 virtual（可见性只能用 XML 的 buttonVisible 控）
+MainButtonWorker.DoButton(Rect) → 非 virtual（覆写它不会被调到！）
+MainButtonWorker.Activate()     → abstract；InterfaceTryActivate 末尾 callvirt 它
+```
+→ **只有 `override Activate()` 是保证会被调到的入口**。
+
+#### 扩展点（"加东西"要动哪里）
+
+| 想加 | 动几处 |
+| --- | --- |
+| 一条新的"AI 要做的事" | **1**（域里填 `Intent`） |
+| 一类新动作大类 | **1**（`IntentKind` 加枚举值） |
+| 一个新出口（HTTP/管道） | **1**（实现 `IIntentSink` + `AddSink`） |
+| 分域托管 | **1**（`TakeoverController` 加集合，调用方签名不变） |
+| 新的 UI 展示 | **0**（读 `IntentBoard.LinesForUi()`） |
+
+
 **Core 测试：271 → 357（全绿）**。本轮**没有部署**，游戏层接线是下一步。
 
 #### ★ 一句话结论：**不能靠"按期望顺序放蓝图"控制施工顺序**
@@ -260,18 +297,25 @@ IL 确证机制：`JobGiver_Work` →（建造类 `PotentialWorkThingsGlobal` �
 
 ### A. 代码规范 / 框架（用户本轮要求，**不部署**）
 
-1. **游戏层接线（Core 已就绪，缺这一步）**：
+1. **接线：把各域填上 `Intent`**（开关/窗口/文件框架已就绪，缺这一步）。
+   每个域在"我打算动手"时填一次 `DomainCycleResult.Intent`（一句人话 + 原因），
+   框架会自动送进窗口与 JSONL。**加接口就行，不用改流程**。
+2. **重启后实机验证这四件事**（已编译通过，但没跑过）：
+   ① 主按钮「AI托管」点得动、左键切开关、右键开窗口、中键三态
+   ② 窗口画得出来、能滚动、按钮有效
+   ③ `foodprobe/intents selftest` 10 条断言全过
+   ④ **关掉托管后 AI 真的不动手**（这条最关键：闸门只在 `GameComponentTick` 一处）
+3. **游戏层接线（Core 已就绪）**：
    （a）**从 Def 真实分类填语义注册表**（`thingCategories` / `joyKind`，
    而不是 Def 名字 —— `ChessTable` 那次就是名字骗人）
    （b）把 `BuildOutline` + `MaterialStagedPlanner` 接进 `TemplateBuildDomain`
-   （现在那里是"整栋一次评估"）
    （c）扫 `scripts/template-capture.mjs` 用注册表判定角色
-   ⚠ 这些都要重启游戏才能验，所以**必须等快照那条线做完**。
-2. **按审计报告改造游戏层**（7 步，按收益/风险排序）——
+4. **按审计报告改造游戏层**（7 步，按收益/风险排序）——
    [docs/审计-游戏层框架与重复.md](docs/审计-游戏层框架与重复.md)。
    最高价值的一条：**把基点从「主组件」搬到「协调器」**（现在加/撤一个域要改主组件 + 探针）。
    最低风险的一条：**删 10 个死成员**（含接口成员 `IsSurvivalCritical`，4 个域都实现了但零消费者）。
-3. **两处需要用户确认**（审计发现，我不改）：
+   已顺手完成其中一步（统一 JSON 出口，见 `Json.cs`）。
+5. **两处需要用户确认**（审计发现，我不改）：
    - `ShelterDomain.BuildFloor` 代码是 `false`，但三处注释说 `true`/`on` —— 是漏改还是本意？
    - `NeedCoordinator._lastRunDay` **不存档**：读档后"今天跑过了"的记忆归零，是有意的吗？
 
