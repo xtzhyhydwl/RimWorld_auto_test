@@ -25,6 +25,7 @@ public static class CoreTests
         RunBuildSiteTests();
         RunTemplateTests();
         RunTemplatePlacerTests();
+        RunTemplateReuseTests();
 
         Console.WriteLine();
         Console.WriteLine(string.Format("=== 通过 {0} / 失败 {1} ===", _pass, _fail));
@@ -1317,6 +1318,147 @@ public static class CoreTests
         var nullTpl = TemplatePlacer.Plan(null, grid, 0, 0, stock, 0, false);
         Eq("样板为 null 时不炸", nullTpl.Blueprints.Count, 0);
         Eq("空样板要 0 材料", TemplatePlacer.RequiredMaterials(new BuildTemplate()).Count, 0);
+    }
+
+    // ---------------- 样板拼接：共享墙复用 ----------------
+
+    private static void RunTemplateReuseTests()
+    {
+        Console.WriteLine();
+        Console.WriteLine("-- 共享墙复用（两个房子连在一起，中间的墙复用）--");
+
+        BuildTemplate t = MakeSmallTemplate();     // 5x5：15 墙 + 1 门 + 1 床 + 1 光源
+        var grid = MakePlacementGrid(40, 40, true);
+        var stock = new Dictionary<string, int>
+        {
+            { "Wall", 100 }, { "Door", 10 }, { "Bed", 10 }, { "TorchLight", 10 }, { "TorchLamp", 10 },
+        };
+
+        // ── 1. ★ `CanReuse` 的判据（这是最关键的一组）──
+        var wall = new TemplateRole { Name = "wall", IsWallLike = true, NeedsStuff = true };
+        var door = new TemplateRole { Name = "door", IsDoorLike = true, NeedsStuff = true };
+        var bed = new TemplateRole { Name = "bed", IsFurniture = true };
+
+        True("★★ 墙可以复用已有的墙",
+            TemplateRole.CanReuse(wall, TemplateRole.ExistingKind.Wall));
+        True("★★ 墙**不能**复用已有的门（否则墙上多个洞，房子不封闭）",
+            !TemplateRole.CanReuse(wall, TemplateRole.ExistingKind.Door));
+        True("★★ 门**不能**复用已有的墙（否则门没了）",
+            !TemplateRole.CanReuse(door, TemplateRole.ExistingKind.Wall));
+        True("★ 门可以复用已有的门",
+            TemplateRole.CanReuse(door, TemplateRole.ExistingKind.Door));
+        True("★★ 墙**不能**复用框架（框架可能被取消 → 那面墙永远建不成）",
+            !TemplateRole.CanReuse(wall, TemplateRole.ExistingKind.Frame));
+        True("★★ 家具不能复用任何东西（别人的家具不是你的家具）",
+            !TemplateRole.CanReuse(bed, TemplateRole.ExistingKind.Furniture)
+            && !TemplateRole.CanReuse(bed, TemplateRole.ExistingKind.Wall));
+        True("空地不算复用", !TemplateRole.CanReuse(wall, TemplateRole.ExistingKind.Empty));
+
+        // ── 2. ★ 两间房并排：共享那一列墙只放一次 ──
+        //
+        // 把第二个样板放在 x=4（第一个在 x=0），于是第二个的左列（样板内 x=0）
+        // 正好落在第一个的右列（地图 x=4）上 —— 那就是共享墙。
+        {
+            var first = TemplatePlacer.Plan(t, grid, 0, 0, stock, 0, false);
+            Eq("第一间房正常放下 18 格", first.Blueprints.Count, 18);
+            Eq("第一间没有复用", first.Reused.Count, 0);
+
+            // 第一间占用的格子上"已有墙"（只对墙类格）
+            var existing = new Dictionary<long, TemplateRole.ExistingKind>();
+            for (int i = 0; i < first.Blueprints.Count; i++)
+            {
+                PlannedBlueprint b = first.Blueprints[i];
+                var kind = b.RoleName == "wall" ? TemplateRole.ExistingKind.Wall
+                         : b.RoleName == "door" ? TemplateRole.ExistingKind.Door
+                         : TemplateRole.ExistingKind.Furniture;
+                existing[((long)b.X << 32) ^ (uint)b.Z] = kind;
+            }
+            Func<int, int, TemplateRole.ExistingKind> lookup = (x, z) =>
+            {
+                TemplateRole.ExistingKind k;
+                return existing.TryGetValue(((long)x << 32) ^ (uint)z, out k)
+                    ? k : TemplateRole.ExistingKind.Empty;
+            };
+
+            // 第二间房放在 x=4（与第一间共享 x=4 那一列）
+            var second = TemplatePlacer.Plan(t, grid, 4, 0, stock, 0, false, lookup);
+
+            True("★★ 第二间房发生了共享复用", second.Reused.Count > 0,
+                second.Reused.Count + " 格被复用");
+
+            // ⚠ 精确算一下共享那一列（第一间的右列 x=4）：
+            //   样板第 3 行是 "W...D" → 右列 x=4 在 z=0..4 分别是 W W W **D** W
+            //   所以那一列是 **4 墙 + 1 门**。
+            //   第二间的**左列**（样板内 x=0）在 z=3 是**墙**（那一行是 "W...W"）。
+            //   → z=0,1,2,4 这 4 格：墙 ↔ 墙 → 复用 ✅
+            //   → z=3 那格：已有**门**、样板要放**墙** → **不能复用**（否则墙上多一个洞）
+            //     → 落进 Unresolved（这是**正确**行为，不是 bug）
+            //
+            // ★ 我第一版期望写了 5，就是没算清这一步 —— 而"墙不能复用门"正是
+            //   整条需求里最容易做错的地方，所以这个 4 是**必须**的。
+            Eq("★★ 共享那一列复用 4 格（第 5 格是门，不能当墙复用）", second.Reused.Count, 4);
+            Eq("★★ 第二间实际放 13 格（18 − 4 复用 − 1 冲突）", second.Blueprints.Count, 13);
+            Eq("★★ 那 1 格冲突被记进未解决（不是静默略过）", second.Unresolved.Count, 1);
+            bool conflictReason2 = second.Unresolved.Count > 0
+                && second.Unresolved[0].Reason.IndexOf("不能复用") >= 0;
+            True("★★ 冲突原因写明\"不能复用\"（这就是防危房的那道闸）", conflictReason2,
+                second.Unresolved.Count > 0 ? second.Unresolved[0].Reason : "无");
+
+            // 复用的应该都是墙
+            bool allWall = true;
+            for (int i = 0; i < second.Reused.Count; i++)
+                if (second.Reused[i].RoleName != "wall") allWall = false;
+            True("★ 复用的都是墙", allWall);
+
+            // ★ 核心收益：两间房的总墙数 < 2×单间
+            int singleWalls = first.WallCount;
+            int totalWalls = first.WallCount + second.WallCount;
+            True("★★ 两间房的总墙数少于两倍单间（真的省了墙）",
+                totalWalls < singleWalls * 2,
+                string.Format("单间 {0} 墙，两间共 {1} 墙（若不复用应为 {2}）",
+                    singleWalls, totalWalls, singleWalls * 2));
+        }
+
+        // ── 3. ★★ 冲突：已有的是门、样板要放墙 → 必须记进未解决（不能静默跳过）──
+        {
+            Func<int, int, TemplateRole.ExistingKind> doorEverywhere =
+                (x, z) => TemplateRole.ExistingKind.Door;
+            var conflict = TemplatePlacer.Plan(t, grid, 0, 0, stock, 0, false, doorEverywhere);
+
+            Eq("★★ 已有门/样板要墙 → 一堵墙都放不下", conflict.WallCount, 0);
+            True("★★ 冲突被记进未解决（不是静默略过）", conflict.Unresolved.Count >= 15,
+                conflict.Unresolved.Count + " 条未解决");
+            bool reasonOk = conflict.Unresolved.Count > 0
+                && conflict.Unresolved[0].Reason.IndexOf("不能复用") >= 0;
+            True("★★ 冲突原因写明了\"不能复用\"（否则会造出危房）", reasonOk,
+                conflict.Unresolved.Count > 0 ? conflict.Unresolved[0].Reason : "无");
+        }
+
+        // ── 4. ★ 框架不算可复用（防止"以为省了，结果墙永远没建成"）──
+        {
+            Func<int, int, TemplateRole.ExistingKind> frameEverywhere =
+                (x, z) => TemplateRole.ExistingKind.Frame;
+            var onFrame = TemplatePlacer.Plan(t, grid, 0, 0, stock, 0, false, frameEverywhere);
+
+            // ⚠ 这里**不能**断言"照放成功 15 堵墙" —— 框架本身占着格子，
+            //   所以 `IsPlaceable` 是 false，墙放不下、进未解决。
+            //   真实流程是"**先清场再放**"（`ShelterDomain.TryPlace` 里就有 WipeFootprint），
+            //   那一步在游戏层；Core 只负责"**不把框架误判成可复用而静默跳过**"。
+            //   （我第一版期望写了 15，是没想清 Core 与游戏层的分工。）
+            Eq("★★ 框架不算复用（没有一格被当成可复用而跳过）", onFrame.Reused.Count, 0);
+
+            // 关键：那些格必须**出现在未解决里**（说明 Core 明确拒绝了，而不是悄悄放过）
+            bool allReported = onFrame.Unresolved.Count >= 15;
+            True("★★ 被框架占住的墙格全部进未解决（证明没有被静默跳过）", allReported,
+                onFrame.Unresolved.Count + " 条未解决");
+        }
+
+        // ── 5. ★ 不传 existingAt 时行为完全不变（向后兼容）──
+        {
+            var plain = TemplatePlacer.Plan(t, grid, 0, 0, stock, 0, false);
+            Eq("★ 不启用复用时有 18 格", plain.Blueprints.Count, 18);
+            Eq("★ 不启用复用时 Reused 为空", plain.Reused.Count, 0);
+        }
     }
 
     // ---------------- 工具 ----------------

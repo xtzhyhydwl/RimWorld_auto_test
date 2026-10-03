@@ -38,6 +38,12 @@ namespace FoodControl.Core
         /// </summary>
         public bool NeedsDefAsItem;
 
+        /// <summary>
+        /// 该格上**已有的东西是什么类别**（供"共享墙复用"判断用）。
+        /// 放在 `PlannedBlueprint` 里是为了让游戏层填一次、Core 反复判。
+        /// </summary>
+        public TemplateRole.ExistingKind Existing = TemplateRole.ExistingKind.Empty;
+
         /// <summary>旋转（0..3），只对需要朝向的东西有意义</summary>
         public int Rotation;
 
@@ -45,6 +51,27 @@ namespace FoodControl.Core
         {
             return string.Format("{0}({1},{2}) {3}->{4}{5}", RoleName, X, Z, Symbol, DefName,
                 NeedsStuff ? " +stuff" : (NeedsDefAsItem ? " (as item)" : ""));
+        }
+    }
+
+    /// <summary>
+    /// **共享复用的格子** —— 那一格已经有同类的墙/门了，所以**不重复放蓝图**。
+    ///
+    /// 用户 2026-10-03：「两个房子连在一起，中间的墙是可以复用的……
+    /// 能复用的话少一面墙，而且更像一个整体。」
+    /// </summary>
+    public sealed class ReusedSlot
+    {
+        public int X;
+        public int Z;
+        public char Symbol;
+        public string RoleName = "";
+        /// <summary>复用的是已有的什么东西（`ExistingKind` 的名字）</summary>
+        public string Existing = "";
+
+        public override string ToString()
+        {
+            return string.Format("({0},{1}) {2} 复用了已有的 {3}", X, Z, RoleName, Existing);
         }
     }
 
@@ -76,6 +103,12 @@ namespace FoodControl.Core
 
         public List<PlannedBlueprint> Blueprints = new List<PlannedBlueprint>();
         public List<UnresolvedSlot> Unresolved = new List<UnresolvedSlot>();
+
+        /// <summary>
+        /// **共享复用的格子**（已有同类的墙/门，所以没重复放蓝图）。
+        /// 用户 2026-10-03 提的"两个房子连在一起，中间的墙可以复用"。
+        /// </summary>
+        public List<ReusedSlot> Reused = new List<ReusedSlot>();
 
         /// <summary>各角色的计划格数（校验用）</summary>
         public Dictionary<string, int> PlannedByRole = new Dictionary<string, int>();
@@ -181,6 +214,13 @@ namespace FoodControl.Core
         /// <param name="available">当前可用的材料/物品数量：defName -> 数量</param>
         /// <param name="rotation">记录用途（实际旋转已在 tpl 里做好）</param>
         /// <param name="mirrored">记录用途</param>
+        /// <param name="existingAt">
+        /// **每一格上已有什么**（地图坐标 → 类别）。传 null 表示"全是空地"（不启用共享墙复用）。
+        ///
+        /// 这是"两个房子连在一起时中间的墙可以复用"（用户 2026-10-03）的入口：
+        /// 重合且**同类**的格会被跳过（不重复放蓝图），从而少一面墙、且两间房更像个整体。
+        /// ⚠ 框架（Frame）**不算可复用**，见 `TemplateRole.CanReuse`。
+        /// </param>
         public static TemplatePlacement Plan(
             BuildTemplate tpl,
             PlacementGrid grid,
@@ -188,7 +228,8 @@ namespace FoodControl.Core
             int originZ,
             Dictionary<string, int> available,
             int rotation,
-            bool mirrored)
+            bool mirrored,
+            Func<int, int, TemplateRole.ExistingKind> existingAt = null)
         {
             var result = new TemplatePlacement
             {
@@ -226,8 +267,8 @@ namespace FoodControl.Core
 
             // ★ 两遍：先墙/门（房子的骨架），再家具。
             //   理由见类注释第 2 条：料不够时宁可少家具，也要先把壳立起来。
-            PlanPass(tpl, grid, originX, originZ, available, used, result, true);
-            PlanPass(tpl, grid, originX, originZ, available, used, result, false);
+            PlanPass(tpl, grid, originX, originZ, available, used, result, true, existingAt);
+            PlanPass(tpl, grid, originX, originZ, available, used, result, false, existingAt);
 
             return result;
         }
@@ -243,7 +284,8 @@ namespace FoodControl.Core
         private static void PlanPass(
             BuildTemplate tpl, PlacementGrid grid, int originX, int originZ,
             Dictionary<string, int> available, Dictionary<string, int> used,
-            TemplatePlacement result, bool structuralPass)
+            TemplatePlacement result, bool structuralPass,
+            Func<int, int, TemplateRole.ExistingKind> existingAt)
         {
             for (int z = 0; z < tpl.Height; z++)
             {
@@ -268,6 +310,48 @@ namespace FoodControl.Core
                     //   我最初传了局部坐标 → 它去查了**地图左上角**那一片能不能放，
                     //   而不是真实站点 → 48 个槽位全部误判为"放不下"
                     //   （而 `FindBestSite` 传的是 `tplOriginX + x`，所以它成功 —— 两边不一致才暴露出来）。
+                    // ①b ★ **共享墙复用**：那一格已经有同类的墙/门了 → 跳过，不重复放
+                    //
+                    // 用户 2026-10-03：「如果你要把两个房子连在一起，
+                    // 那么他们中间的墙是可以复用的……能复用的话少一面墙，
+                    // 然后它其实也更像一个整体。」
+                    //
+                    // ⚠ 判断必须**同类才算可复用**（`TemplateRole.CanReuse`）：
+                    //   `wall↔wall` 可以，`wall↔door` **绝对不行** ——
+                    //   把墙当门跳过 → 墙上多了个洞，房子不封闭，屋顶不会长（危房）。
+                    //   框架（Frame）也不算，理由见 `CanReuse` 的注释。
+                    if (existingAt != null)
+                    {
+                        TemplateRole.ExistingKind existing = TemplateRole.ExistingKind.Empty;
+                        try { existing = existingAt(mx, mz); }
+                        catch (Exception) { existing = TemplateRole.ExistingKind.Empty; }
+
+                        if (TemplateRole.CanReuse(role, existing))
+                        {
+                            result.Reused.Add(new ReusedSlot
+                            {
+                                X = mx, Z = mz, Symbol = sym, RoleName = role.Name,
+                                Existing = existing.ToString(),
+                            });
+                            Bump(result, "共享复用（" + role.Name + " 复用了已有的 " + existing + "）");
+                            continue;
+                        }
+
+                        // 已有东西但**不能**复用 → 一定要记下来（否则会静默盖出危房）
+                        if (existing != TemplateRole.ExistingKind.Empty)
+                        {
+                            result.Unresolved.Add(new UnresolvedSlot
+                            {
+                                X = mx, Z = mz, Symbol = sym, RoleName = role.Name,
+                                Reason = string.Format(
+                                    "该格 ({0},{1}) 已有 {2}，但样板要放 {3} —— 不能复用（会造出危房）",
+                                    mx, mz, existing, role.Name),
+                            });
+                            Bump(result, "已有 " + existing + " 与要放的 " + role.Name + " 冲突");
+                            continue;
+                        }
+                    }
+
                     if (!grid.IsPlaceable(mx, mz))
                     {
                         if (result.PassSamples.Count < 12)

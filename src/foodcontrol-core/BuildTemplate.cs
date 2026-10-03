@@ -50,6 +50,51 @@ namespace FoodControl.Core
         /// </summary>
         public bool NeedsStuff;
 
+        /// <summary>
+        /// 该格上**已有的东西属于哪一类** —— 这是"两个房子连在一起时中间的墙可以复用"
+        /// （用户 2026-10-03）所需的输入。
+        ///
+        /// 匹配规则必须**同类才算能复用**：
+        ///   `wall ↔ wall` 可以，`door ↔ door` 可以，**`wall ↔ door` 绝对不行**。
+        ///
+        /// 为什么：把墙当门跳过 → **墙上多了个洞，房子不封闭，屋顶不会长**（危房）。
+        /// </summary>
+        public enum ExistingKind
+        {
+            /// <summary>那里什么都没有</summary>
+            Empty = 0,
+            /// <summary>已有墙类建筑/蓝图</summary>
+            Wall = 1,
+            /// <summary>已有门类建筑/蓝图</summary>
+            Door = 2,
+            /// <summary>已有家具（不能当结构复用）</summary>
+            Furniture = 3,
+            /// <summary>已有**框架**（未建成的墙）—— ★ 不能当可复用</summary>
+            Frame = 4,
+            /// <summary>已有别的东西（挡路）</summary>
+            Other = 5,
+        }
+
+        /// <summary>
+        /// 本角色**能不能复用**那一格上已有的东西（即"跳过不放蓝图"）。
+        ///
+        /// ⚠ **框架（`Frame`）不算可复用**：框架是"还没建成的墙"。
+        ///   如果因为那里有框架就跳过，一旦那个框架被取消，这面墙就**永远没建成**
+        ///   → 房子缺一面墙。宁可重复放（多花几格料，安全），也不要冒这个风险。
+        /// </summary>
+        public static bool CanReuse(TemplateRole role, ExistingKind existing)
+        {
+            if (role == null) return false;
+            if (existing == ExistingKind.Empty) return false;
+            if (existing == ExistingKind.Frame) return false;    // ★ 框架不算
+            if (existing == ExistingKind.Other) return false;
+
+            if (role.IsWallLike) return existing == ExistingKind.Wall;
+            if (role.IsDoorLike) return existing == ExistingKind.Door;
+            // 家具/工作台这类**不允许**复用：别人的家具不是你的家具
+            return false;
+        }
+
         public TemplateRole Clone()
         {
             return new TemplateRole
