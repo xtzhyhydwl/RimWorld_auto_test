@@ -113,11 +113,21 @@ namespace FoodControl.Game
                 }
 
                 // ② 已经有住处了就不要盖第二间（除非测试强制）
-                if (!ForceBuild && ShelterDomain.HasAnyShelter(map))
+                //
+                // ★ 判据来自**建筑账本**，不是数地图上的建筑。
+                //
+                //   为什么必须这样（踩过）：`ShelterDomain.HasAnyShelter` 的第一行是
+                //   `CountBlueprintBuilds(map) > 0` —— 而 **debug 开局自带 32 个蓝图
+                //   + 662 面墙**（实测），所以那个守卫一上来就判定"已有住处"，
+                //   正常路径**永远拒绝动手**。这正是我上一轮"验证被守卫拦住"的根因。
+                //
+                //   账本问的是"**我们造过没有**"，天然不受开局自带的东西污染。
+                BuildingLedger.BindToMap(map);
+                if (!ForceBuild && BuildingLedger.HasAnyOfOurs())
                 {
                     result.Ok = true;
                     result.DidWork = false;
-                    result.Summary = "已有住处/蓝图，不重复盖（样板库有 " + all.Count + " 份可用）";
+                    result.Summary = "账本里已有我们造的 " + BuildingLedger.Describe() + "，不重复盖";
                     return result;
                 }
 
@@ -273,6 +283,52 @@ namespace FoodControl.Game
 
                 // ⑨ 回读验证（不信自己成功了）
                 int seen = ShelterDomain.CountBlueprintBuilds(map);
+
+                // ⑩ ★ **记账** —— 我们自己放了什么，我们自己知道（用户 2026-10-03）
+                //
+                // 这是唯一能 100% 确定"这是我们造的"的时机：
+                // 事后从地图猜会被 debug 开局的 662 堵墙、废墟、其他 mod 的东西污染。
+                int recorded = 0;
+                try
+                {
+                    var ledgerCells = new List<RegistryCell>();
+                    for (int i = 0; i < plan.Blueprints.Count; i++)
+                    {
+                        PlannedBlueprint bp = plan.Blueprints[i];
+                        ledgerCells.Add(new RegistryCell
+                        {
+                            X = bp.X, Z = bp.Z,
+                            Role = bp.RoleName ?? "",
+                            DefName = bp.DefName ?? "",
+                            StillThere = true,
+                        });
+                    }
+                    // 共享墙复用的那些格**也要记**（它们是这栋建筑的一部分，
+                    // 只是蓝图是前一栋放的）
+                    for (int i = 0; i < plan.Reused.Count; i++)
+                    {
+                        ReusedSlot ru = plan.Reused[i];
+                        ledgerCells.Add(new RegistryCell
+                        {
+                            X = ru.X, Z = ru.Z,
+                            Role = ru.RoleName ?? "",
+                            DefName = "(复用)",
+                            StillThere = true,
+                        });
+                    }
+
+                    if (ledgerCells.Count > 0)
+                    {
+                        BuildingRecord rec = BuildingLedger.Record(
+                            map, tpl.Id, siteX, siteZ, 0, false, ledgerCells);
+                        if (rec != null) recorded = rec.Cells.Count;
+                    }
+                }
+                catch (Exception e)
+                {
+                    try { Log.Warning("[FoodControl] 记账失败（不影响建造）：" + e.Message); } catch (Exception) { }
+                }
+
                 report.WallsPlaced = wallPlaced;
                 report.DoorsPlaced = doorPlaced;
                 report.BedsPlaced = bedPlaced;
@@ -287,10 +343,10 @@ namespace FoodControl.Game
                 result.Ok = true;
                 result.DidWork = placed > 0;
                 result.Summary = string.Format(
-                    "样板 {0} @({1},{2}) 基地距{3:F0}：计划 {4} 格 → 放下 {5} 格（墙{6}/门{7}/床{8}/灯{9}，未解决 {10}，蓝图回读 {11}）",
+                    "样板 {0} @({1},{2}) 基地距{3:F0}：计划 {4} 格 → 放下 {5} 格（墙{6}/门{7}/床{8}/灯{9}，未解决 {10}，蓝图回读 {11}，记账 {12}）",
                     tpl.Id, siteX, siteZ, avgDist,
                     plan.Blueprints.Count, placed, wallPlaced, doorPlaced, bedPlaced, torchPlaced,
-                    plan.Unresolved.Count, seen);
+                    plan.Unresolved.Count, seen, recorded);
 
                 if (plan.Unresolved.Count > 0 && plan.Unresolved.Count <= 6)
                 {

@@ -335,14 +335,102 @@ namespace FoodControl.Core
             return string.Format("账本：{0} 栋建筑，共 {1} 格（现存 {2}）", _records.Count, cells, alive);
         }
 
+        /// <summary>
+        /// **给外部读取用的紧凑 JSON**（每栋一行摘要 + 可选逐格）。
+        ///
+        /// 为什么要专门提供它：探针（`DSH.FoodProbe`）只能通过反射看 mod 内部类型，
+        /// 而 `Records` 返回的是**只读包装**，反射读嵌套泛型集合很容易拿到 null
+        /// （我就踩了：`id`/`originX` 全是 null、`cells` 恒为 0，而 `success` 还是 true ——
+        /// 这种"看起来成功了其实什么都没读到"最难查）。
+        ///
+        /// → 与其在探针里搞复杂反射，不如让 Core **直接给出一个字符串**。
+        ///   探针拿到的就是最终答案，没有中间层可以出错。
+        /// </summary>
+        public string ToSummaryJson(bool includeCells)
+        {
+            var sb = new StringBuilder();
+            sb.Append("{\"count\":").Append(_records.Count);
+            sb.Append(",\"summary\":").Append(Q(Summary()));
+            sb.Append(",\"records\":[");
+
+            for (int i = 0; i < _records.Count; i++)
+            {
+                BuildingRecord r = _records[i];
+                if (r == null) continue;
+                if (i > 0) sb.Append(",");
+
+                sb.Append("{\"id\":").Append(Q(r.Id));
+                sb.Append(",\"templateId\":").Append(Q(r.TemplateId));
+                sb.Append(",\"originX\":").Append(r.OriginX);
+                sb.Append(",\"originZ\":").Append(r.OriginZ);
+                sb.Append(",\"rotation\":").Append(r.Rotation);
+                sb.Append(",\"mirrored\":").Append(r.Mirrored ? "true" : "false");
+                sb.Append(",\"day\":").Append(r.Day);
+                sb.Append(",\"width\":").Append(r.Width);
+                sb.Append(",\"height\":").Append(r.Height);
+                sb.Append(",\"cells\":").Append(r.Cells.Count);
+                sb.Append(",\"alive\":").Append(r.AliveCount);
+
+                if (includeCells)
+                {
+                    sb.Append(",\"cellList\":[");
+                    for (int j = 0; j < r.Cells.Count; j++)
+                    {
+                        RegistryCell c = r.Cells[j];
+                        if (c == null) continue;
+                        if (j > 0) sb.Append(",");
+                        sb.Append("[").Append(c.X).Append(",").Append(c.Z).Append(",")
+                          .Append(Q(c.Role)).Append(",").Append(c.StillThere ? "1" : "0").Append("]");
+                    }
+                    sb.Append("]");
+                }
+                sb.Append("}");
+            }
+
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
+        /// <summary>查某一格的 JSON（供探针）</summary>
+        public string QueryCellJson(int x, int z)
+        {
+            var at = At(x, z);
+            var sb = new StringBuilder();
+            sb.Append("{\"x\":").Append(x).Append(",\"z\":").Append(z);
+            sb.Append(",\"isOurs\":").Append(IsOurs(x, z) ? "true" : "false");
+            sb.Append(",\"belongsTo\":").Append(at.Count);
+            sb.Append(",\"records\":[");
+            for (int i = 0; i < at.Count; i++)
+            {
+                if (i > 0) sb.Append(",");
+                sb.Append(Q(at[i].Id));
+            }
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
         // ------------------------------------------------------------------
         // 序列化（和样板一样，Core 自写 JSON，零依赖）
         // ------------------------------------------------------------------
 
         public string ToJson()
         {
+            return ToJsonWithMapId("");
+        }
+
+        /// <summary>
+        /// 带 `mapUniqueId` 头部的序列化。
+        ///
+        /// 为什么需要它：账本存成独立文件（不跟存档走），所以换存档时会读到
+        /// **上一张地图**的坐标 —— 那会指到完全无关的地方。用地图 id 做绑定检测。
+        /// </summary>
+        public string ToJsonWithMapId(string mapUniqueId)
+        {
             var sb = new StringBuilder();
-            sb.Append("{\n  \"version\": 1,\n  \"records\": [\n");
+            sb.Append("{\n");
+            sb.Append("  \"mapUniqueId\": ").Append(Q(mapUniqueId ?? "")).Append(",\n");
+            sb.Append("  \"version\": 1,\n");
+            sb.Append("  \"records\": [\n");
 
             for (int i = 0; i < _records.Count; i++)
             {

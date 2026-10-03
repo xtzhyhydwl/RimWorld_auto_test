@@ -511,6 +511,79 @@ namespace DSH.FoodProbe
             };
         }
 
+        [Tool("foodprobe/ledger",
+            Description = "★ 读**建筑账本**：我们自己造过什么、在哪里（剥离开地图原有元素）。只读。")]
+        public object Ledger(
+            [ToolParameter(Description = "可选：查这一格是不是我们造的，格式 \"x,z\"")] string cell = null)
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+            var led = FindType(asm, "BuildingLedger");
+            if (led == null) return new { success = false, message = "找不到 BuildingLedger" };
+
+            try
+            {
+                object reg = CallStatic(led, "get_Registry");
+                if (reg == null) return new { success = false, message = "账本为 null" };
+
+                // ★ 让 Core **直接给出 JSON**，探针只负责转交。
+                //
+                // 为什么不反射读 Records 列表：`Records` 是只读包装（ReadOnlyCollection），
+                // 反射读嵌套泛型集合会拿到 null —— 实测 `id`/`originX` 全是 null、
+                // `cells` 恒为 0，而探针的 `success` **还是 true**。
+                // 这种"看起来成功了其实什么都没读到"是最难查的一类问题，
+                // 所以与其在探针里堆反射，不如让数据源直接给最终字符串。
+                string summaryJson = null;
+                try
+                {
+                    var m = reg.GetType().GetMethod("ToSummaryJson", ANY_ALL);
+                    if (m != null) summaryJson = m.Invoke(reg, new object[] { true }) as string;
+                }
+                catch (Exception e)
+                {
+                    return new { success = false, message = "ToSummaryJson 调用失败：" + e.Message };
+                }
+
+                string cellJson = null;
+                if (!string.IsNullOrEmpty(cell))
+                {
+                    var parts = cell.Split(',');
+                    if (parts.Length == 2)
+                    {
+                        int qx, qz;
+                        if (int.TryParse(parts[0].Trim(), out qx) && int.TryParse(parts[1].Trim(), out qz))
+                        {
+                            try
+                            {
+                                var m2 = reg.GetType().GetMethod("QueryCellJson", ANY_ALL);
+                                if (m2 != null) cellJson = m2.Invoke(reg, new object[] { qx, qz }) as string;
+                            }
+                            catch (Exception) { }
+                        }
+                    }
+                }
+
+                return new
+                {
+                    success = true,
+                    describe = CallStatic(led, "Describe")?.ToString(),
+                    hasAnyOfOurs = CallStatic(led, "HasAnyOfOurs"),
+                    aliveStructureCells = CallStatic(led, "AliveStructureCells"),
+                    mapIdentity = CallStatic(led, "MapIdentity", Find.CurrentMap)?.ToString(),
+                    filePath = CallStatic(led, "get_FilePath")?.ToString(),
+                    recordsJson = summaryJson,
+                    cellJson,
+                    note = "★ 账本记的是「我们曾经下了什么蓝图」(意图历史), 不是「地图上还剩什么」。"
+                         + "被烧/被拆只标 StillThere=false, **不删除**。"
+                         + "recordsJson 是 Core 直接产出的 JSON（不用反射读集合，避免拿到 null）。",
+                };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = "读账本失败：" + e.Message, stack = e.StackTrace };
+            }
+        }
+
         [Tool("foodprobe/health", Description = "自检：FoodControl mod 加载了吗、内部类型和静态入口在不在。只读。")]
         public object Health()
         {
