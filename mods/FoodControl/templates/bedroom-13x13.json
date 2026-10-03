@@ -1,0 +1,146 @@
+{
+  "id": "bedroom-13x13",
+  "name": "大卧室13x13(8床)",
+  "origin": "user",
+  "size": {
+    "w": 13,
+    "h": 13
+  },
+  "tags": [
+    "bedroom",
+    "starter"
+  ],
+  "rotatable": true,
+  "mirrorable": true,
+  "rows": [
+    "WWWWWWDWWWWWW",
+    "WBWBW...WBWBW",
+    "WBWBW...WBWBW",
+    "WDWDW...WDWDW",
+    "W.......W...W",
+    "W...TSS.....W",
+    "D...STTS....D",
+    "W...STTS....W",
+    "W...W.A.....W",
+    "WDWDW...WDWDW",
+    "WBWBW..EWBWBW",
+    "WBWBW..EWBWBW",
+    "WWWWWWDWWWWWW"
+  ],
+  "roles": {
+    "W": {
+      "name": "wall",
+      "accepts": [
+        "Wall"
+      ],
+      "isWallLike": true,
+      "needsStuff": true,
+      "exampleDef": "Wall"
+    },
+    "D": {
+      "name": "door",
+      "accepts": [
+        "Door"
+      ],
+      "isDoorLike": true,
+      "needsStuff": true,
+      "exampleDef": "Door"
+    },
+    "B": {
+      "name": "bed",
+      "accepts": [
+        "Bed",
+        "DoubleBed"
+      ],
+      "isFurniture": true,
+      "needsStuff": false,
+      "exampleDef": "Bed"
+    },
+    "T": {
+      "name": "table",
+      "accepts": [
+        "ChessTable",
+        "Table2x2c",
+        "Table2x4c",
+        "Table3x3c"
+      ],
+      "isFurniture": true,
+      "needsStuff": true,
+      "exampleDef": "ChessTable"
+    },
+    "S": {
+      "name": "seat",
+      "accepts": [
+        "Stool",
+        "DiningChair"
+      ],
+      "isFurniture": true,
+      "needsStuff": true,
+      "exampleDef": "Stool"
+    },
+    "A": {
+      "name": "furniture",
+      "accepts": [
+        "HorseshoesPin"
+      ],
+      "isFurniture": true,
+      "needsStuff": true,
+      "exampleDef": "HorseshoesPin"
+    },
+    "E": {
+      "name": "storage",
+      "accepts": [
+        "Shelf",
+        "ShelfSmall"
+      ],
+      "isFurniture": true,
+      "needsStuff": true,
+      "exampleDef": "Shelf"
+    }
+  },
+  "requires": {
+    "minAreaCells": 169,
+    "needsRoofAfterBuild": true,
+    "minClearance": 1
+  },
+  "capture": {
+    "requested": {
+      "x": 132,
+      "z": 126,
+      "w": 13,
+      "h": 13
+    },
+    "trim": {
+      "offsetX": 132,
+      "offsetZ": 126,
+      "width": 13,
+      "height": 13,
+      "note": "trimmedRows 是以这组坐标/尺寸裁剪后的样板；用它对得上墙的外沿。"
+    },
+    "counts": {
+      "wallLike": 70,
+      "doorLike": 12,
+      "furniture": 30,
+      "light": 0,
+      "empty": 57,
+      "roofedCells": 0,
+      "skippedNonFurnitureBlueprints": 0,
+      "ambiguousAsFurniture": 1
+    },
+    "defsSeen": {
+      "Wall": 68,
+      "Door": 12,
+      "Bed": 16,
+      "TorchWallLamp": 2,
+      "ChessTable": 1,
+      "Stool": 6,
+      "Table2x2c": 4,
+      "HorseshoesPin": 1,
+      "Shelf": 2
+    },
+    "warnings": [
+      "⚠ 有 1 个**认不出角色**的建筑被标成家具槽 A（HorseshoesPin@138,134）—— 如果这些其实是环境杂物（石头/废墟），请把它们从 rows 里删掉"
+    ],
+    "capturedAt": "2026-10-03T13:10:00.689Z"
+  }
+}
