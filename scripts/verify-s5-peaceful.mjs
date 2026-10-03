@@ -95,7 +95,8 @@ async function sample(label) {
     minMood: moods.length ? Math.min(...moods) : -1,
     people: col.map((c) => ({ name: c.name, food: c.food, mood: c.mood, downed: c.downed, dead: c.dead })),
     mental: col.filter((c) => c.mentalState).map((c) => `${c.name}:${c.mentalState}`),
-    planted: st?.state?.PlantedCells ?? null,
+    planted: st?.state?.CultivatedCells ?? null,
+    growingZones: st?.state?.GrowingZoneCount ?? null,
   };
   samples.push(s);
   log(`    [${label}] tick=${s.ticks} 人=${s.colonistCount} 粮=${(s.stock).toFixed(1)} 最低food=${s.minFood.toFixed(3)} 最低mood=${s.minMood.toFixed(3)}`);
@@ -150,18 +151,31 @@ async function main() {
     log('\n=== 3. 削存粮到约 1.5 天（否则验收没有证明力）===');
     let starved = false;
     let sdetail = '';
-    for (let round = 0; round < 12; round++) {
+    let stagnAnt = 0;
+    for (let round = 0; round < 20; round++) {
       const r = await call('foodprobe/read_state', {}, 60000).catch(() => null);
       const days = r?.state?.ReserveDays;
-      sdetail = `round ${round}: 可撑 ${days} 天`;
+      const cultivated = r?.state?.CultivatedCells ?? -1;
+      sdetail = `round ${round}: 可撑 ${days} 天，种植 ${cultivated} 格`;
       log(`    ${sdetail}`);
       if (typeof days === 'number' && days <= 2.2) { starved = true; break; }
+
       const f = await call('foodprobe/forbid_food', { targetNutrition: 7.2 }, 60000).catch(() => null);
       log(`      forbid_food: changed=${f?.changed} ${f?.allowedNutritionBefore} → ${f?.allowedNutritionAfter}`);
+
+      // ⚠ `changed === 0` **不等于**达标 —— 实测撞到过：
+      //   上一次调用已把食物禁光（changed>0），但**新收获的庄稼**又补进来了，
+      //   于是这一次 changed=0 而 ReserveDays 仍有 10.7 天。
+      //   所以不能一看到 changed=0 就 break，要**再看存粮**决定：
+      //   达标 → 通过；没达标且连续两次没进展 → 才放弃（说明地图上真的没食物可禁了）。
       if ((f?.changed ?? 0) === 0) {
-        if (typeof days === 'number' && days <= 2.2) { starved = true; }
-        break;
-      }
+        const re = await call('foodprobe/read_state', {}, 60000).catch(() => null);
+        const d2 = re?.state?.ReserveDays;
+        if (typeof d2 === 'number' && d2 <= 2.2) { starved = true; sdetail += ` ｜ 已达标`; break; }
+        stagnAnt++;
+        sdetail += ` ｜ 无进展（仍 ${d2} 天）`;
+        if (stagnAnt >= 2) break;
+      } else stagnAnt = 0;
     }
     record('削存粮到约 1.5～2.2 天', starved, sdetail);
 
