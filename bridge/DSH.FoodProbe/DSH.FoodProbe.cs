@@ -668,6 +668,93 @@ namespace DSH.FoodProbe
             }
         }
 
+        [Tool("foodprobe/ledger_reset",
+            Description = "★ 清空建筑账本（测试用）。会删文件 + 清内存。")]
+        public object LedgerReset()
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+            var led = FindType(asm, "BuildingLedger");
+            if (led == null) return new { success = false, message = "找不到 BuildingLedger" };
+            try
+            {
+                // 先清内存
+                CallStatic(led, "Reset");
+                // 再删文件（Reset 会标 dirty，但下次 Save 前不会重建）
+                var pathObj = CallStatic(led, "get_FilePath");
+                string path = pathObj?.ToString();
+                bool deleted = false;
+                if (!string.IsNullOrEmpty(path))
+                {
+                    try { if (System.IO.File.Exists(path)) { System.IO.File.Delete(path); deleted = true; } }
+                    catch (Exception) { }
+                }
+                return new
+                {
+                    success = true,
+                    deleted,
+                    path,
+                    describe = CallStatic(led, "Describe")?.ToString(),
+                };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message };
+            }
+        }
+
+        [Tool("foodprobe/close_force_pause",
+            Description = "★ 关掉所有会强制暂停的窗口（新殖民地会弹'给阵营起名'对话框，它会挡住时间推进）。返回关了哪些。")]
+        public object CloseForcePause()
+        {
+            var closed = new List<string>();
+            try
+            {
+                // 从后往前关（越靠后的越"上层"）
+                for (int i = Find.WindowStack.Windows.Count - 1; i >= 0; i--)
+                {
+                    Window w = Find.WindowStack.Windows[i];
+                    if (w == null) continue;
+                    if (!w.forcePause) continue;
+
+                    string t = w.GetType().FullName;
+                    try
+                    {
+                        // 起名对话框：找不到"确定"按钮时的通用做法就是直接关掉。
+                        // 名字留空游戏也会自己补一个默认值，不影响测试。
+                        w.Close(false);
+                        closed.Add(t);
+                    }
+                    catch (Exception e)
+                    {
+                        closed.Add(t + "(关失败:" + e.Message + ")");
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message };
+            }
+
+            var left = new List<string>();
+            try
+            {
+                foreach (Window w in Find.WindowStack.Windows)
+                    if (w != null && w.forcePause) left.Add(w.GetType().FullName);
+            }
+            catch (Exception) { }
+
+            return new
+            {
+                success = true,
+                closed = closed.ToArray(),
+                stillForcePause = left.ToArray(),
+                note = "★ 新开的 debug 殖民地会弹 `Dialog_NamePlayerFactionAndSettlement` "
+                     + "(forcePause=true)，它会挡住 `play_for` —— 实测表现为"
+                     + "\"连续 20 次推进 0 tick\"。关掉它即可。名字留空游戏会补默认值。",
+            };
+        }
+
         [Tool("foodprobe/health", Description = "自检：FoodControl mod 加载了吗、内部类型和静态入口在不在。只读。")]
         public object Health()
         {

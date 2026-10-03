@@ -63,6 +63,14 @@ async function clearForcePause() {
       closed.push('main-tab:Menu');
     }
   }
+  // ★ 还有别的会强制暂停的窗口（实测：新殖民地弹的
+  //   `Dialog_NamePlayerFactionAndSettlement`）—— 它挡住 play_for，
+  //   表现为"连续 20 次推进 0 tick"。
+  //   探针提供了通用关闭入口，别再逐个 type 硬编码。
+  if (closed.length === 0) {
+    const r = await call('foodprobe/close_force_pause', {}, 30000).catch(() => null);
+    for (const c of r?.closed || []) closed.push(c);
+  }
   return closed;
 }
 
@@ -197,8 +205,20 @@ async function main() {
         //   其实是靠 11 天的存粮撑的，什么也没证明。
         const f = await call('foodprobe/forbid_food', { targetNutrition: 7.2 }, 60000).catch(() => null);
         log(`      forbid_food: changed=${f?.changed} 可用营养 ${f?.allowedNutritionBefore} → ${f?.allowedNutritionAfter}`);
+
+        // ★ `changed === 0` **不一定**是失败 —— 也可能是**已经在目标之下了**
+        //   （比如上一轮跑过、食物已经被禁掉）。这时候应该算**通过**。
+        //   我第一版直接把它当失败，于是"已经削好了"反而报 FAIL（假失败）。
         if ((f?.changed ?? 0) === 0) {
-          lastDetail += ' ｜ forbid_food 改不动了（可能地图上本来就没多少食物）';
+          // 再读一次存粮确认
+          const re = await call('foodprobe/read_state').catch(() => null);
+          const d2 = re?.state?.ReserveDays;
+          if (typeof d2 === 'number' && d2 <= 2.2) {
+            ok = true;
+            lastDetail += ` ｜ 无需再削（当前 ${d2.toFixed(2)} 天已达标）`;
+          } else {
+            lastDetail += ` ｜ forbid_food 改不动了，但存粮仍 ${d2} 天`;
+          }
           break;
         }
       }
