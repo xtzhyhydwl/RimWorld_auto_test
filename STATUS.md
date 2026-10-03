@@ -7,18 +7,39 @@
 
 **用户决定做「生产自动化」mod，第一条线路：食物闭环。**
 
-设计已完成，等用户拍板几个参数后进入实现。设计文档：
-[docs/生产自动化-设计.md](docs/生产自动化-设计.md)
+**Core 逻辑层已完成并全部离线测试通过（58/58）。**
+设计文档：[docs/生产自动化-设计.md](docs/生产自动化-设计.md)
 
 一句话形态：**感知（现有多少食物）→ 预测（未来 15 天每天多少）→ 决策（要不要动手）
 → 执行（自动画种植区去种）→ 观测回流**。只有「决策」一层是可替换的，
 所以「上层用脚本还是 LLM」是局部改动。
 
-**下一步**：写 `DSH.FoodBridge` 伴生 DLL（感知必须靠它，桥接读不到 nutrition）。
+**下一步**：游戏内适配层（`Game/`）—— 等 API 符号确证结果。
+
+### 用户已定的参数
+
+| 参数 | 值 |
+| --- | --- |
+| 目标带 | 常备 **10** 天，低于 **7** 补，高于 **20** 停 |
+| 狩猎 | **不进 MVP** |
+| 作物 | **固定水稻** |
+| 基地中心 | Home 质心 → 最近的贮藏区 → 地图中心（兜底链） |
+| 距离惩罚 | 可接受 **40** 格，超出每格罚 **1** 分 |
+| 已有种植区 | **优先复用空地**，不新开 |
 
 ---
 
 ## 已完成
+
+### FoodControl · Core 逻辑层（2026-10-03）
+- [x] `src/foodcontrol-core/`：预测器 / 决策 / 选址，**纯逻辑，不引用游戏程序集**
+- [x] **58/58 离线测试通过**：`node scripts/build-core.mjs`（毫秒级，不开游戏）
+- [x] 预测器**显式建模光周期**（实测晚上生长率为 0，不能按 24h 线性外推）
+- [x] 选址用**带地形代价的 BFS 距离场**而非欧氏距离（河对岸直线 10 格、实际绕 118 格，已测）
+- [x] `build-core.mjs` 含**静态检查**：Core 一旦引用 `Verse`/`RimWorld` 类型就报错，
+      从机制上保证「逻辑可离线测试」不被破坏
+- [x] 一个测试发现（已固化成用例）："存粮 7.5 天 + 6 天后才收获" 触发补种是**正确的**，
+      依赖未到手的收成本身就是风险
 
 ### 生产自动化 · 设计与侦察（2026-10-03）
 - [x] 需求讨论 + 设计文档：[docs/生产自动化-设计.md](docs/生产自动化-设计.md)
@@ -79,15 +100,17 @@
 
 ## 待办
 
-- [ ] **写 `DSH.FoodBridge` 伴生 DLL**（P1 的 blocking 前置，照 `bridge/DSH.CEBridge/` 范式）
-      - `food/summary`（食物总量 + 殖民者数 + 每日消耗）
-      - `food/plants`（在种作物：Def/格数/`growth` float/土壤肥力）
-      - `food/set_crop`（绕开「改作物只能走 UI」）
-      - 编译前**必须先停游戏**；「写 DLL 能解决」目前仍是**推断**，未编译验证过
-- [ ] 用户拍板：目标带数值 / 是否把狩猎放进 MVP / 作物是否固定水稻
+- [ ] **游戏内适配层 `Game/`**（P1 blocking）—— 等 `docs/游戏API符号确证.md` 回来后开工
+      - `StateReader`：游戏 API → `FoodState`（食物总量、殖民者数、在种作物、可用空地）
+      - `PlotPlanner`：游戏地图 → `PassabilityMap`（地表可种性 / 肥力 / 通行代价）
+      - `Executor`：`FoodAction` → 建种植区 / 设作物 / 复用已有区
+      - `FoodControlGameComponent`：每游戏日跑一轮
+      - `Telemetry`：写 `telemetry.jsonl`（测试脚本读它，**不需要桥接**）
+- [ ] mod 骨架 + `About.xml` + junction 部署 + ModsConfig 接入
+- [ ] 标定实测：`NutritionPerCellAtMaturity`、`EffectiveGrowthHoursPerDay`、每日消耗 nutrition
+- [ ] 集成测试（读遥测 + 摆场景 + 断言，含**不振荡**断言）
 - [ ] 补做 `play_for` 的**反向对照**（用 `open_main_tab {mainTabId}` 重开 Menu 标签页，预期再次 0 tick）
 - [ ] 查清 Menu 标签页是谁打开的（`press_cancel` 已排除）
-- [ ] 测精确的**有效生长小时数**（晚上 Growth rate = 0%，影响预测器精度）
 - [ ] 补齐 CE 工具：`ce/set_traits`、`ce/set_age`、`ce/set_hediffs`、`ce/set_genes`
 - [ ] 打通 `Actions\Loaded Files For Mod`（现在只弹主菜单文字，疑似需要先选 mod）
 - [ ] 解决 `Add Hediff` 的效果确认方式（Health 面板有变化但文字匹配不命中）
