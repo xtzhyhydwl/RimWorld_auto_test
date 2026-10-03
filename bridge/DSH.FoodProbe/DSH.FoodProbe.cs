@@ -1076,6 +1076,292 @@ namespace DSH.FoodProbe
             return UnforbidAllImpl(onlyItems);
         }
 
+        // ── S4 住处域：建筑/蓝图的独立回读 ───────────────────────────
+        //
+        // ★ 这是 S4 验证的关键一环：**只信桥接自己读到的地图状态**，
+        //   绝不信 mod 自述的 "success"。判定原则见 skill 的"第一原则"第 2 条。
+
+        /// <summary>
+        /// 数地图上的建造物：蓝图（含门蓝图）/ 框架 / 已建成的墙门。
+        ///
+        /// ⚠ 元数据确证：`RimWorld.Blueprint_Door : RimWorld.Blueprint_Build` ——
+        ///   **子类**。所以 `t is Blueprint_Build` 一次就把墙的和门的都算上。
+        ///   但分开数才能验证"墙 23 + 门 1"这个具体账。
+        /// </summary>
+        public static object ListBuildingsImpl(int maxSamples)
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            int bpBuild = 0;          // 所有 Blueprint_Build（含 Blueprint_Door）
+            int bpDoor = 0;           // 其中是 Blueprint_Door 的
+            int frames = 0;           // 建造框架
+            int wallsBuilt = 0;       // 已建成的墙（ThingDefOf.Wall）
+            int doorsBuilt = 0;       // 已建成的门
+            int playerBuildings = 0;
+
+            var bpByBuildDef = new Dictionary<string, int>();
+            var bpByStuff = new Dictionary<string, int>();
+            var bpSamples = new List<object>();
+            var frameSamples = new List<object>();
+
+            var wallDef = DefDatabase<ThingDef>.GetNamedSilentFail("Wall");
+            var doorDef = DefDatabase<ThingDef>.GetNamedSilentFail("Door");
+
+            try
+            {
+                foreach (var t in map.listerThings.AllThings)
+                {
+                    try
+                    {
+                        if (t?.def == null) continue;
+
+                        var bp = t as Blueprint_Build;
+                        if (bp != null)
+                        {
+                            bpBuild++;
+                            if (bp is Blueprint_Door) bpDoor++;
+
+                            var buildDef = bp.def.entityDefToBuild != null
+                                ? bp.def.entityDefToBuild.defName : "(null)";
+                            if (!bpByBuildDef.ContainsKey(buildDef)) bpByBuildDef[buildDef] = 0;
+                            bpByBuildDef[buildDef]++;
+
+                            // ⚠ Verse.Thing.stuff 是 protected —— 读公开的 Thing.Stuff（实测 CS1061 踩过）
+                            string stuffName = bp.Stuff != null ? bp.Stuff.defName : "(无)";
+                            if (!bpByStuff.ContainsKey(stuffName)) bpByStuff[stuffName] = 0;
+                            bpByStuff[stuffName]++;
+
+                            if (bpSamples.Count < Math.Max(maxSamples, 8))
+                            {
+                                bpSamples.Add(new
+                                {
+                                    x = bp.Position.x, z = bp.Position.z,
+                                    blueprintDef = bp.def.defName,
+                                    buildsDef = buildDef,
+                                    stuff = stuffName,
+                                    isDoorBlueprint = bp is Blueprint_Door,
+                                    faction = bp.Faction != null ? bp.Faction.Name : null,
+                                });
+                            }
+                            continue;
+                        }
+
+                        if (t is Frame)
+                        {
+                            frames++;
+                            if (frameSamples.Count < 6)
+                            {
+                                frameSamples.Add(new
+                                {
+                                    x = t.Position.x, z = t.Position.z,
+                                    def = t.def.defName,
+                                    stuff = t.Stuff != null ? t.Stuff.defName : null,
+                                });
+                            }
+                            continue;
+                        }
+
+                        if (wallDef != null && t.def == wallDef) wallsBuilt++;
+                        if (doorDef != null && t.def == doorDef) doorsBuilt++;
+                        if (t.def.category == ThingCategory.Building
+                            && t.Faction == Faction.OfPlayer) playerBuildings++;
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message, bpBuild, frames, wallsBuilt, doorsBuilt };
+            }
+
+            return new
+            {
+                success = true,
+                // ★ 核心数字
+                blueprintBuild_total = bpBuild,          // 墙 + 门 的蓝图（门是子类）
+                blueprintDoor = bpDoor,                  // 其中门蓝图
+                blueprintWall = bpBuild - bpDoor,        // 墙蓝图 = 总数 - 门
+                frames,
+                wallsBuilt,
+                doorsBuilt,
+                playerBuildings,
+                byBuildDef = bpByBuildDef,
+                byStuff = bpByStuff,
+                blueprintSamples = bpSamples,
+                frameSamples,
+                note = "★ 判定：blueprintBuild_total>0 才说明**地图上真的出现了蓝图**。"
+                     + "只看 mod 返回的 success 不算数。"
+                     + "Blueprint_Door 是 Blueprint_Build 的子类，所以 blueprintBuild_total 已含门，"
+                     + "blueprintWall = total - blueprintDoor。",
+            };
+        }
+
+        [Tool("foodprobe/list_buildings",
+            Description = "★S4：数地图上的建造物（蓝图/门蓝图/框架/已建成墙门）+ 材质与位置。只读。")]
+        public object ListBuildings(
+            [ToolParameter(Description = "采样条数，默认 8")] int maxSamples = 8)
+        {
+            return ListBuildingsImpl(maxSamples);
+        }
+
+        /// <summary>
+        /// **地板那条路的取证工具**（只在测试时间避不开时才用）。
+        ///
+        /// 步骤：选格子 → `CanDesignateCell`（= `GenConstruct.CanPlaceBlueprintAt`）→
+        /// `DesignateSingleCell` → 回读地形。**看回读结果是不是"地形直接变了、但没有蓝图"**。
+        /// </summary>
+        public static object FloorPathImpl(string terrainDefName, int count)
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            var terrain = DefDatabase<TerrainDef>.GetNamedSilentFail(terrainDefName);
+            if (terrain == null)
+                return new { success = false, message = "找不到 TerrainDef: " + terrainDefName };
+
+            // 这个 TerrainDef 有没有"蓝图形态"？—— 这是判定"地板能不能走放蓝图那条路"的关键
+            var blueprintDef = terrain.blueprintDef;
+            var frameDef = terrain.frameDef;
+            int areaBefore = 0, areaAfter = 0;
+
+            // 找一个还没铺该地形的空地采样
+            var targets = new List<IntVec3>();
+            try
+            {
+                foreach (var c in CellRect.WholeMap(map).Cells)
+                {
+                    if (c.GetTerrain(map) == terrain) { areaBefore++; continue; }
+                }
+                // 从地图中心往外找 count 格可行走、无阻碍、还没铺该地形的
+                var center = map.Center;
+                int r = 0;
+                while (targets.Count < Math.Max(count, 1) && r < 60)
+                {
+                    foreach (var c in GenRadial.RadialCellsAround(center, r, true))
+                    {
+                        if (targets.Count >= Math.Max(count, 1)) break;
+                        if (!c.InBounds(map)) continue;
+                        if (c.GetTerrain(map) == terrain) continue;
+                        if (!c.Walkable(map)) continue;
+                        if (c.GetThingList(map).Count > 0) continue;
+                        targets.Add(c);
+                    }
+                    r++;
+                }
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = "找目标格失败：" + e.Message };
+            }
+
+            if (targets.Count == 0)
+                return new { success = false, message = "找不到可铺的目标格", areaBefore };
+
+            int designateAccepted = 0, designateRejected = 0, bpDelta = 0, frameDelta = 0;
+            var rejected = new List<string>();
+            var beforeTerrain = new List<string>();
+
+            int bpBefore = 0, frameBefore = 0;
+            foreach (var t in map.listerThings.AllThings)
+            {
+                if (t is Blueprint_Build) bpBefore++;
+                else if (t is Frame) frameBefore++;
+            }
+
+            try
+            {
+                var des = new Designator_Build(terrain);
+                foreach (var c in targets)
+                {
+                    // ⚠ 仍然"先查再放"
+                    var can = des.CanDesignateCell(c);
+                    if (!can.Accepted)
+                    {
+                        designateRejected++;
+                        if (rejected.Count < 6) rejected.Add($"({c.x},{c.z}) {can.Reason}");
+                        continue;
+                    }
+                    beforeTerrain.Add($"{c.x},{c.z}=" + c.GetTerrain(map).defName);
+                    des.DesignateSingleCell(c);
+                    designateAccepted++;
+                }
+            }
+            catch (Exception e)
+            {
+                return new
+                {
+                    success = false,
+                    message = "DesignateSingleCell 抛异常：" + e.GetType().Name + " " + e.Message,
+                    blueprintDef = blueprintDef?.defName,
+                    frameDef = frameDef?.defName,
+                    designateAccepted, designateRejected,
+                };
+            }
+
+            // ★ 回读
+            int nowTerrain = 0;
+            foreach (var c in targets)
+            {
+                try { if (c.GetTerrain(map) == terrain) nowTerrain++; } catch { }
+            }
+            foreach (var c in CellRect.WholeMap(map).Cells)
+            {
+                try { if (c.GetTerrain(map) == terrain) areaAfter++; } catch { }
+            }
+            foreach (var t in map.listerThings.AllThings)
+            {
+                if (t is Blueprint_Build) bpDelta++;
+                else if (t is Frame) frameDelta++;
+            }
+            bpDelta -= bpBefore;
+            frameDelta -= frameBefore;
+
+            bool instantTerrain = nowTerrain > 0;
+            bool madeBlueprint = bpDelta > 0;
+
+            return new
+            {
+                success = true,
+                terrainDef = terrain.defName,
+                // ★ 这两条是元数据层面的答案
+                terrain_blueprintDef = blueprintDef != null ? blueprintDef.defName : null,
+                terrain_frameDef = frameDef != null ? frameDef.defName : null,
+                costStuffCount = terrain.costStuffCount,
+                hasBlueprintForm = blueprintDef != null,
+
+                targetsFound = targets.Count,
+                designateAccepted,
+                designateRejected,
+                rejectedReasons = rejected,
+                beforeTerrain,
+                terrainNowOnTargets = nowTerrain,
+                terrainAreaBefore = areaBefore,
+                terrainAreaAfter = areaAfter,
+                blueprintDelta = bpDelta,
+                frameDelta,
+
+                verdict = instantTerrain && !madeBlueprint
+                    ? "★ 确证：Designator_Build(TerrainDef) **直接改地形** —— 地形立刻变了，"
+                      + "但**没有产生任何蓝图**。所以地板没有'放蓝图'这条游戏路径。"
+                    : madeBlueprint
+                        ? "意外：居然产生了蓝图（请把这个结果记进文档）"
+                        : "地形没有变化（designator 没生效或全被拒）",
+                note = "这条路会**免费、瞬间**改地形（不走 Frame、不耗料、不需要小人）——"
+                     + "默认不在 mod 里启用，只作为取证。",
+            };
+        }
+
+        [Tool("foodprobe/floor_path",
+            Description = "★S4 取证：用 Designator_Build(TerrainDef) 铺 N 格地板，回读地形与蓝图数，"
+                        + "证明地板到底是'放蓝图'还是'直接改地形'。会真的改地图。")]
+        public object FloorPath(
+            [ToolParameter(Description = "地形 defName，默认 WoodPlankFloor")] string terrainDefName = "WoodPlankFloor",
+            [ToolParameter(Description = "铺几格，默认 4")] int count = 4)
+        {
+            return FloorPathImpl(terrainDefName, count);
+        }
+
         // ── mod 内部的一次性初始化钩子 ─────────────────────────────────
         //
         // 探针自己也能 `unforbid_all`，但**测试要走 mod 自己的代码路径** ——
@@ -1215,6 +1501,81 @@ namespace DSH.FoodProbe
             catch (Exception e)
             {
                 return new { success = false, message = e.Message };
+            }
+        }
+
+        // ── S4 住处域：跑 mod 自己的代码路径 ──────────────────────────
+        //
+        // 为什么必须走 mod 的静态钩子而不是探针自己放蓝图：
+        //   否则测的是**探针**，不是 mod。S1/S3 都是这个规矩。
+
+        [Tool("foodprobe/run_shelter",
+            Description = "★S4：让 mod 立刻跑一次住处域（选址→选材→放蓝图→回读），返回一行结果。")]
+        public object RunShelter()
+        {
+            return CallModStatic("RunShelterNow", "run_shelter");
+        }
+
+        [Tool("foodprobe/inspect_shelter",
+            Description = "★S4：只读诊断 —— 住处域这一轮**会**怎么盖（户型/材质/需要多少料），绝不动地图。")]
+        public object InspectShelter()
+        {
+            return CallModStatic("InspectShelterNow", "inspect_shelter");
+        }
+
+        [Tool("foodprobe/set_shelter_floor_path",
+            Description = "★S4 取证：打开/关闭 mod 里'用 designator 铺地板'这条实验路径。mode=on/off。")]
+        public object SetShelterFloorPath(
+            [ToolParameter(Description = "on 或 off，默认 off")] string mode = "off")
+        {
+            return CallModStatic("SetShelterFloorPath", "set_shelter_floor_path", mode);
+        }
+
+        [Tool("foodprobe/reset_shelter_days",
+            Description = "★S4：清掉域协调器的按天去重，让住处域今天可以再跑一次（测试用）。")]
+        public object ResetShelterDays()
+        {
+            return CallModStatic("ResetShelterFlags", "reset_shelter_days");
+        }
+
+        /// <summary>
+        /// 调 mod 里 `FoodControlGameComponent` 上的一个 **public static** 方法（0 或 1 个字符串参数）。
+        ///
+        /// 抽出来是因为 S4 一口气多了四个钩子，每个都抄一遍 FindMod/FindType/CallStatic 太啰嗦。
+        /// ⚠ 失败时必须把"现有静态方法列表"回出来 —— 否则排查只能靠猜（这是 S1 留下的一条经验）。
+        /// </summary>
+        private object CallModStatic(string method, string toolName, params object[] args)
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+
+            var comp = FindType(asm, "FoodControlGameComponent");
+            if (comp == null) return new { success = false, message = "找不到 FoodControlGameComponent" };
+
+            try
+            {
+                var r = CallStatic(comp, method, args);
+                if (r == null)
+                {
+                    return new
+                    {
+                        success = false,
+                        message = toolName + "：没有 " + method + "() 或返回 null。现有静态方法："
+                            + string.Join(", ", comp.GetMethods(ANY_STATIC).Select(m => m.Name).Distinct().ToArray()),
+                    };
+                }
+                return new { success = true, result = r.ToString() };
+            }
+            catch (Exception e)
+            {
+                return new
+                {
+                    success = false,
+                    message = "调用 " + method + " 抛异常",
+                    exception = e.GetType().FullName,
+                    detail = e.Message,
+                    stack = e.StackTrace,
+                };
             }
         }
 

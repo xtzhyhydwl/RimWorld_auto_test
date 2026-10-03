@@ -223,8 +223,16 @@ internal static class IlDump
                     }
                 case OperandType.ShortInlineBrTarget:
                     {
-                        sbyte d = (sbyte)il[i]; i += 1;
-                        operand = "IL_" + (i + d).ToString("X4"); break;
+                        // ⚠ 这里曾经有个**off-by-one**：先 i+=1 读操作数，再算 i+d，
+                        //   而 CLI 的定义是「目标 = 操作数**之后**那条指令的偏移 + d」，
+                        //   且 `i` 恰好就等于那个偏移 —— 所以**读完后要把 i 减回去**。
+                        //   不修的话所有条件跳转都会指向"操作数结束后的下一条"，
+                        //   表现为 `brtrue.s` 被打印成 `brfalse.s` 的下一条
+                        //   （我们差点因此把地板路径的 if 结构读反，编出一套错的结论）。
+                        sbyte d = (sbyte)il[i];
+                        operand = "IL_" + (i + d).ToString("X4");
+                        i += 1;
+                        break;
                     }
                 case OperandType.InlineSwitch:
                     {

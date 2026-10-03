@@ -144,5 +144,142 @@ public static class CompileProbe
                      cur, size, def, stage, readBack, blocking, z)) { }
     }
 
+    /// <summary>
+    /// **S4（住处域）用到的每一个游戏 API**。
+    ///
+    /// 这一节是 S4 部署前最值钱的东西：部署要重启游戏（约 12 秒 + 重开殖民地），
+    /// 编不过就白费一轮。而 S4 的路子里**最不确定的是地板那条**（`TerrainDef` 不是 `ThingDef`），
+    /// 所以这里把两条路都写成真代码编一遍。
+    ///
+    /// ⚠ 这个方法是**上一轮实测抓出来的错误**的活档案，别再改回去：
+    ///   - `Verse.Thing.stuff` 是 **protected** → 只能读公开的 `Thing.Stuff`（写 `bp.stuff` 是 CS1061）
+    ///   - `TerrainDef` **没有** `buildingDef` 字段（写 `floor.buildingDef` 也是 CS1061）
+    ///   - `DesignationManager.DesignationAt` **必须**带 `DesignationDef`（少参数是 CS7036）；
+    ///     要"任意标定"得用 `HasMapDesignationAt(IntVec3)`
+    /// </summary>
+    internal static void TouchShelterApis(Map map)
+    {
+        ThingDef stuff = DefDatabase<ThingDef>.GetNamedSilentFail("WoodLog");
+
+        // ---- 放蓝图（S4 的核心）：先查再放 ----
+        AcceptanceReport report = GenConstruct.CanPlaceBlueprintAt(
+            ThingDefOf.Wall, new IntVec3(10, 0, 10), Rot4.North, map,
+            true, null, null, stuff, false, false, false);
+        if (report.Accepted && report.Reason != null) { }
+
+        bool canBuildOn = GenConstruct.CanBuildOnTerrain(
+            ThingDefOf.Wall, new IntVec3(10, 0, 10), map, Rot4.North, null, stuff);
+        if (canBuildOn) { }
+
+        Blueprint_Build bp = GenConstruct.PlaceBlueprintForBuild(
+            ThingDefOf.Wall, new IntVec3(10, 0, 10), map, Rot4.North,
+            Faction.OfPlayer, stuff, null, null, true);
+        if (bp != null)
+        {
+            ThingDef bpDef = bp.def;
+            ThingDef builds = bp.def.entityDefToBuild as ThingDef;
+            ThingDef bpStuff = bp.Stuff;                 // ⚠ 公开属性，不是 protected 的 stuff 字段
+            if (bpDef != null && builds != null && bpStuff != null) { }
+        }
+        bool isDoorBp = bp is Blueprint_Door;            // Blueprint_Door : Blueprint_Build
+        if (isDoorBp) { }
+
+        // ---- 三个 Def 必须在 ----
+        if (ThingDefOf.Wall != null && ThingDefOf.Door != null && ThingDefOf.Stool != null) { }
+
+        // ---- 造建造价 / 允许的 stuff 类别 ----
+        int wallCost = ThingDefOf.Wall.costStuffCount;
+        int doorCost = ThingDefOf.Door.costStuffCount;
+        List<StuffCategoryDef> wallCats = ThingDefOf.Wall.stuffCategories;
+        if (wallCost >= 0 && doorCost >= 0 && wallCats != null)
+        {
+            bool hasWoody = wallCats.Contains(StuffCategoryDefOf.Woody);
+            if (hasWoody) { }
+        }
+
+        // ---- ★ 地板 = TerrainDef（任务书里"没完全确证"的那条）----
+        TerrainDef floor = TerrainDefOf.WoodPlankFloor;
+        TerrainDef concrete = TerrainDefOf.Concrete;
+        TerrainDef tile = TerrainDefOf.PavedTile;
+        if (floor == null || concrete == null || tile == null) return;
+
+        ThingDef floorBlueprint = floor.blueprintDef;    // 有 ⇒ 地板也有蓝图形态
+        ThingDef floorFrame = floor.frameDef;
+        int floorCost = floor.costStuffCount;
+        if (floorBlueprint != null || floorFrame != null || floorCost >= 0) { }
+        // ⚠ 注意：这里**没有** floor.buildingDef —— 那个成员不存在
+
+        // 通用 designator 入口（能吃 TerrainDef）
+        var des = new Designator_Build(floor);
+        des.SetStuffDef(stuff);
+        AcceptanceReport canDes = des.CanDesignateCell(new IntVec3(10, 0, 12));
+        if (canDes.Accepted && canDes.Reason != null) { }
+        des.ResetStuffToDefault();
+        ThingDef desStuff = des.StuffDef;                // Designator_Place.StuffDef（public get）
+        if (desStuff != null) { }
+        // ⚠ 这里刻意**不**调 DesignateSingleCell：探针文件不许有副作用。
+        //   实机取证走 foodprobe/floor_path。
+
+        // ---- 可盖性（喂 Core 的 BuildabilityMap）----
+        IntVec3 c = new IntVec3(10, 0, 10);
+        bool walkable = c.Walkable(map);
+        int pathCost = c.GetTerrain(map).pathCost;
+        Building edifice = c.GetEdifice(map);
+        TerrainAffordanceDef afford = ThingUtility.GetTerrainAffordanceNeed(ThingDefOf.Wall, stuff);
+        if (walkable && pathCost >= 0 && afford != null && edifice != null) { }
+
+        List<Thing> cellThings = c.GetThingList(map);
+        if (cellThings != null)
+        {
+            for (int i = 0; i < cellThings.Count; i++)
+            {
+                Thing t = cellThings[i];
+                if (t == null || t.def == null) continue;
+                bool b = t.def.category == ThingCategory.Building
+                      || t is Blueprint || t is Frame || t is Plant;
+                if (b) { }
+            }
+        }
+        bool designated = map.designationManager.HasMapDesignationAt(c);
+        if (designated) { }
+
+        // ---- 回读：数蓝图 / 已建成的墙门（不信 mod 自述）----
+        int bpCount = 0, doorBpCount = 0, frames = 0, walls = 0, doors = 0;
+        foreach (Thing t in map.listerThings.AllThings)
+        {
+            Blueprint_Build b = t as Blueprint_Build;    // 含 Blueprint_Door（子类）
+            if (b != null)
+            {
+                bpCount++;
+                if (b is Blueprint_Door) doorBpCount++;
+            }
+            if (t is Frame) frames++;
+            if (t.def == ThingDefOf.Wall) walls++;
+            if (t.def == ThingDefOf.Door) doors++;
+        }
+        if (bpCount < 0 || doorBpCount < 0 || frames < 0 || walls < 0 || doors < 0) { }
+
+        // 按 def 索引的桶（比遍历 AllThings 便宜）
+        List<Thing> wallThings = map.listerThings.ThingsOfDef(ThingDefOf.Wall);
+        List<Thing> bpGroup = map.listerThings.ThingsInGroup(ThingRequestGroup.Blueprint);
+        List<Thing> frameGroup = map.listerThings.ThingsInGroup(ThingRequestGroup.BuildingFrame);
+        if (wallThings != null && bpGroup != null && frameGroup != null) { }
+
+        // 地形回读（地板没有 Thing —— 只能读地形）
+        TerrainDef nowTerrain = new IntVec3(10, 0, 10).GetTerrain(map);
+        if (nowTerrain == TerrainDefOf.WoodPlankFloor) { }
+
+        // 径向扫描（地板取证工具用）
+        foreach (IntVec3 rc in GenRadial.RadialCellsAround(map.Center, 5, true))
+        {
+            if (!rc.InBounds(map)) continue;
+        }
+        foreach (IntVec3 mc in CellRect.WholeMap(map).Cells)
+        {
+            if (mc.GetTerrain(map) == null) continue;
+            break;
+        }
+    }
+
     private static bool argsNoop(params object[] xs) { return xs == null; }
 }

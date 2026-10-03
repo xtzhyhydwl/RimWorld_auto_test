@@ -215,6 +215,91 @@ namespace FoodControl.Game
         }
 
         // ------------------------------------------------------------------
+        // 可盖性（S4 住处域用）
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// **地图 → Core 的 `BuildabilityMap`**（S4 住处域的输入）。
+        ///
+        /// 和 `PassabilityMap`（可种性/肥力）的区别：这里关心的是
+        /// **"能不能盖房子"** —— 地表能不能承重、上面有没有挡路的东西。
+        ///
+        /// `MoveCost` 直接复用 <see cref="MoveCostAt"/>（和食物域同一套），
+        /// 因为选址评分只关心"离基地多远"，两边用同一个代价函数才能比较。
+        ///
+        /// ⚠ `Buildable` 这里用的是**保守近似**（地表可站 + 格上无植物/建筑/蓝图/框架）。
+        ///   真正的权威判据是游戏自己的 `GenConstruct.CanPlaceBlueprintAt`，
+        ///   所以放蓝图之前**每一个格子都要再查一次**（见 `ShelterDomain`）。
+        ///   这里只负责把"明显不可能的格"筛掉，省掉大量昂贵的游戏判定。
+        /// </summary>
+        public static BuildabilityMap BuildBuildabilityMap(Map map)
+        {
+            if (map == null) return null;
+
+            int w = map.Size.x;
+            int h = map.Size.z;
+            if (w <= 0 || h <= 0) return null;
+
+            var grid = new BuildabilityMap
+            {
+                Width = w,
+                Height = h,
+                Buildable = new bool[w * h],
+                MoveCost = new double[w * h],
+            };
+
+            for (int z = 0; z < h; z++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    int i = z * w + x;
+                    var c = new IntVec3(x, 0, z);
+
+                    grid.MoveCost[i] = MoveCostAt(c, map);      // 与食物域同一套代价
+                    grid.Buildable[i] = IsBuildableAt(c, map);
+                }
+            }
+
+            return grid;
+        }
+
+        /// <summary>
+        /// 这一格"看起来能不能盖"（保守近似，**不是权威判据**）。
+        ///
+        /// 判据（按代价从低到高）：
+        ///   ① 在界内、可行走（不可行走 = 山体/深水/已有建筑占着）
+        ///   ② 格上没有植物 / 建筑 / 蓝图 / 框架
+        ///
+        /// ⚠ 刻意**不**在这里调 `CanPlaceBlueprintAt`：那是 250×250 = 6.25 万次重判定，
+        ///   会把一次决策卡死。放蓝图时再逐格查。
+        /// </summary>
+        public static bool IsBuildableAt(IntVec3 c, Map map)
+        {
+            try
+            {
+                if (map == null || !c.InBounds(map)) return false;
+                if (!c.Walkable(map)) return false;
+
+                List<Thing> things = c.GetThingList(map);
+                for (int i = 0; i < things.Count; i++)
+                {
+                    Thing t = things[i];
+                    if (t == null || t.def == null) continue;
+                    if (t.def.category == ThingCategory.Building) return false;
+                    if (t is Blueprint) return false;
+                    if (t is Frame) return false;
+                    if (t is Plant) return false;
+                }
+
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        // ------------------------------------------------------------------
         // 可种性 / 通行代价 / 肥力
         // ------------------------------------------------------------------
 
@@ -318,8 +403,31 @@ namespace FoodControl.Game
         ///
         /// ⚠ Home 区这一条用 `CenterIndex = -1` + 填 Cells：让 **Core** 自己求质心
         ///   （`SiteSelection.CentroidOf`），保证离线测试和线上跑的是同一份实现。
+        ///
+        /// **internal** 是给 S4 住处域复用（`BuildabilityMap` 同样有 `Index`/`InBounds`）。
         /// </summary>
-        private static List<CenterCandidate> BuildCenterCandidates(Map map, PassabilityMap grid)
+        internal static List<CenterCandidate> BuildCenterCandidates(Map map, PassabilityMap grid)
+        {
+            // 只用到 InBounds/Index/Width/Height 四个成员，两种栅格的签名一致
+            // → 用一个转换器复用同一份实现（不要抄两遍）
+            return BuildCenterCandidatesCore(
+                map, grid.Width, grid.Height,
+                (x, z) => grid.InBounds(x, z),
+                (x, z) => grid.Index(x, z));
+        }
+
+        /// <summary>住处域版本（栅格是 `BuildabilityMap`）。</summary>
+        internal static List<CenterCandidate> BuildCenterCandidates(Map map, BuildabilityMap grid)
+        {
+            return BuildCenterCandidatesCore(
+                map, grid.Width, grid.Height,
+                (x, z) => grid.InBounds(x, z),
+                (x, z) => grid.Index(x, z));
+        }
+
+        private static List<CenterCandidate> BuildCenterCandidatesCore(
+            Map map, int gridW, int gridH,
+            Func<int, int, bool> inBounds, Func<int, int, int> index)
         {
             var list = new List<CenterCandidate>();
 
@@ -338,7 +446,7 @@ namespace FoodControl.Game
                     foreach (IntVec3 c in home.ActiveCells)
                     {
                         if (!c.InBounds(map)) continue;
-                        homeCand.Cells.Add(grid.Index(c.x, c.z));
+                        homeCand.Cells.Add(index(c.x, c.z));
                     }
                     if (homeCand.Cells.Count > 0) list.Add(homeCand);
                 }
@@ -366,7 +474,7 @@ namespace FoodControl.Game
                         {
                             IntVec3 c = sp.cells[k];
                             if (!c.InBounds(map)) continue;
-                            cand.Cells.Add(grid.Index(c.x, c.z));
+                            cand.Cells.Add(index(c.x, c.z));
                             sx += c.x;
                             sz += c.z;
                         }
@@ -375,12 +483,12 @@ namespace FoodControl.Game
                         // Core 要求贮藏区候选必须带 CenterIndex（否则被跳过）→ 这里自己算质心
                         int cx = (int)Math.Round((double)sx / cand.Cells.Count);
                         int cz = (int)Math.Round((double)sz / cand.Cells.Count);
-                        if (!grid.InBounds(cx, cz))
+                        if (!inBounds(cx, cz))
                         {
-                            cx = Math.Min(Math.Max(cx, 0), grid.Width - 1);
-                            cz = Math.Min(Math.Max(cz, 0), grid.Height - 1);
+                            cx = Math.Min(Math.Max(cx, 0), Math.Max(0, gridW - 1));
+                            cz = Math.Min(Math.Max(cz, 0), Math.Max(0, gridH - 1));
                         }
-                        cand.CenterIndex = grid.Index(cx, cz);
+                        cand.CenterIndex = index(cx, cz);
                         list.Add(cand);
                     }
                 }

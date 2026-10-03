@@ -300,25 +300,7 @@ namespace FoodControl.Game
 
                 if (_stockpileForManualRun == null) _stockpileForManualRun = new StockpileDomain();
 
-                DomainContext ctx;
-                if (Instance != null)
-                {
-                    ctx = Instance.BuildContext(map, CalendarDay(map), GenLocalDate.HourOfDay(map));
-                }
-                else
-                {
-                    ctx = new DomainContext
-                    {
-                        Map = map,
-                        Day = CalendarDay(map),
-                        Hour = GenLocalDate.HourOfDay(map),
-                        Policy = new PolicyConfig(),
-                        Calibration = new Calibration(),
-                        SiteOptions = new SiteSelectionOptions(),
-                        CropDef = ResolveCropDef("Plant_Rice"),
-                    };
-                }
-
+                DomainContext ctx = BuildManualContext(map);
                 DomainCycleResult r = _stockpileForManualRun.RunCycle(ctx);
                 return r == null ? "返回 null" : r.Summary;
             }
@@ -375,6 +357,116 @@ namespace FoodControl.Game
             {
                 return "{\"error\":\"" + e.Message.Replace("\"", "'") + "\"}";
             }
+        }
+
+        // ------------------------------------------------------------------
+        // S4 住处域的测试钩子
+        // ------------------------------------------------------------------
+
+        /// <summary>给测试钩子复用的单例（真实调度走协调器各自 new）</summary>
+        private static ShelterDomain _shelterForManualRun;
+
+        /// <summary>
+        /// **静态测试钩子**：立刻跑一次住处域（**忽略"每 N 天"的调度**）。
+        ///
+        /// 和 `RunStockpileNow` 同款：不这么写的话，测试要推进到
+        /// "第 3 的倍数的游戏日"才能看到住处域动手，慢且不好定位。
+        /// </summary>
+        public static string RunShelterNow()
+        {
+            try
+            {
+                Map map = Verse.Find.CurrentMap;
+                if (map == null) return "没有当前地图";
+
+                if (_shelterForManualRun == null) _shelterForManualRun = new ShelterDomain();
+
+                DomainContext ctx = BuildManualContext(map);
+                DomainCycleResult r = _shelterForManualRun.RunCycle(ctx);
+                return r == null ? "返回 null" : r.Summary;
+            }
+            catch (Exception e)
+            {
+                try { Log.Error("[FoodControl] RunShelterNow 异常：" + e); } catch (Exception) { }
+                return "RunShelterNow 异常：" + e.Message;
+            }
+        }
+
+        /// <summary>
+        /// **静态测试钩子（只读）**：把住处域"这一轮会怎么盖"算出来，**绝不动地图**。
+        ///
+        /// 为什么需要它：真放蓝图是不可逆的（地图上会多 24 个蓝图）。
+        /// 测试可以先用它确认户型/材质合理，再决定要不要真放。
+        /// </summary>
+        public static string InspectShelterNow()
+        {
+            try
+            {
+                Map map = Verse.Find.CurrentMap;
+                if (map == null) return "没有当前地图";
+                return ShelterDomain.InspectNow(map);
+            }
+            catch (Exception e)
+            {
+                return "InspectShelterNow 异常：" + e.Message;
+            }
+        }
+
+        /// <summary>
+        /// **静态测试钩子（取证用）**：打开/关闭"用 designator 铺地板"这条实验路径。
+        ///
+        /// 参数是 1 个字符串："on" / "off"。
+        /// 打开后**下一次**住处域跑的时候会真的用 `Designator_Build(TerrainDef)` 铺地板，
+        /// 用来在游戏里证明「这条路是直接改地形，不是放蓝图」。
+        /// </summary>
+        public static string SetShelterFloorPath(string mode)
+        {
+            try
+            {
+                bool on = !string.IsNullOrEmpty(mode)
+                    && (mode == "on" || mode == "true" || mode == "1");
+                ShelterDomain.BuildFloor = on;
+                ShelterDomain.AllowInstantTerrainFloor = on;
+                return "地板路径 BuildFloor=" + ShelterDomain.BuildFloor
+                    + " AllowInstantTerrainFloor=" + ShelterDomain.AllowInstantTerrainFloor;
+            }
+            catch (Exception e)
+            {
+                return "SetShelterFloorPath 异常：" + e.Message;
+            }
+        }
+
+        /// <summary>**静态测试钩子**：把住处域的"已经盖过"状态清掉（配合按天去重一起清）。</summary>
+        public static string ResetShelterFlags()
+        {
+            try
+            {
+                NeedCoordinator.ResetDayTracking();
+                return "已清空按天去重记录（住处域今天可以再跑）";
+            }
+            catch (Exception e)
+            {
+                return "ResetShelterFlags 异常：" + e.Message;
+            }
+        }
+
+        /// <summary>组装手动触发的上下文（`Instance` 没有时的兜底）。</summary>
+        private static DomainContext BuildManualContext(Map map)
+        {
+            if (Instance != null)
+            {
+                return Instance.BuildContext(map, CalendarDay(map), GenLocalDate.HourOfDay(map));
+            }
+            return new DomainContext
+            {
+                Map = map,
+                Day = CalendarDay(map),
+                Hour = GenLocalDate.HourOfDay(map),
+                Policy = new PolicyConfig(),
+                Calibration = new Calibration(),
+                SiteOptions = new SiteSelectionOptions(),
+                CropDef = ResolveCropDef("Plant_Rice"),
+            };
         }
 
         /// <summary>**静态测试钩子**：重置"今天已做过初始化"标记，让下次 tick 重跑。</summary>
