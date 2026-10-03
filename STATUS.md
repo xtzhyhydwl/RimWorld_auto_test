@@ -14,8 +14,28 @@
 | S1 | 开局允许所有被禁取物资 | ✅ **完成** 14/14（`runs/s1-unforbid/report.md`） |
 | S2 | 抽 `INeedDomain` 框架（只搬食物，零行为变化） | ✅ **完成**（+ 修掉自己引入的去重 bug，8/8：`runs/s2b-dedup/report.md`） |
 | S3 | 储藏区 domain（复用 `SiteSelection`） | ✅ **完成** 13/13（`runs/s3-stockpile/report.md`） |
-| S4 | 住处 domain（方块房：选址 → 选建材 → 放蓝图） | ⬜ 下一步 |
+| S4 | 住处 domain（方块房：选址 → 选建材 → 放蓝图） | 🔄 Core 完成（98/98）；Game 层实现中 |
 | S5 | 5 天生存验收（3 人全有饭吃 + 心情不崩） | ⬜ |
+
+### S4 已确证的 API（元数据确证）
+
+```csharp
+// 放建筑蓝图（核心）
+GenConstruct.PlaceBlueprintForBuild(BuildableDef, IntVec3, Map, Rot4, Faction, ThingDef stuff, ...)
+GenConstruct.CanPlaceBlueprintAt(...) -> AcceptanceReport    // 放之前先查合法性
+GenConstruct.CanBuildOnTerrain(...) -> bool                  // 地表能否承重
+ThingDefOf.Wall / Door / Bed / Stool                         // 都存在
+TerrainDefOf.WoodPlankFloor / Concrete / PavedTile           // 地板
+```
+
+`stuff` 参数就是"用什么材质"的入口，接上 S1 里 `ColonySetup.CountBuildingMaterials()`
+数出来的建材（实测 `WoodLog 300 / Steel 1170`）。
+
+⚠ **地板那条路径未完全确证**：地板是 `TerrainDef`（不是 `ThingDef`），
+通用入口是 `Designator_Build(BuildableDef)` + `SetStuffDef` + `DesignateSingleCell`，
+但它可能依赖 `Find.DesignatorManager` 里选中的 designator。
+子代理正在验证；**若走不通就只做墙和门**（用户说的"方块房"最核心就是这两样），
+不硬凑。
 
 ### ★ S2 期间自己引入又自己抓到的一个 bug（留档）
 
