@@ -168,19 +168,25 @@ namespace FoodControl.Game
                 // （比如"允许所有物资"），那类事没理由等到 8 点 ——
                 // 而且新殖民地往往是半夜开局的。
                 //
-                // ⚠ 域之间的异常由 `NeedCoordinator` 逐个隔离，这里再包一层兜底。
+                // ⚠ 先用 `AnyDomainDue` 做**廉价早退**：这个方法每 64 tick 就会被调一次，
+                //   而真正跑一遍要建上下文（解析 Def）+ 遍历域。大部分时候答案都是"没事可做"。
+                //   （曾经因为漏了按天去重，导致一天跑 900 次决策 —— 见 `NeedCoordinator` 的注释）
                 int hour = GenLocalDate.HourOfDay(map);
                 try
                 {
-                    DomainContext ctx = BuildContext(map, day, hour);
-                    List<DomainCycleResult> results = NeedCoordinator.RunAllDomains(ctx);
-                    string summary = NeedCoordinator.Summarize(results);
-                    // 只在真的有域动手了才打日志，避免每天刷一行废话
-                    bool anyWork = false;
-                    for (int i = 0; i < results.Count; i++) if (results[i].DidWork) anyWork = true;
-                    if (anyWork)
+                    if (NeedCoordinator.AnyDomainDue(day, hour))
                     {
-                        try { Log.Message("[FoodControl] " + summary); } catch (Exception) { }
+                        DomainContext ctx = BuildContext(map, day, hour);
+                        List<DomainCycleResult> results = NeedCoordinator.RunAllDomains(ctx);
+                        string summary = NeedCoordinator.Summarize(results);
+
+                        // 只在真的有域动手了才打日志，避免刷屏
+                        bool anyWork = false;
+                        for (int i = 0; i < results.Count; i++) if (results[i].DidWork) anyWork = true;
+                        if (anyWork)
+                        {
+                            try { Log.Message("[FoodControl] " + summary); } catch (Exception) { }
+                        }
                     }
                 }
                 catch (Exception e)

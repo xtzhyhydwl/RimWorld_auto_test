@@ -181,6 +181,38 @@ namespace FoodControl.Game
         }
 
         /// <summary>
+        /// **廉价的早退检查**：有没有任何域"今天该跑但还没跑"。
+        ///
+        /// 为什么要它：组件每 64 tick 就会调一次协调器，而完整跑一遍
+        /// `RunAllDomains` 要建上下文（含解析 Def）、遍历所有域。
+        /// 大部分时候答案都是"没事可做"，所以先用这个便宜的问题挡一下 ——
+        /// 它只做字典查找 + 几次时段比较，不碰游戏数据。
+        ///
+        /// ⚠ 语义上必须与 `RunAllDomains` 的判定**一致**，否则会出现
+        ///   "早退说没事、实际有事"（永远不跑）或反向（每 tick 都跑）。
+        /// </summary>
+        public static bool AnyDomainDue(int day, int hour)
+        {
+            for (int i = 0; i < _domains.Count; i++)
+            {
+                INeedDomain d = _domains[i];
+                if (LastRunDayOf(d.Id) == day) continue;          // 今天跑过了
+
+                // 时段敏感的域：这里要能安全调用（失败就当作"不跑"，不抛）
+                try
+                {
+                    var probe = new DomainContext { Day = day, Hour = hour };
+                    if (d.ShouldRunToday(probe)) return true;
+                }
+                catch (Exception)
+                {
+                    // 判断失败就当它今天不跑；真正的异常会在 RunAllDomains 里被记录
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
         /// **每个游戏日跑一次**：按优先级依次跑各域。
         /// 调用方（`FoodControlGameComponent`）负责判断"是不是新的一天"。
         /// </summary>
@@ -221,7 +253,26 @@ namespace FoodControl.Game
                         catch (Exception) { }
                     }
 
-                    // ── ② 域自己的节奏（今天要不要跑）──
+                    // ── ② 按天去重：今天已经跑过就不再跑 ──
+                    //
+                    // ⚠ 这一步**必须**存在，而且必须在 ShouldRunToday 之前。
+                    //   我重构时曾经把它删掉，只留了"执行后记账"，结果：
+                    //   白天的每一次协调器调用（每 64 tick 一次）都判定 ShouldRunToday=true
+                    //   → **一天跑了约 900 次决策**，日志被刷爆、CPU 白烧。
+                    //   实测证据（tick 间隔 64、内容完全相同）：
+                    //     [FoodControl] tick=154240 day=3(Spring) ... 动作=PlantCrop Plant_Rice ×41
+                    //     [FoodControl] tick=154304 day=3(Spring) ... 动作=PlantCrop Plant_Rice ×41
+                    //   → 去重与"时段"是**两件独立的事**，不能合并成一个判断。
+                    int lastRunDay = LastRunDayOf(domain.Id);
+                    if (lastRunDay == ctx.Day)
+                    {
+                        r.Ok = true;
+                        r.Summary = "今天已经跑过";
+                        results.Add(r);
+                        continue;
+                    }
+
+                    // ── ③ 域自己的节奏（今天这个时刻要不要跑）──
                     bool shouldRun;
                     try { shouldRun = domain.ShouldRunToday(ctx); }
                     catch (Exception e)
@@ -234,17 +285,18 @@ namespace FoodControl.Game
 
                     if (!shouldRun)
                     {
-                        // ⚠ **不要在这里标记"今天已完成"**。
-                        //   域的 `ShouldRunToday` 是**时段敏感**的（食物域要等到 8:00–19:00），
-                        //   如果这里就记下"今天跑过了"，那么凌晨第一次 tick 会把它标记掉，
-                        //   当天 8 点之后就再也不会跑了。踩过这个坑。
+                        // ⚠ 这里**不要**记 _lastRunDay：`ShouldRunToday` 是**时段敏感**的
+                        //   （食物域要等到 8:00–19:00）。如果在这里就记下"今天跑过了"，
+                        //   凌晨第一次 tick 会把当天标记掉，当天 8 点之后就再也不会跑了。
+                        //   → 只"暂不跑"，不记账；等时段满足时再去重那张表还是空的，于是会跑。
                         r.Ok = true;
                         r.Summary = "按自身节奏暂不跑（等条件满足）";
                         results.Add(r);
                         continue;
                     }
 
-                    // 到这一步说明"今天该跑的已经跑了"，记下来避免重复
+                    // 到这一步说明"决定要跑这一轮了"，先记账再跑：
+                    // 万一下面抛异常，今天也不会疯狂重试（异常本来就会被吞掉）。
                     _lastRunDay[domain.Id] = ctx.Day;
 
                     // ── ③ 跑闭环 ──

@@ -527,6 +527,121 @@ namespace DSH.FoodProbe
             };
         }
 
+        [Tool("foodprobe/domains",
+            Description = "读域协调器状态：注册了哪些域、每个域上次跑过哪天、当前游戏日/时段。只读。")]
+        public object Domains()
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            int day = 0, hour = 0;
+            try
+            {
+                day = GenLocalDate.Year(map) * 60 + GenLocalDate.DayOfYear(map);
+                hour = GenLocalDate.HourOfDay(map);
+            }
+            catch { }
+
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载", day, hour };
+
+            var coord = FindType(asm, "NeedCoordinator");
+            if (coord == null) return new { success = false, message = "找不到 NeedCoordinator", day, hour };
+
+            var domainInfos = new List<object>();
+            try
+            {
+                // 读静态属性 Domains（IList<INeedDomain>）
+                var prop = coord.GetProperty("Domains", ANY_STATIC);
+                var list = prop != null ? prop.GetValue(null, null) : null;
+                if (list is System.Collections.IEnumerable en)
+                {
+                    foreach (var d in en)
+                    {
+                        if (d == null) continue;
+                        var t = d.GetType();
+                        string id = null;
+                        try
+                        {
+                            var p = t.GetProperty("Id");
+                            if (p != null) id = (string)p.GetValue(d, null);
+                        }
+                        catch { }
+
+                        int lastDay = int.MinValue;
+                        if (id != null)
+                        {
+                            var m = coord.GetMethod("LastRunDayOf", ANY_STATIC);
+                            if (m != null)
+                            {
+                                try
+                                {
+                                    var v = m.Invoke(null, new object[] { id });
+                                    if (v is int) lastDay = (int)v;
+                                }
+                                catch { }
+                            }
+                        }
+
+                        domainInfos.Add(new
+                        {
+                            id,
+                            type = t.Name,
+                            lastRunDay = lastDay,
+                            ranToday = lastDay == day,
+                        });
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = "读域列表失败：" + e.Message, day, hour };
+            }
+
+            int totalCycles = 0;
+            try
+            {
+                var f = coord.GetField("TotalCycles", ANY_STATIC);
+                if (f != null) totalCycles = (int)f.GetValue(null);
+            }
+            catch { }
+
+            return new
+            {
+                success = true,
+                day,
+                hour,
+                totalCycles,
+                domainCount = domainInfos.Count,
+                domains = domainInfos,
+                note = "ranToday=true 表示这个域今天已经跑过。"
+                     + "如果同一天里 totalCycles 持续增长，说明按天去重坏了 —— "
+                     + "曾经因此一天跑 900 次决策。",
+            };
+        }
+
+        [Tool("foodprobe/reset_domain_days",
+            Description = "清掉域协调器的'按天去重'记录，让所有域今天可以再跑一次（测试用）。")]
+        public object ResetDomainDays()
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+            var coord = FindType(asm, "NeedCoordinator");
+            if (coord == null) return new { success = false, message = "找不到 NeedCoordinator" };
+
+            try
+            {
+                var m = coord.GetMethod("ResetDayTracking", ANY_STATIC);
+                if (m == null) return new { success = false, message = "没有 ResetDayTracking()" };
+                m.Invoke(null, null);
+                return new { success = true, result = "已清空按天去重记录" };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message };
+            }
+        }
+
         [Tool("foodprobe/telemetry_tail", Description = "读 mod 写的 telemetry.jsonl 末尾若干行。只读。")]
         public object TelemetryTail(
             [ToolParameter(Description = "读多少行，默认 5")] int lines = 5)
