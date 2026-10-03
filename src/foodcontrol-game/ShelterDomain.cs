@@ -38,30 +38,51 @@ namespace FoodControl.Game
     /// | 建区那套「先查再放 + 回读验证」纪律 | **选建材**（数库存，不猜） |
     /// | 域框架（调度/异常隔离/遥测打标） | **放蓝图**（`GenConstruct`） |
     ///
-    /// ## ⚠ 地板这条路径：写代码之前先去元数据里查了，结论和任务书里的猜测**不同**
+    /// ## ★★ 地板这条路径：我读 IL 得出的结论是**错的**，实测推翻了它（值得留档）
     ///
-    /// 任务书说「地板是 `TerrainDef`，不是 `ThingDef` —— 这条没完全确证」。
-    /// 实测元数据（`tools/asmdump`，2026-10-03）：
+    /// **第一阶段（错）**：我拿 `tools/asmdump/IlDump.exe` 反汇编
+    /// `Designator_Build.DesignateSingleCell`，看到的跳转是
+    /// ```
+    /// IL_008E: brtrue.s IL_00AF      ← 我以为"godMode 成立就跳到地形分支"
+    /// IL_00AB: bne.un   IL_0202
+    /// IL_00B0: ... isinst TerrainDef ... TerrainGrid::SetTerrain
+    /// ```
+    /// 于是我在类注释里写下结论：**「地板是 `TerrainDef`，走 `terrainGrid.SetTerrain`，
+    /// 是瞬间免费改地形，没有蓝图形态」**，并把 `BuildFloor` 默认关掉。
     ///
-    /// 1. `TerrainDefOf.WoodPlankFloor` / `.Concrete` / `.PavedTile` **确实存在**，类型是 `TerrainDef`。
-    /// 2. **`TerrainDef` 没有 `buildingDef` 字段**（写 `floor.buildingDef` 直接 CS1061）——
-    ///    只有 `blueprintDef` / `frameDef` / `costStuffCount`。
-    /// 3. `Blueprint_Door : Blueprint_Build`（子类）—— 所以回读时 `is Blueprint_Build` **已经包含门**。
-    /// 4. `Designator_Build.DesignateSingleCell` 的 IL（`tools/asmdump/IlDump`）显示：
-    ///    - `entDef is TerrainDef` ⇒ 走 `map.terrainGrid.SetTerrain(c, terrainDef)` —— **直接改地形**；
-    ///    - `isFoundation` 走 `SetFoundation`；`temporary` 走 `SetTempTerrain`；
-    ///    - `else`（普通 ThingDef，比如墙）⇒ `GenSpawn.WipeExistingThings(...)` +
-    ///      `GenConstruct.PlaceBlueprintForBuild(...)` —— **蓝图**。
-    ///    ⇒ **地板没有"蓝图形态"**：地板在游戏里就是"小人过去铺地形"。
-    ///      用 `Designator_Build` 铺地板 = **瞬间免费**改地形（不走 Frame、不耗料、不需要小人）。
-    /// 5. 元数据还确证了 `Verse.Thing.stuff` 是 **protected**（只能读公开的 `Thing.Stuff`）、
-    ///    `DesignationManager.DesignationAt` **必须**带 `DesignationDef`
-    ///    （要"任意标定"得用 `HasMapDesignationAt`）。
+    /// **第二阶段（实测打脸）**：`foodprobe/floor_path` 真的跑了一次，返回
+    /// ```
+    /// "terrain_blueprintDef": "Blueprint_WoodPlankFloor",   ← 不是 null！
+    /// "hasBlueprintForm": true,
+    /// "blueprintDelta": 3,  "terrainAreaBefore/After": 0 → 0
+    /// ```
+    /// 也就是说：**地形没变、蓝图 +3**。地板**就是蓝图**，和墙门走的是同一条路。
     ///
-    /// **所以本域默认只放墙和门**（`BuildFloor = false`），地板写进 TODO —— 见
-    /// `docs/s4-住区域.md`。留一个 `AllowInstantTerrainFloor` 开关是给**实测取证**用的：
-    /// 打开它会真的用 designator 铺一次地板，用来在游戏里证明"它确实瞬间改地形、不产生蓝图"。
-    /// **默认关**，因为"瞬间免费铺地板"不是这个 mod 想做的事。
+    /// **根因（自己工具的 off-by-one）**：`IlDump.cs` 的 `ShortInlineBrTarget` 分支
+    /// 把跳转目标算成了 `操作数起点 + d`，而 CLI 的定义是 `操作数起点 + 1 + d`。
+    /// 于是**每一个条件跳转的目标都指向"操作数中间"**，`brtrue.s IL_00B0` 被打印成
+    /// `brtrue.s IL_00AF` —— **条件成立时走哪条路被读反了**。
+    /// 修好工具后重看，真实结构是：
+    /// ```
+    /// IL_0089: ldsfld godMode
+    /// IL_008E: brtrue.s IL_00B0      ← godMode = true 才走地形分支
+    /// IL_0090: ... GetStatValueAbstract(WorkToBuild)   ← 正常模式会走到这里
+    /// IL_00AB: bne.un   IL_0202      ← WorkToBuild != 0 → ★ 走蓝图分支
+    /// IL_00B0: ... isinst TerrainDef ... TerrainGrid::SetTerrain   ← 只有 WorkToBuild == 0 的无本建造才走
+    /// ```
+    /// **结论**：`WorkToBuild != 0` 的地板（木地板/混凝土地砖都是）走
+    /// **`GenSpawn.WipeExistingThings` + `GenConstruct.PlaceBlueprintForBuild`** —— 和墙一模一样。
+    ///
+    /// **三条教训**（写进 `docs/s4-住区域.md`）：
+    ///   1. **元数据/IL 只是旁证，行为必须实测。** 我拿 IL 当"确证"用了，代价是编出一套错结论。
+    ///   2. **工具本身也会错，而且错了会让"确证"变成"反向确证"。** 发现"IL 说不通但实测有结果"时，
+    ///      第一反应应该是**怀疑工具**，而不是怀疑游戏。
+    ///   3. **断言要对着数据写。** 我那条 `terrain.blueprintDef == null` 的断言，
+    ///      在回读已经打印出 `Blueprint_WoodPlankFloor` 的情况下还判"失败"，
+    ///      等于把"预期错、实际对"记成了 bug —— 报告和数据自相矛盾早该被发现。
+    ///
+    /// **最终做法**：`BuildFloor` **默认 true**，地板走 `GenConstruct.PlaceBlueprintForBuild`
+    /// （和墙门同一条路：先查再放、耗料、要小人来铺）。
     /// </summary>
     public sealed class ShelterDomain : INeedDomain
     {
@@ -77,19 +98,26 @@ namespace FoodControl.Game
         public static int HouseSize = 7;
 
         /// <summary>
-        /// **地板开关**。默认 **false**：地板在游戏里没有蓝图形态
-        /// （见类注释 §「地板这条路径」），用 designator 铺等于瞬间免费改地形。
-        ///
-        /// 打开它的唯一用途是**实测取证**：证明这条路真的绕过了建造流程。
+        /// **地板开关**。默认 **true**：木质/混凝土地板都有 `blueprintDef`
+        /// （实测 `TerrainDefOf.WoodPlankFloor.blueprintDef == Blueprint_WoodPlankFloor`），
+        /// 走的是和墙门完全一样的 `GenConstruct.PlaceBlueprintForBuild` 路径。
         /// </summary>
-        public static bool BuildFloor = false;
+        public static bool BuildFloor = true;
 
         /// <summary>
-        /// 允许"没有建造成本"的地形改造（即上面那个开关真的动手）。
-        /// 和 `BuildFloor` 分成两个开关，是为了能表达
-        /// 「我想看看户型里地板有多少格，但**不要**改地图」。
+        /// 用哪个地形当地板。默认木地板（最便宜、前期就有）。
         /// </summary>
-        public static bool AllowInstantTerrainFloor = false;
+        public static string FloorTerrainDefName = "WoodPlankFloor";
+
+        /// <summary>
+        /// **测试专用**：强制盖房，忽略"已有住处/已有蓝图"的守卫。
+        ///
+        /// 为什么需要：debug 开局自带 662 面墙 + 28 扇门，正常守卫会正确地拒绝盖房，
+        /// 于是**验收永远看不到 23+1 个蓝图**。这个开关只给测试用。
+        ///
+        /// ⚠ 生产路径必须保持 false（默认就是 false）。
+        /// </summary>
+        public static bool ForceOverride = false;
 
         /// <summary>最多盖几间（别无限盖）</summary>
         public static int MaxHouses = 1;
@@ -166,13 +194,37 @@ namespace FoodControl.Game
             if (map == null) return false;
             try
             {
-                if (CountOfDef(map, ThingDefOf.Wall) > 0) return true;
-                if (CountOfDef(map, ThingDefOf.Door) > 0) return true;
                 if (CountBlueprintBuilds(map) > 0) return true;
                 if (CountFrames(map) > 0) return true;
+                // ⚠ 只在"我们自己盖过"的前提下才拿"有墙有门"当住处证据。
+                //   原因（实测）：**debug 开局自带 662 面墙 + 28 扇门**，
+                //   无条件把"有墙有门"当住处 ⇒ 正常路径永远拒绝动手，验收也就永远看不到蓝图。
+                //   野外遗迹同样会误伤，所以这里必须限定"我们盖过"。
+                if (_placedOnce)
+                {
+                    if (CountOfDef(map, ThingDefOf.Wall) > 0) return true;
+                    if (CountOfDef(map, ThingDefOf.Door) > 0) return true;
+                }
             }
             catch (Exception) { }
             return false;
+        }
+
+        /// <summary>
+        /// 本会话里**我们自己**放过至少一次住处蓝图。
+        ///
+        /// 用途只有两个：① 让 `ShouldRunToday` 的"已有住处"守卫只在**真的盖过**之后生效
+        /// （否则会被 debug 开局自带的几百面墙误伤）；
+        /// ② 防止"蓝图被取消后无限重盖"。
+        ///
+        /// ⚠ 不存档：读档后这个标志会归零，于是会先看一眼现有蓝图再决定 —— 行为仍然正确。
+        /// </summary>
+        private static bool _placedOnce;
+
+        /// <summary>测试用：清掉"我们盖过"的标记（配合 `ForceOverride`）。</summary>
+        public static void ResetPlacedFlag()
+        {
+            _placedOnce = false;
         }
 
         // ------------------------------------------------------------------
@@ -188,28 +240,36 @@ namespace FoodControl.Game
                 Map map = ctx.Map;
 
                 // ── ① 别重复盖 ──
+                //
+                // ⚠ `ForceOverride` 是**测试专用**（默认 false）：debug 开局自带几百面墙，
+                //   正常守卫会正确地拒绝动手，验收就永远看不到 23+1 个蓝图。
                 int existingWalls = CountOfDef(map, ThingDefOf.Wall);
                 int existingDoors = CountOfDef(map, ThingDefOf.Door);
                 int existingBPs = CountBlueprintBuilds(map);
                 int existingFrames = CountFrames(map);
 
-                if (existingBPs > 0 || existingFrames > 0)
+                if (!ForceOverride)
                 {
-                    result.Ok = true;
-                    result.DidWork = false;
-                    result.Summary = string.Format(
-                        "已经有一处在盖（蓝图 {0} / 框架 {1}），不重复动手",
-                        existingBPs, existingFrames);
-                    return result;
-                }
-                if (existingWalls > 0 && existingDoors > 0 && MaxHouses <= 1)
-                {
-                    result.Ok = true;
-                    result.DidWork = false;
-                    result.Summary = string.Format(
-                        "已有住处（墙 {0} / 门 {1}），不再盖第二间",
-                        existingWalls, existingDoors);
-                    return result;
+                    if (existingBPs > 0 || existingFrames > 0)
+                    {
+                        result.Ok = true;
+                        result.DidWork = false;
+                        result.Summary = string.Format(
+                            "已经有一处在盖（蓝图 {0} / 框架 {1}），不重复动手",
+                            existingBPs, existingFrames);
+                        return result;
+                    }
+                    // ★ 只有**我们自己盖过**之后，才把"地图上有墙有门"当成住处证据。
+                    //   debug 开局自带 662 面墙 + 28 扇门，不加这个限定就会永远拒绝干活。
+                    if (_placedOnce && existingWalls > 0 && existingDoors > 0 && MaxHouses <= 1)
+                    {
+                        result.Ok = true;
+                        result.DidWork = false;
+                        result.Summary = string.Format(
+                            "已有住处（墙 {0} / 门 {1}），不再盖第二间",
+                            existingWalls, existingDoors);
+                        return result;
+                    }
                 }
 
                 // ── ② 可盖性地图 + 基地距离场（复用食物域那套距离场与兜底链）──
@@ -436,7 +496,9 @@ namespace FoodControl.Game
         {
             public int WallsPlaced;
             public int DoorsPlaced;
-            public int FloorsPlacedViaDesignator;
+
+            /// <summary>放出去的地板蓝图格数</summary>
+            public int FloorsPlaced;
 
             /// <summary>被 `CanPlaceBlueprintAt` 拒掉的位置（含原因），最多记 8 条</summary>
             public List<string> Rejected = new List<string>();
@@ -444,6 +506,7 @@ namespace FoodControl.Game
             /// <summary>回读到的蓝图数（★ 桥接之外的第二道独立确认）</summary>
             public int WallBlueprintReadBack;
             public int DoorBlueprintReadBack;
+            public int FloorBlueprintReadBack;
             public int TotalBlueprintReadBack;
 
             /// <summary>回读通过吗（**只有 true 才算真的落地了**）</summary>
@@ -454,8 +517,9 @@ namespace FoodControl.Game
 
             public override string ToString()
             {
-                return string.Format("墙蓝图{0} 门蓝图{1} 回读(墙{2}/门{3}/总{4}) 验证={5}{6}",
-                    WallsPlaced, DoorsPlaced, WallBlueprintReadBack, DoorBlueprintReadBack,
+                return string.Format("墙蓝图{0} 门蓝图{1} 地板蓝图{2} 回读(墙{3}/门{4}/地板{5}/总{6}) 验证={7}{8}",
+                    WallsPlaced, DoorsPlaced, FloorsPlaced,
+                    WallBlueprintReadBack, DoorBlueprintReadBack, FloorBlueprintReadBack,
                     TotalBlueprintReadBack, Verified,
                     Rejected.Count > 0 ? " 被拒" + Rejected.Count : "");
             }
@@ -464,14 +528,13 @@ namespace FoodControl.Game
         /// <summary>
         /// **真的放蓝图**。顺序照本项目纪律：**每一格先 `CanPlaceBlueprintAt` 查，再放**。
         ///
-        /// 为什么不用 `Designator_Build.DesignateSingleCell` 放墙：
-        ///   它能用（IL 里走的就是 `PlaceBlueprintForBuild`），但它还会做
-        ///   `GenSpawn.WipeExistingThings(...)` —— 会把挡路的树/石头**直接删掉**。
-        ///   我们要的是"挑一块干净的地"，不是"推平它"，所以走 `GenConstruct` 更可控。
+        /// 墙 / 门 / 地板**三条都走 `GenConstruct.PlaceBlueprintForBuild`** ——
+        /// 这是实测确认的（见类注释 §「地板这条路径」）：地板虽然 `def` 是 `TerrainDef`，
+        /// 但它有 `blueprintDef == Blueprint_WoodPlankFloor`，放出来就是**蓝图**，
+        /// 要耗料、要小人来铺，和墙完全一致。
         ///
-        /// ⚠ 门必须是 `ThingDefOf.Door` + 正确朝向：门的 `Size` 是 1×1 但
-        ///   它贴在墙上，朝向错会挡住两侧。门朝南的墙上开门时，
-        ///   门的 "forward" 应该是南北向 → 用 `Rot4.South`（门面朝南）。
+        /// ⚠ 门必须有正确朝向：门的 `Size` 是 1×1，但它嵌在墙上，
+        ///   转向错了会挡住门洞两侧。南北向的墙 ⇒ `Rot4.South`；东西向的墙 ⇒ `Rot4.East`。
         /// </summary>
         public static PlacementReport PlaceBlueprints(Map map, BuildingPlan plan, MaterialChoice material)
         {
@@ -480,7 +543,7 @@ namespace FoodControl.Game
 
             int w = map.Size.x;
 
-            // ── ① 墙 ──
+            // ── ① 墙（北向：墙是 1×1，朝向无影响，但保持和 Designator_Build 一致）──
             for (int i = 0; i < plan.WallCells.Count; i++)
             {
                 IntVec3 c = IndexToCell(plan.WallCells[i], w, map);
@@ -497,25 +560,55 @@ namespace FoodControl.Game
                 pr.DoorsPlaced++;
             }
 
-            // ── ③ 地板（默认不做，见类注释）──
+            // ── ③ 地板 ★（BuildFloor 默认 true；实测地板有蓝图形态）──
             if (BuildFloor)
             {
                 pr.FloorPathTried = true;
-                if (!AllowInstantTerrainFloor)
+                TerrainDef floor = ResolveFloorTerrainDef();
+                if (floor == null)
                 {
-                    pr.FloorPathNote = "BuildFloor=true 但 AllowInstantTerrainFloor=false："
-                        + "只是算了户型（" + plan.FloorCells.Count + " 格），**没有**动地图";
+                    pr.FloorPathNote = "找不到地板 TerrainDef（" + FloorTerrainDefName + "），地板跳过";
                 }
                 else
                 {
-                    int placed = PlaceFloorViaDesignator(map, plan, material);
-                    pr.FloorsPlacedViaDesignator = placed;
-                    pr.FloorPathNote = "用 Designator_Build(TerrainDef) 铺了 " + placed
-                        + " 格 —— 注意：这条路是**直接改地形**，不产生蓝图、不耗料、不需要小人";
+                    // ⚠ 地板**不带 stuff**：TerrainDef 的构造材料由它自己的 costStuffCount 决定，
+                    //   传 stuff 反而会让 CanPlaceBlueprintAt / 蓝图语义对不上。
+                    //   （实测 byStuff 里地板蓝图显示 "(无)"。）
+                    for (int i = 0; i < plan.FloorCells.Count; i++)
+                    {
+                        IntVec3 c = IndexToCell(plan.FloorCells[i], w, map);
+                        if (!TryPlace(map, floor, c, Rot4.North, null, pr)) continue;
+                        pr.FloorsPlaced++;
+                    }
+                    pr.FloorPathNote = string.Format(
+                        "用 GenConstruct.PlaceBlueprintForBuild({0}) 放了 {1}/{2} 格地板蓝图",
+                        floor.defName, pr.FloorsPlaced, plan.FloorCells.Count);
                 }
+            }
+            else
+            {
+                pr.FloorPathNote = "BuildFloor=false：只算了户型（" + plan.FloorCells.Count + " 格），没放地板蓝图";
             }
 
             return pr;
+        }
+
+        /// <summary>解析地板地形 Def（配置写错名字不该刷红字，找不到就返回 null 并降级）。</summary>
+        public static TerrainDef ResolveFloorTerrainDef()
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(FloorTerrainDefName))
+                {
+                    TerrainDef d = DefDatabase<TerrainDef>.GetNamedSilentFail(FloorTerrainDefName);
+                    if (d != null) return d;
+                }
+                return TerrainDefOf.WoodPlankFloor;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         /// <summary>
@@ -567,20 +660,20 @@ namespace FoodControl.Game
         }
 
         /// <summary>
-        /// **地板那条路**：用 `Designator_Build(TerrainDef)` 直接改地形。
+        /// **地板那条路**：保留成"取证/兼容"入口。
         ///
-        /// 元数据/IL 已经说明它走 `TerrainGrid::SetTerrain`（不是蓝图），
-        /// 这里保留它是为了**在游戏里取证**（默认开关是关的）。
-        ///
-        /// ⚠ 仍然遵守"先查再放"：先调 `designator.CanDesignateCell(c)`
-        ///   （它的 IL 就是 `GenConstruct.CanPlaceBlueprintAt`），通过才 `DesignateSingleCell`。
+        /// ⚠ 实测结论是**地板走 `GenConstruct.PlaceBlueprintForBuild` 也能出蓝图**
+        ///   （见类注释），所以生产路径**不再用** `Designator_Build`。
+        ///   这个函数留着是因为它是一条**合法的备用路**（`CanDesignateCell` 内部
+        ///   就是 `GenConstruct.CanPlaceBlueprintAt`，也遵守"先查再放"），
+        ///   将来若需要"覆盖已有地形/地基"这类语义可以走它。
         /// </summary>
         public static int PlaceFloorViaDesignator(Map map, BuildingPlan plan, MaterialChoice material)
         {
             int placed = 0;
             if (map == null || plan == null || plan.FloorCells.Count == 0) return 0;
 
-            TerrainDef floor = TerrainDefOf.WoodPlankFloor;
+            TerrainDef floor = ResolveFloorTerrainDef();
             if (floor == null) return 0;
 
             try
@@ -607,7 +700,7 @@ namespace FoodControl.Game
             }
             catch (Exception)
             {
-                // 这条路是实验性的，失败就算了（默认也不开）
+                // 备用路，失败就算了（生产不用它）
             }
 
             return placed;

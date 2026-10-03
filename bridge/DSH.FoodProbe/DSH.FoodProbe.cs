@@ -1206,85 +1206,147 @@ namespace DSH.FoodProbe
         }
 
         /// <summary>
-        /// **地板那条路的取证工具**（只在测试时间避不开时才用）。
+        /// **地板那条路的干净实验**（一次只动**一格**，前后各记一次账）。
         ///
-        /// 步骤：选格子 → `CanDesignateCell`（= `GenConstruct.CanPlaceBlueprintAt`）→
-        /// `DesignateSingleCell` → 回读地形。**看回读结果是不是"地形直接变了、但没有蓝图"**。
+        /// 背景：我先前**读 IL** 得出"`Designator_Build(TerrainDef)` 走 `TerrainGrid::SetTerrain`，
+        /// 是瞬间免费改地形"——实测把它推翻了。根因是 `tools/asmdump/IlDump.cs`
+        /// 的 `ShortInlineBrTarget` 有 **off-by-one**，把所有条件跳转的目标都读成"操作数中间"，
+        /// 于是我把 `IL_008E: brtrue.s IL_00AF`（**其实是跳向 IL_00B0 的地形分支**）读反了。
+        ///
+        /// 这个工具就是把结论钉死用的：**一格、一次、前后记账**。
+        ///
+        /// 判据（用户给的）：
+        ///   - 地形没变 + 蓝图 +1（buildsDef == 目标 TerrainDef） ⇒ **地板就是蓝图**
+        ///   - 地形变了 + 蓝图 +0                                ⇒ 才是"直接改地形"
         /// </summary>
-        public static object FloorPathImpl(string terrainDefName, int count)
+        public static object FloorPathImpl(string terrainDefName, int count, string mode, int index)
         {
             var map = Find.CurrentMap;
             if (map == null) return new { success = false, message = "没有当前地图" };
+            if (count < 1) count = 1;
+            if (count > 16) count = 16;
+            if (index < 0) index = 0;
+            if (string.IsNullOrEmpty(mode)) mode = "designator";
 
             var terrain = DefDatabase<TerrainDef>.GetNamedSilentFail(terrainDefName);
             if (terrain == null)
                 return new { success = false, message = "找不到 TerrainDef: " + terrainDefName };
 
-            // 这个 TerrainDef 有没有"蓝图形态"？—— 这是判定"地板能不能走放蓝图那条路"的关键
-            var blueprintDef = terrain.blueprintDef;
-            var frameDef = terrain.frameDef;
-            int areaBefore = 0, areaAfter = 0;
-
-            // 找一个还没铺该地形的空地采样
-            var targets = new List<IntVec3>();
+            // ── 找一个**干净格**：无任何 Thing、无标定、不属于任何区 ──
+            var clean = new List<IntVec3>();
             try
             {
-                foreach (var c in CellRect.WholeMap(map).Cells)
+                foreach (var c in GenRadial.RadialCellsAround(map.Center, 45, true))
                 {
-                    if (c.GetTerrain(map) == terrain) { areaBefore++; continue; }
-                }
-                // 从地图中心往外找 count 格可行走、无阻碍、还没铺该地形的
-                var center = map.Center;
-                int r = 0;
-                while (targets.Count < Math.Max(count, 1) && r < 60)
-                {
-                    foreach (var c in GenRadial.RadialCellsAround(center, r, true))
-                    {
-                        if (targets.Count >= Math.Max(count, 1)) break;
-                        if (!c.InBounds(map)) continue;
-                        if (c.GetTerrain(map) == terrain) continue;
-                        if (!c.Walkable(map)) continue;
-                        if (c.GetThingList(map).Count > 0) continue;
-                        targets.Add(c);
-                    }
-                    r++;
+                    if (!c.InBounds(map)) continue;
+                    if (!c.Walkable(map)) continue;
+                    if (c.GetTerrain(map) == terrain) continue;
+                    if (c.GetThingList(map).Count > 0) continue;
+                    if (map.zoneManager.ZoneAt(c) != null) continue;
+                    if (map.designationManager.HasMapDesignationAt(c)) continue;
+                    // 只要"真正干净"的：连相邻格都没有建造物（避免门的交互格之类干扰）
+                    clean.Add(c);
                 }
             }
             catch (Exception e)
             {
-                return new { success = false, message = "找目标格失败：" + e.Message };
+                return new { success = false, message = "找干净格失败：" + e.Message };
             }
 
-            if (targets.Count == 0)
-                return new { success = false, message = "找不到可铺的目标格", areaBefore };
+            if (clean.Count == 0)
+                return new { success = false, message = "地图中心附近找不到干净格" };
+            if (index >= clean.Count) index = 0;
 
-            int designateAccepted = 0, designateRejected = 0, bpDelta = 0, frameDelta = 0;
-            var rejected = new List<string>();
-            var beforeTerrain = new List<string>();
+            var targets = new List<IntVec3>();
+            for (int k = 0; k < count && index + k < clean.Count; k++) targets.Add(clean[index + k]);
 
-            int bpBefore = 0, frameBefore = 0;
-            foreach (var t in map.listerThings.AllThings)
+            // ── 记账：before ──
+            Func<Dictionary<string, int>> countBlueprints = delegate
             {
-                if (t is Blueprint_Build) bpBefore++;
-                else if (t is Frame) frameBefore++;
+                var d = new Dictionary<string, int>();
+                foreach (var t in map.listerThings.AllThings)
+                {
+                    var bp = t as Blueprint_Build;
+                    if (bp == null) continue;
+                    string k = bp.def.entityDefToBuild != null ? bp.def.entityDefToBuild.defName : "(null)";
+                    if (!d.ContainsKey(k)) d[k] = 0;
+                    d[k]++;
+                }
+                return d;
+            };
+
+            var bpBefore = countBlueprints();
+            var terrainBefore = new List<string>();
+            foreach (var c in targets) terrainBefore.Add(c.GetTerrain(map).defName);
+
+            int settledBefore = 0;
+            foreach (var c in CellRect.WholeMap(map).Cells)
+            {
+                try { if (c.GetTerrain(map) == terrain) settledBefore++; } catch { }
             }
+
+            // ── 动手 ──
+            int accepted = 0, rejected = 0;
+            var rejectedReasons = new List<string>();
+            var errors = new List<string>();
+            bool dryRun = mode == "designator_dry";
 
             try
             {
-                var des = new Designator_Build(terrain);
-                foreach (var c in targets)
+                if (mode == "genconstruct")
                 {
-                    // ⚠ 仍然"先查再放"
-                    var can = des.CanDesignateCell(c);
-                    if (!can.Accepted)
+                    // 另一条路：直接把 TerrainDef 当 BuildableDef 交给 GenConstruct
+                    foreach (var c in targets)
                     {
-                        designateRejected++;
-                        if (rejected.Count < 6) rejected.Add($"({c.x},{c.z}) {can.Reason}");
-                        continue;
+                        try
+                        {
+                            var rep = GenConstruct.CanPlaceBlueprintAt(
+                                terrain, c, Rot4.North, map, true, null, null, null,
+                                false, false, false);
+                            if (!rep.Accepted)
+                            {
+                                rejected++;
+                                if (rejectedReasons.Count < 5) rejectedReasons.Add($"({c.x},{c.z}) {rep.Reason}");
+                                continue;
+                            }
+                            var bp = GenConstruct.PlaceBlueprintForBuild(
+                                terrain, c, map, Rot4.North, Faction.OfPlayer, null, null, null, true);
+                            if (bp == null) { rejected++; continue; }
+                            accepted++;
+                        }
+                        catch (Exception ex)
+                        {
+                            rejected++;
+                            if (errors.Count < 5)
+                                errors.Add($"({c.x},{c.z}) {ex.GetType().Name}: {ex.Message}");
+                        }
                     }
-                    beforeTerrain.Add($"{c.x},{c.z}=" + c.GetTerrain(map).defName);
-                    des.DesignateSingleCell(c);
-                    designateAccepted++;
+                }
+                else
+                {
+                    var des = new Designator_Build(terrain);
+                    foreach (var c in targets)
+                    {
+                        try
+                        {
+                            var can = des.CanDesignateCell(c);
+                            if (!can.Accepted)
+                            {
+                                rejected++;
+                                if (rejectedReasons.Count < 5) rejectedReasons.Add($"({c.x},{c.z}) {can.Reason}");
+                                continue;
+                            }
+                            accepted++;
+                            if (dryRun) continue;
+                            des.DesignateSingleCell(c);
+                        }
+                        catch (Exception ex)
+                        {
+                            rejected++;
+                            if (errors.Count < 5)
+                                errors.Add($"({c.x},{c.z}) {ex.GetType().Name}: {ex.Message}");
+                        }
+                    }
                 }
             }
             catch (Exception e)
@@ -1292,74 +1354,161 @@ namespace DSH.FoodProbe
                 return new
                 {
                     success = false,
-                    message = "DesignateSingleCell 抛异常：" + e.GetType().Name + " " + e.Message,
-                    blueprintDef = blueprintDef?.defName,
-                    frameDef = frameDef?.defName,
-                    designateAccepted, designateRejected,
+                    message = "动手时抛异常：" + e.GetType().Name + " " + e.Message,
+                    mode, targets = targets.Select(c => $"{c.x},{c.z}").ToArray(),
                 };
             }
 
-            // ★ 回读
-            int nowTerrain = 0;
-            foreach (var c in targets)
-            {
-                try { if (c.GetTerrain(map) == terrain) nowTerrain++; } catch { }
-            }
+            // ── 记账：after ──
+            var bpAfter = countBlueprints();
+            var terrainAfter = new List<string>();
+            foreach (var c in targets) terrainAfter.Add(c.GetTerrain(map).defName);
+
+            int settledAfter = 0;
             foreach (var c in CellRect.WholeMap(map).Cells)
             {
-                try { if (c.GetTerrain(map) == terrain) areaAfter++; } catch { }
+                try { if (c.GetTerrain(map) == terrain) settledAfter++; } catch { }
             }
-            foreach (var t in map.listerThings.AllThings)
-            {
-                if (t is Blueprint_Build) bpDelta++;
-                else if (t is Frame) frameDelta++;
-            }
-            bpDelta -= bpBefore;
-            frameDelta -= frameBefore;
 
-            bool instantTerrain = nowTerrain > 0;
-            bool madeBlueprint = bpDelta > 0;
+            var delta = new Dictionary<string, int>();
+            foreach (var kv in bpAfter)
+            {
+                int was = bpBefore.ContainsKey(kv.Key) ? bpBefore[kv.Key] : 0;
+                if (kv.Value != was) delta[kv.Key] = kv.Value - was;
+            }
+            foreach (var kv in bpBefore)
+            {
+                if (!bpAfter.ContainsKey(kv.Key)) delta[kv.Key] = -kv.Value;
+            }
+            int bpDeltaTotal = 0;
+            foreach (var kv in delta) bpDeltaTotal += kv.Value;
+
+            int newBlueprintsForTargetTerrain =
+                (bpAfter.ContainsKey(terrain.defName) ? bpAfter[terrain.defName] : 0)
+                - (bpBefore.ContainsKey(terrain.defName) ? bpBefore[terrain.defName] : 0);
+
+            bool terrainChanged = settledAfter != settledBefore;
+            bool madeBlueprint = newBlueprintsForTargetTerrain > 0;
+
+            string verdict;
+            if (dryRun) verdict = "dry-run：只查了 CanDesignateCell，没动手";
+            else if (terrainChanged && !madeBlueprint)
+                verdict = "★ 地形**直接变了**且**没有**产生蓝图 ⇒ 才是'直接改地形'";
+            else if (!terrainChanged && madeBlueprint)
+                verdict = "★ 地形**没变**、蓝图 **+1**（且 buildsDef == " + terrain.defName + "）"
+                        + " ⇒ **地板就是蓝图**（我先前读 IL 得出的'瞬间改地形'是错的）";
+            else if (terrainChanged && madeBlueprint)
+                verdict = "两者都变了（地形 + 蓝图）—— 请把这份数据记进文档";
+            else
+                verdict = "地形没变、蓝图也没变 ⇒ designator 没生效或全被拒";
 
             return new
             {
                 success = true,
+                mode,
+                dryRun,
                 terrainDef = terrain.defName,
-                // ★ 这两条是元数据层面的答案
-                terrain_blueprintDef = blueprintDef != null ? blueprintDef.defName : null,
-                terrain_frameDef = frameDef != null ? frameDef.defName : null,
-                costStuffCount = terrain.costStuffCount,
-                hasBlueprintForm = blueprintDef != null,
+                // 元数据层：TerrainDef **有** blueprintDef（这点实测已确证）
+                terrain_blueprintDef = terrain.blueprintDef != null ? terrain.blueprintDef.defName : null,
+                terrain_frameDef = terrain.frameDef != null ? terrain.frameDef.defName : null,
+                terrain_hasBlueprintForm = terrain.blueprintDef != null,
+                terrain_costStuffCount = terrain.costStuffCount,
 
-                targetsFound = targets.Count,
-                designateAccepted,
-                designateRejected,
-                rejectedReasons = rejected,
-                beforeTerrain,
-                terrainNowOnTargets = nowTerrain,
-                terrainAreaBefore = areaBefore,
-                terrainAreaAfter = areaAfter,
-                blueprintDelta = bpDelta,
-                frameDelta,
+                // ★ 干净实验：一格一次、前后记账
+                targetCells = targets.Select(c => $"{c.x},{c.z}").ToArray(),
+                terrainBefore,
+                terrainAfter,
+                terrainChanged,
+                settledCountBefore = settledBefore,
+                settledCountAfter = settledAfter,
 
-                verdict = instantTerrain && !madeBlueprint
-                    ? "★ 确证：Designator_Build(TerrainDef) **直接改地形** —— 地形立刻变了，"
-                      + "但**没有产生任何蓝图**。所以地板没有'放蓝图'这条游戏路径。"
-                    : madeBlueprint
-                        ? "意外：居然产生了蓝图（请把这个结果记进文档）"
-                        : "地形没有变化（designator 没生效或全被拒）",
-                note = "这条路会**免费、瞬间**改地形（不走 Frame、不耗料、不需要小人）——"
-                     + "默认不在 mod 里启用，只作为取证。",
+                blueprintCountBefore = bpBefore,
+                blueprintCountAfter = bpAfter,
+                blueprintDeltaByDef = delta,
+                blueprintDeltaTotal = bpDeltaTotal,
+                newBlueprintsForTargetTerrain,
+
+                accepted, rejected, rejectedReasons, errors,
+                verdict,
             };
         }
 
         [Tool("foodprobe/floor_path",
-            Description = "★S4 取证：用 Designator_Build(TerrainDef) 铺 N 格地板，回读地形与蓝图数，"
-                        + "证明地板到底是'放蓝图'还是'直接改地形'。会真的改地图。")]
+            Description = "★地板路径干净实验：在**一格**干净格上动手，前后各记一次地形与蓝图账。"
+                        + "mode=designator|genconstruct|designator_dry。会真的改地图（除 dry）。")]
         public object FloorPath(
             [ToolParameter(Description = "地形 defName，默认 WoodPlankFloor")] string terrainDefName = "WoodPlankFloor",
-            [ToolParameter(Description = "铺几格，默认 4")] int count = 4)
+            [ToolParameter(Description = "动几格，默认 1（干净实验建议 1）")] int count = 1,
+            [ToolParameter(Description = "designator / genconstruct / designator_dry，默认 designator")] string mode = "designator",
+            [ToolParameter(Description = "从第几个干净格开始，默认 0")] int index = 0)
         {
-            return FloorPathImpl(terrainDefName, count);
+            return FloorPathImpl(terrainDefName, count, mode, index);
+        }
+
+        /// <summary>
+        /// 查 `TerrainGrid.SetTerrain` 有没有被别的 mod **Harmony patch** 过。
+        ///
+        /// 为什么要查这个：IL 说"地形直接改"，实测说"产生了蓝图"。
+        /// 除了我自己 IL 读反之外，第二个可能是 **Harmony patch 改写了几何**。
+        /// 这个工具把 patch 列表打出来，一眼就能排除/坐实。
+        /// </summary>
+        public static object PatchesImpl()
+        {
+            var rows = new List<object>();
+            var errors = new List<string>();
+
+            var targets = new object[]
+            {
+                new { t = typeof(TerrainGrid), m = "SetTerrain" },
+                new { t = typeof(TerrainGrid), m = "SetFoundation" },
+                new { t = typeof(Designator_Build), m = "DesignateSingleCell" },
+                new { t = typeof(GenConstruct), m = "PlaceBlueprintForBuild" },
+                new { t = typeof(GenConstruct), m = "CanPlaceBlueprintAt_NewTemp" },
+            };
+
+            foreach (var tg in targets)
+            {
+                var ty = (Type)tg.GetType().GetProperty("t").GetValue(tg, null);
+                var mn = (string)tg.GetType().GetProperty("m").GetValue(tg, null);
+                try
+                {
+                    var all = HarmonyLib.Harmony.GetAllPatchedMethods();
+                    var hit = all.FirstOrDefault(mm =>
+                        mm.DeclaringType == ty && mm.Name == mn);
+                    if (hit == null)
+                    {
+                        rows.Add(new { target = ty.Name + "." + mn, patched = false, owners = new string[0] });
+                        continue;
+                    }
+                    var info = HarmonyLib.Harmony.GetPatchInfo(hit);
+                    var owners = new List<string>();
+                    foreach (var p in info.Prefixes) owners.Add("prefix:" + p.owner);
+                    foreach (var p in info.Postfixes) owners.Add("postfix:" + p.owner);
+                    foreach (var p in info.Transpilers) owners.Add("transpiler:" + p.owner);
+                    foreach (var p in info.Finalizers) owners.Add("finalizer:" + p.owner);
+                    rows.Add(new { target = ty.Name + "." + mn, patched = owners.Count > 0, owners = owners.ToArray() });
+                }
+                catch (Exception e)
+                {
+                    errors.Add(ty.Name + "." + mn + ": " + e.Message);
+                }
+            }
+
+            return new
+            {
+                success = true,
+                patchedMethods = rows,
+                errors,
+                note = "如果 TerrainGrid.SetTerrain / Designator_Build.DesignateSingleCell 都没被 patch，"
+                     + "那'IL 说改地形、实测出蓝图'就只可能是**我自己 IL 读反了**（见 IlDump 的 off-by-one）。",
+            };
+        }
+
+        [Tool("foodprobe/patches",
+            Description = "查 TerrainGrid.SetTerrain / Designator_Build.DesignateSingleCell 等有没有被 Harmony patch。只读。")]
+        public object Patches()
+        {
+            return PatchesImpl();
         }
 
         // ── mod 内部的一次性初始化钩子 ─────────────────────────────────
@@ -1514,6 +1663,23 @@ namespace DSH.FoodProbe
         public object RunShelter()
         {
             return CallModStatic("RunShelterNow", "run_shelter");
+        }
+
+        [Tool("foodprobe/run_shelter_force",
+            Description = "★S4 **测试专用**：忽略'已有住处/已有蓝图'的守卫，强制盖一间。"
+                        + "用于 debug 开局自带几百面墙、正常路径永远拒绝动手的场景。")]
+        public object RunShelterForce()
+        {
+            return CallModStatic("RunShelterNowForce", "run_shelter_force");
+        }
+
+        [Tool("foodprobe/set_shelter_force",
+            Description = "★S4 **测试专用**：开关'强制盖房'标志位。on 之后生产路径也会无视守卫，"
+                        + "所以只是为了让测试能临时打开，**不是**生产配置。")]
+        public object SetShelterForce(
+            [ToolParameter(Description = "on 或 off，默认 off")] string mode = "off")
+        {
+            return CallModStatic("SetShelterForce", "set_shelter_force", mode);
         }
 
         [Tool("foodprobe/inspect_shelter",
