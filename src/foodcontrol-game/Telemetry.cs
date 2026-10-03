@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using FoodControl.Core;
+using RimWorld;
 using Verse;
 
 namespace FoodControl.Game
@@ -22,9 +23,12 @@ namespace FoodControl.Game
     /// </summary>
     public static class Telemetry
     {
-        /// <summary>落盘目录名（在 `GenFilePaths.SaveDataFolderPath` 之下）</summary>
-        public const string FolderName = "FoodControl";
-        public const string FileName = "telemetry.jsonl";
+        /// <summary>
+        /// 落盘文件名。**直接放在 `SaveDataFolderPath` 根下**（不是子目录）——
+        /// 因为测试侧的探针 `bridge/DSH.FoodProbe/DSH.FoodProbe.cs` 的 `foodprobe/telemetry_tail`
+        /// 就是按 `<SaveDataFolderPath>/foodcontrol-telemetry.jsonl` 去找的。两边必须一致。
+        /// </summary>
+        public const string FileName = "foodcontrol-telemetry.jsonl";
 
         /// <summary>超过这个大小就轮转成 telemetry.1.jsonl，避免长跑把盘写满</summary>
         private const long MaxBytes = 4L * 1024 * 1024;
@@ -39,10 +43,9 @@ namespace FoodControl.Game
         public static int LinesWritten;
 
         /// <summary>
-        /// 遥测文件的绝对路径。
-        /// ⚠ 这是**推断**的落点：设计文档只说「`GenFilePaths.SaveDataFolderPath` 下」，
-        ///   我选了子目录 `FoodControl/telemetry.jsonl`（比散在存档根目录干净）。
-        ///   真实路径同时会写进 Player.log（第一条日志会打印一次），免得对不上账。
+        /// 遥测文件的绝对路径 = `<see cref="GenFilePaths.SaveDataFolderPath"/>/foodcontrol-telemetry.jsonl`。
+        /// ⚠ 这条落点是**约定**（与测试探针对齐），不是从游戏 API 里读出来的；
+        ///   真实路径同时会写进 Player.log（第一次写之前打印一次），免得对不上账。
         /// </summary>
         public static string TelemetryPath
         {
@@ -51,14 +54,14 @@ namespace FoodControl.Game
                 string root = null;
                 try
                 {
-                    root = GenFilePaths.SaveDataFolderPath;   // 确证：public static get（元数据确证）
+                    root = GenFilePaths.SaveDataFolderPath;   // 确证：public static get（元数据确证 + 编译探针）
                 }
                 catch (Exception e)
                 {
                     LastError = "拿不到 SaveDataFolderPath: " + e.Message;
                 }
                 if (string.IsNullOrEmpty(root)) root = Path.GetTempPath();
-                return Path.Combine(Path.Combine(root, FolderName), FileName);
+                return Path.Combine(root, FileName);
             }
         }
 
@@ -108,7 +111,7 @@ namespace FoodControl.Game
                     var fi = new FileInfo(path);
                     if (fi.Length > MaxBytes)
                     {
-                        string rotated = Path.Combine(dir, "telemetry.1.jsonl");
+                        string rotated = Path.Combine(dir, "foodcontrol-telemetry.1.jsonl");
                         try
                         {
                             if (File.Exists(rotated)) File.Delete(rotated);

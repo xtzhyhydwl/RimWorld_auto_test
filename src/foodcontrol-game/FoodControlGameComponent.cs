@@ -68,17 +68,26 @@ namespace FoodControl.Game
         /// <summary>决策窗口终点（游戏内小时）。默认 19（≈日落）。</summary>
         public static int DecisionHourTo = 19;
 
-        /// <summary>策略参数（将来的 LLM 慢环改的就是这一层，见设计文档 §三）</summary>
-        public PolicyConfig Policy = new PolicyConfig();
+        /// <summary>
+        /// 策略参数（将来的 LLM 慢环改的就是这一层，见设计文档 §三）。
+        /// ⚠ 字段名**不能**叫 `Policy`：本文件 `using FoodControl.Core;` 引入了同名类型 `Policy`，
+        ///   字段会遮蔽类型，`Policy.Decide(...)` 直接编译不过（CS1061）。踩过。
+        /// </summary>
+        public PolicyConfig PolicySettings = new PolicyConfig();
 
-        /// <summary>标定系数（MVP 用默认值；`NutritionPerCellAtMaturity` 等应由实测回填）</summary>
-        public Calibration Calibration = new Calibration();
+        /// <summary>标定系数（MVP 用默认值；`NutritionPerCellAtMaturity` 等应由实测回填）。
+        /// 同理不叫 `Calibration`，避免遮蔽同名的 Core 类型。</summary>
+        public Calibration CalibrationSettings = new Calibration();
 
         /// <summary>选址参数（Core 的默认值就是用户拍板的 40/1.0/120）</summary>
         public SiteSelectionOptions SiteOptions = new SiteSelectionOptions();
 
-        /// <summary>保留 game 引用（1.6 的 `Verse.GameComponent` 自己**没有** game 字段，所以自己存一份）</summary>
-        private readonly Game _game;
+        /// <summary>
+        /// 保留 game 引用（1.6 的 `Verse.GameComponent` 自己**没有** game 字段，所以自己存一份）。
+        /// ⚠ 必须写全 `Verse.Game` —— 本文件的命名空间就是 `FoodControl.Game`，
+        ///   裸写 `Game` 会被解析成命名空间（CS0118），这是踩过的编译错误。
+        /// </summary>
+        private readonly Verse.Game _game;
 
         /// <summary>上次跑过的"日"（绝对日序号 = 年 × 60 + 年内天）</summary>
         private int _lastRunDay = int.MinValue;
@@ -89,7 +98,7 @@ namespace FoodControl.Game
         /// <summary>
         /// ⚠ 参数**必须是单个 `Game`** —— 游戏用 `Activator.CreateInstance(type, this)` 造这个类（见类注释）。
         /// </summary>
-        public FoodControlGameComponent(Game game)
+        public FoodControlGameComponent(Verse.Game game)
             : base()
         {
             _game = game;
@@ -130,7 +139,7 @@ namespace FoodControl.Game
                 if (Current.ProgramState != ProgramState.Playing) return;
                 if (Current.Game == null) return;
 
-                Map map = Find.CurrentMap;
+                Map map = Verse.Find.CurrentMap;
                 if (map == null || !map.IsPlayerHome) return;
 
                 int hour = GenLocalDate.HourOfDay(map);
@@ -165,7 +174,7 @@ namespace FoodControl.Game
             {
                 if (Current.ProgramState != ProgramState.Playing)
                     return "未在游戏中（ProgramState != Playing）";
-                Map map = Find.CurrentMap;
+                Map map = Verse.Find.CurrentMap;
                 if (map == null) return "没有当前地图";
                 CycleResult cr = RunCycle(map, "manual");
                 return cr.Summary;
@@ -185,13 +194,13 @@ namespace FoodControl.Game
         {
             try
             {
-                Map map = Find.CurrentMap;
+                Map map = Verse.Find.CurrentMap;
                 if (map == null) return "{\"error\":\"没有当前地图\"}";
 
-                ThingDef crop = ResolveCropDef(Policy.PreferredPlantDefName);
-                PlotPlan plan = PlotPlanner.BuildPlan(map, crop, SiteOptions, Policy.MaxCellsPerDecision);
+                ThingDef crop = ResolveCropDef(PolicySettings.PreferredPlantDefName);
+                PlotPlan plan = PlotPlanner.BuildPlan(map, crop, SiteOptions, PolicySettings.MaxCellsPerDecision);
                 GameReadings readings = StateReader.Read(map, plan);
-                FoodState state = StateReader.ToFoodState(readings, plan, Calibration);
+                FoodState state = StateReader.ToFoodState(readings, plan, CalibrationSettings);
                 return Telemetry.BuildJson(readings, state, plan, null, null, "read-only", "");
             }
             catch (Exception e)
@@ -239,17 +248,17 @@ namespace FoodControl.Game
                 // ① 作物 Def：策略里写的是 defName，这里解析成 ThingDef。
                 //    用 GetNamed(name, false)（确证文档 §C10：DefDatabase<T>.GetNamed(string, bool errorOnFail)）
                 //    —— 不要 errorOnFail=true，否则玩家改配置文件写错一个名字就刷红字。
-                ThingDef crop = ResolveCropDef(Policy.PreferredPlantDefName);
+                ThingDef crop = ResolveCropDef(PolicySettings.PreferredPlantDefName);
 
                 // ② 选址计划（游戏地图 → Core 的栅格/距离场/候选）
-                PlotPlan plan = PlotPlanner.BuildPlan(map, crop, SiteOptions, Policy.MaxCellsPerDecision);
+                PlotPlan plan = PlotPlanner.BuildPlan(map, crop, SiteOptions, PolicySettings.MaxCellsPerDecision);
 
                 // ③ 感知（游戏 API → 原始读数 → Core 的 FoodState）
                 GameReadings readings = StateReader.Read(map, plan);
-                FoodState state = StateReader.ToFoodState(readings, plan, Calibration);
+                FoodState state = StateReader.ToFoodState(readings, plan, CalibrationSettings);
 
                 // ④ 决策（Core，纯函数，可离线复现）
-                FoodDecision decision = Policy.Decide(state, Policy);
+                FoodDecision decision = FoodControl.Core.Policy.Decide(state, PolicySettings);
 
                 // ⑤ 执行（Core 的动作 → 真的建区/设作物）
                 ExecutionResult exec = Executor.Execute(decision.Action, plan, map);
@@ -317,7 +326,7 @@ namespace FoodControl.Game
             if (Instance != null) return Instance;
             try
             {
-                Game g = Current.Game;
+                Verse.Game g = Current.Game;
                 if (g != null && g.components != null)
                 {
                     for (int i = 0; i < g.components.Count; i++)
@@ -346,7 +355,7 @@ namespace FoodControl.Game
 
             try
             {
-                Game g = Current.Game;
+                Verse.Game g = Current.Game;
                 if (g == null || g.components == null) return null;
                 var created = new FoodControlGameComponent(g);
                 g.components.Add(created);

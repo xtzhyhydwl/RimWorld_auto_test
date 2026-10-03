@@ -66,6 +66,24 @@ public static class CompileProbe
         // ---- 格子上的东西 ----
         List<Thing> things = new IntVec3(0, 0, 0).GetThingList(map);
 
+        // ---- 产量标定（NutritionPerCellAtMaturity 必须实测，不能估）----
+        float harvestYield = plantDef.plant.harvestYield;          // 每株基础产量
+        float harvestMinGrowth2 = plantDef.plant.harvestMinGrowth; // 可收获阈值
+        ThingDef harvested = plantDef.plant.harvestedThingDef;     // 收获产物
+        if (harvested != null)
+        {
+            // ⚠ GetStatValue 是 StatExtension 的扩展方法，接收者必须是 Thing 实例，
+            //   不能拿 ThingDef 调（实测 CS1929）。ThingMaker.MakeThing 造未入图实例来读。
+            Thing probeThing = ThingMaker.MakeThing(harvested, null);
+            if (probeThing != null)
+            {
+                float nutPerItem = probeThing.GetStatValue(StatDefOf.Nutrition, true);
+                float perCell = harvestYield * nutPerItem;         // ★ 回填 Calibration 的数
+                if (perCell < 0) { }
+            }
+        }
+        float yieldNow = plant.YieldNow();                         // 成熟后实际可收量
+
         // ---- 生长（GrowthRate 是 public；GrowthPerTick/Resting 是 protected，不能碰）----
         float growth = plant.Growth;
         float growthRate = plant.GrowthRate;

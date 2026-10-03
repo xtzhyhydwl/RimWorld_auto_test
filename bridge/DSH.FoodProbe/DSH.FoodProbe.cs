@@ -548,5 +548,125 @@ namespace DSH.FoodProbe
                 return new { success = false, message = e.Message };
             }
         }
+
+        /// <summary>
+        /// **标定：每格成熟作物值多少 nutrition。**
+        ///
+        /// 为什么必须实测而不是估：这个数直接决定「缺口 → 要种几格」。
+        /// 估错就是**系统性**地种太多或太少（比如真值 6 而填了 18 → 种 3 倍的地）。
+        ///
+        /// 算法：以游戏自己的数据为准 ——
+        ///   每格产量  = `plantDef.plant.harvestYield`（每株基础产量，受收获系数修正）
+        ///   每株营养  = `harvestedThingDef.GetStatValue(StatDefOf.Nutrition)`
+        ///   ⇒ 每格 nutrition = 产量 × 每株营养
+        /// 不做任何硬编码假设，全部从 Def 与 Stat 读。
+        /// </summary>
+        public static object YieldPerCellImpl(string plantDefName, int sampleCells)
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            var plantDef = DefDatabase<ThingDef>.GetNamedSilentFail(plantDefName);
+            if (plantDef?.plant == null)
+                return new { success = false, message = "找不到植物 Def 或它不是植物: " + plantDefName };
+
+            var pp = plantDef.plant;
+
+            // 收获产物的营养值
+            //
+            // ⚠ `GetStatValue` 是 `RimWorld.StatExtension` 的扩展方法，**接收者必须是 `Thing` 实例**，
+            //   不能拿 `ThingDef` 调（实测报 CS1929）。所以这里用 `ThingMaker.MakeThing` 造一个
+            //   **未入图**的实例来读 —— 不 spawn，不碰地图。
+            double nutPerItem = 0;
+            string harvestedDef = null;
+            try
+            {
+                var hd = pp.harvestedThingDef;
+                if (hd != null)
+                {
+                    harvestedDef = hd.defName;
+                    var probeThing = ThingMaker.MakeThing(hd, null);
+                    if (probeThing != null)
+                    {
+                        nutPerItem = probeThing.GetStatValue(StatDefOf.Nutrition, true);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = "读 harvestedThingDef 营养值失败: " + e.Message };
+            }
+
+            double yieldBase = pp.harvestYield;
+            double perCell = yieldBase * nutPerItem;
+
+            // 顺便读一下游戏里**真实**的植物：生长进度、以及成熟后可收多少
+            var samples = new List<object>();
+            double liveYieldSum = 0; int liveYieldN = 0;
+            double liveGrowthSum = 0; int liveGrowthN = 0;
+
+            if (map.listerThings != null)
+            {
+                foreach (var th in map.listerThings.AllThings)
+                {
+                    var p = th as Plant;
+                    if (p == null) continue;
+                    if (p.def != plantDef) continue;
+
+                    liveGrowthSum += p.Growth; liveGrowthN++;
+
+                    // 只有成熟到可收获时 YieldNow 才有意义
+                    double yn = 0;
+                    try { if (p.HarvestableNow) yn = p.YieldNow(); } catch { }
+                    if (yn > 0) { liveYieldSum += yn; liveYieldN++; }
+
+                    if (samples.Count < Math.Max(sampleCells, 6))
+                    {
+                        samples.Add(new
+                        {
+                            growth = Math.Round(p.Growth, 4),
+                            growthRate = Math.Round(p.GrowthRate, 4),
+                            harvestableNow = p.HarvestableNow,
+                            yieldNow = Math.Round(yn, 2),
+                        });
+                    }
+                }
+            }
+
+            return new
+            {
+                success = true,
+                plantDef = plantDef.defName,
+                growDays = pp.growDays,
+                harvestMinGrowth = pp.harvestMinGrowth,
+                harvestYieldBase = yieldBase,
+                harvestedThingDef = harvestedDef,
+                nutritionPerHarvestedItem = Math.Round(nutPerItem, 5),
+
+                // ★ 这就是要回填到 Calibration.NutritionPerCellAtMaturity 的数
+                nutritionPerCellAtMaturity = Math.Round(perCell, 4),
+                calculation = string.Format("{0} (harvestYield) × {1} (nutrition/item) = {2}",
+                    yieldBase, nutPerItem, Math.Round(perCell, 4)),
+
+                livePlantsFound = liveGrowthN,
+                liveAvgGrowth = liveGrowthN > 0 ? Math.Round(liveGrowthSum / liveGrowthN, 4) : 0,
+                liveHarvestableCount = liveYieldN,
+                liveAvgYieldNow = liveYieldN > 0 ? Math.Round(liveYieldSum / liveYieldN, 2) : 0,
+
+                sample = samples,
+                note = "perCell 用的是 harvestYield（每株基础产量）。实际还会被种植者技能/"
+                     + "PlantHarvestYield 等 stat 修正；liveAvgYieldNow 是游戏真实 YieldNow 的均值，"
+                     + "两者对比可以看出修正幅度。",
+            };
+        }
+
+        [Tool("foodprobe/yield_per_cell",
+            Description = "标定：某作物每格成熟后值多少 nutrition（读游戏 Def + Stat，不硬编码）。只读。")]
+        public object YieldPerCell(
+            [ToolParameter(Description = "作物 defName，默认 Plant_Rice")] string plantDefName = "Plant_Rice",
+            [ToolParameter(Description = "采样多少个植物，默认 6")] int sampleCells = 6)
+        {
+            return YieldPerCellImpl(plantDefName, sampleCells);
+        }
     }
 }

@@ -44,6 +44,74 @@ namespace FoodControl.Game
         // ------------------------------------------------------------------
 
         /// <summary>
+        /// **测试钩子专用**：无参数地读「当前地图」的状态，返回一个**全是属性**的快照对象。
+        ///
+        /// 为什么单独加这一个（`bridge/DSH.FoodProbe` 的 `foodprobe/read_state` 会反射调它）：
+        ///   1. 那个探针是 `CallStatic(reader, "Read")` → `"ReadCurrentMap"`，**按 0 个参数找方法**，
+        ///      而 <see cref="Read"/> 需要 (Map, PlotPlan)，所以必须有一个 0 参入口。
+        ///   2. 探针的 `Describe()` **只遍历 public 属性、不遍历字段**，
+        ///      而 `FoodState` / `GameReadings` 的成员都是 public 字段 —— 直接返回它们只会得到空字典。
+        ///      所以这里用一个以属性为主的 DTO。
+        /// 只读：不决策、不执行、不写遥测。
+        /// </summary>
+        public static FoodStateSnapshot ReadCurrentMap()
+        {
+            var snap = new FoodStateSnapshot();
+            try
+            {
+                Map map = Verse.Find.CurrentMap;
+                if (map == null)
+                {
+                    snap.Error = "没有当前地图";
+                    return snap;
+                }
+
+                // 选址计划也要造一份 —— 「可用空地」是 PlotPlanner 才能算的量
+                ThingDef crop = null;
+                try { crop = DefDatabase<ThingDef>.GetNamed("Plant_Rice", false); } catch (Exception) { }
+                PlotPlan plan = PlotPlanner.BuildPlan(map, crop, new SiteSelectionOptions(), 0);
+
+                GameReadings readings = Read(map, plan);
+                FoodState state = ToFoodState(readings, plan, new Calibration());
+
+                snap.Tick = readings.Tick;
+                snap.DayOfYear = readings.DayOfYear;
+                snap.Season = readings.Season;
+                snap.Stock = state.Stock;
+                snap.ColonistCount = readings.ColonistCount;
+                snap.BurnRatePerDay = state.BurnRatePerDay;
+                snap.ReserveDays = state.ReserveDays;
+                snap.ArableCellsAvailable = state.ArableCellsAvailable;
+                snap.ArableCellsInExistingZones = plan.ArableCellsInExistingZones;
+                snap.GrowingZoneCount = readings.GrowingZoneCount;
+                snap.CultivatedCells = readings.CultivatedCellCount;
+                snap.WildPlantsIgnored = readings.WildPlantCount;
+                snap.FoodStacks = readings.FoodStackCount;
+                snap.FoodDefs = readings.FoodDefCount;
+                snap.Error = readings.Error;
+                snap.PlanNote = plan.Note;
+
+                snap.Planted = new List<string>();
+                if (readings.CultivatedPlants != null)
+                {
+                    for (int i = 0; i < readings.CultivatedPlants.Count; i++)
+                    {
+                        PlantBucket b = readings.CultivatedPlants[i];
+                        if (b == null) continue;
+                        snap.Planted.Add(string.Format(
+                            "{0} cells={1} growth={2:F3} growthRate={3:F3} growDays={4:F1}",
+                            b.DefName, b.CellCount, b.AvgGrowth, b.AvgGrowthRate, b.GrowDays));
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                snap.Error = "ReadCurrentMap 异常: " + e.Message;
+            }
+            return snap;
+        }
+
+        /// <summary>
         /// 把游戏状态读成 <see cref="GameReadings"/>。
         ///
         /// 设计上**永不抛异常**给调用方：任何单点失败都降级成 <see cref="GameReadings.Error"/> 文本，
@@ -339,5 +407,36 @@ namespace FoodControl.Game
             if (string.IsNullOrEmpty(a)) return b;
             return a + " | " + b;
         }
+    }
+
+    /// <summary>
+    /// 感知结果的**只读快照**，全部用 public 属性。
+    ///
+    /// 为什么用属性而不是字段：`bridge/DSH.FoodProbe` 的 `Describe()` 只反射 public 属性，
+    /// 用字段的话探针输出会是一堆空对象（踩过）。这个类只服务于「测试读一眼」这个场景，
+    /// 闭环本体走的是 <see cref="GameReadings"/> + <see cref="FoodControl.Core.FoodState"/>。
+    /// </summary>
+    public sealed class FoodStateSnapshot
+    {
+        public int Tick { get; set; }
+        public int DayOfYear { get; set; }
+        public string Season { get; set; }
+
+        public double Stock { get; set; }
+        public int ColonistCount { get; set; }
+        public double BurnRatePerDay { get; set; }
+        public double ReserveDays { get; set; }
+
+        public int ArableCellsAvailable { get; set; }
+        public int ArableCellsInExistingZones { get; set; }
+        public int GrowingZoneCount { get; set; }
+        public int CultivatedCells { get; set; }
+        public int WildPlantsIgnored { get; set; }
+        public int FoodStacks { get; set; }
+        public int FoodDefs { get; set; }
+
+        public List<string> Planted { get; set; }
+        public string PlanNote { get; set; }
+        public string Error { get; set; }
     }
 }

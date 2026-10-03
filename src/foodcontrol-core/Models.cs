@@ -61,10 +61,13 @@ namespace FoodControl.Core
         public double GrowthRate = 1.0;
 
         /// <summary>
-        /// 该作物从 0 长到 1 需要的游戏天数，对应 `ThingDef.plant.growDays`（水稻 = 2）。
+        /// 该作物从 0 长到 1 需要的游戏天数，对应 `ThingDef.plant.growDays`。
+        ///
+        /// 水稻实测 **growDays = 3**（游戏内实测，2026-10-03）。
+        /// ⚠ 这里**不要硬编码具体作物的值** —— 由游戏层运行时从 `def.plant.growDays` 读取填入。
         /// 游戏里的公式是 `GrowthPerTick = GrowthRate / (60000 × growDays)`。
         /// </summary>
-        public double GrowDays = 5.8;
+        public double GrowDays = 3.0;
 
         public PlantGroup() { }
 

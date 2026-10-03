@@ -121,7 +121,7 @@ namespace FoodControl.Game
             zone = PickZoneWithExtendCells(plan);
             if (zone != null)
             {
-                return ExtendZone(zone, plan, map, need, res, false);
+                return ExtendZone(zone, plan, map, need, res);
             }
 
             // ---- ③ 实在没有可复用的，才新建地块 ----
@@ -168,7 +168,7 @@ namespace FoodControl.Game
         }
 
         private static ExecutionResult ExtendZone(
-            Zone_Growing zone, PlotPlan plan, Map map, int need, ExecutionResult res, bool placeholder)
+            Zone_Growing zone, PlotPlan plan, Map map, int need, ExecutionResult res)
         {
             res.Method = "extend-zone";
             string id = PlotPlanner.ZoneIdOf(zone);
