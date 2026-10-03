@@ -1550,6 +1550,202 @@ namespace DSH.FoodProbe
             }
         }
 
+        [Tool("foodprobe/concerns",
+            Description = "★ 读**基本面**：生产队列 / 研究 / 心情期望 / 财富。面向对象，非事件推断。只读。")]
+        public object Concerns()
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            try
+            {
+                // ── ① 生产队列（用户: "有没有我们需要的、但没在生产的东西"）──
+                var bills = new List<object>();
+                try
+                {
+                    foreach (Thing t in map.listerThings.AllThings)
+                    {
+                        if (t?.def == null) continue;
+                        BillStack stack = null;
+                        try
+                        {
+                            // 工作台走 IBillGiver 接口（不是 CompBiocodable —— 那个是生物编码）
+                            var giver = t as IBillGiver;
+                            if (giver != null) stack = giver.BillStack;
+                        }
+                        catch (Exception) { }
+                        if (stack == null) continue;
+
+                        foreach (Bill b in stack.Bills)
+                        {
+                            if (b == null) continue;
+                            object target = null;
+                            string repeatMode = null;
+                            try
+                            {
+                                // ⚠ `repeatMode` **不在 `Bill` 基类上**（编译期确证过），
+                                //   所以用反射探测 —— 拿到更好，拿不到也不影响主功能。
+                                var rmProp = b.GetType().GetProperty("repeatMode");
+                                if (rmProp != null)
+                                {
+                                    var rmv = rmProp.GetValue(b, null);
+                                    if (rmv != null)
+                                    {
+                                        var dn = rmv.GetType().GetProperty("defName");
+                                        repeatMode = dn != null ? dn.GetValue(rmv, null) as string : rmv.ToString();
+                                    }
+                                }
+                                var tc = b.GetType().GetProperty("targetCount");
+                                if (tc != null) target = tc.GetValue(b, null);
+                            }
+                            catch (Exception) { }
+
+                            bills.Add(new
+                            {
+                                bench = t.def.defName,
+                                benchPos = new int[] { t.Position.x, t.Position.z },
+                                recipe = b.recipe != null ? b.recipe.defName : null,
+                                recipeLabel = b.recipe != null ? b.recipe.label : null,
+                                suspended = b.suspended,
+                                repeatMode,
+                                targetCount = target,
+                            });
+                        }
+                    }
+                }
+                catch (Exception) { }
+
+                // ── ② 研究 ──
+                object research = null;
+                try
+                {
+                    var rm = Find.ResearchManager;
+                    if (rm != null)
+                    {
+                        object cur = null;
+                        try { cur = rm.GetType().GetProperty("currentProj")?.GetValue(rm, null); }
+                        catch (Exception) { }
+
+                        var finished = new List<string>();
+                        try
+                        {
+                            foreach (var d in DefDatabase<ResearchProjectDef>.AllDefsListForReading)
+                            {
+                                bool done = false;
+                                try { done = d.IsFinished; } catch (Exception) { }
+                                if (done) finished.Add(d.defName);
+                            }
+                        }
+                        catch (Exception) { }
+
+                        research = new
+                        {
+                            current = cur?.ToString(),
+                            finishedCount = finished.Count,
+                            finished,
+                        };
+                    }
+                }
+                catch (Exception) { }
+
+                // ── ③ 心情 + 期望（★ 用户点出的"富→期望↑→心情↓"环）──
+                var moods = new List<object>();
+                try
+                {
+                    foreach (Pawn p in map.mapPawns.FreeColonists)
+                    {
+                        if (p?.needs == null) continue;
+
+                        float moodLevel = -1;
+                        try
+                        {
+                            var mn = p.needs.mood;
+                            if (mn != null) moodLevel = mn.CurLevelPercentage;
+                        }
+                        catch (Exception) { }
+
+                        string expectation = null;
+                        try
+                        {
+                            var e = ExpectationsUtility.CurrentExpectationFor(p);
+                            expectation = e != null ? e.defName : null;
+                        }
+                        catch (Exception) { }
+
+                        var negThoughts = new List<string>();
+                        try
+                        {
+                            var mem = p.needs.mood != null ? p.needs.mood.thoughts : null;
+                            var memories = mem != null ? mem.memories : null;
+                            if (memories != null)
+                            {
+                                var listProp = memories.GetType().GetProperty("Memories");
+                                var list = listProp != null ? listProp.GetValue(memories, null) as System.Collections.IEnumerable : null;
+                                if (list != null)
+                                {
+                                    foreach (object o in list)
+                                    {
+                                        var mt = o as Thought_Memory;
+                                        if (mt?.def == null) continue;
+                                        float off = 0;
+                                        try { off = mt.MoodOffset(); } catch (Exception) { }
+                                        if (off < 0 && negThoughts.Count < 6)
+                                            negThoughts.Add(mt.def.defName + "(" + off.ToString("F1") + ")");
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception) { }
+
+                        moods.Add(new
+                        {
+                            name = p.Name?.ToStringShort,
+                            mood = moodLevel,
+                            expectation,
+                            negativeThoughts = negThoughts,
+                        });
+                    }
+                }
+                catch (Exception) { }
+
+                // ── ④ 财富（期望的驱动量）──
+                object wealth = null;
+                try
+                {
+                    var ww = map.wealthWatcher;
+                    if (ww != null)
+                    {
+                        wealth = new
+                        {
+                            total = ww.WealthTotal,
+                            items = ww.WealthItems,
+                            buildings = ww.WealthBuildings,
+                            pawns = ww.WealthPawns,
+                        };
+                    }
+                }
+                catch (Exception) { }
+
+                return new
+                {
+                    success = true,
+                    billCount = bills.Count,
+                    bills,
+                    research,
+                    moods,
+                    wealth,
+                    note = "★ 用户 2026-10-03 点出的\"关注面\"：他不会具体关心某个资源的数值，"
+                         + "而是**总体的**看。特别是这个**反馈环**：殖民地变富 → 小人期望↑ → 心情↓ → "
+                         + "需要**更好的食物**（数量明明够！）→ 心情回升。"
+                         + "只看\"食物够不够\"的 AI **永远看不懂\"为什么产精致食物\"**。",
+                };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message, stack = e.StackTrace };
+            }
+        }
+
         [Tool("foodprobe/health", Description = "自检：FoodControl mod 加载了吗、内部类型和静态入口在不在。只读。")]
         public object Health()
         {
