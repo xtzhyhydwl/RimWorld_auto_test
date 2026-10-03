@@ -1,10 +1,9 @@
 using System;
 using System.Collections.Generic;
-using FoodControl.Core;
 using RimWorld;
 using Verse;
 
-namespace FoodControl.Game
+namespace ColonySnapshots
 {
     /// <summary>
     /// **一个快照读取块** —— 每个"关注面"实现一个。
@@ -465,19 +464,94 @@ namespace FoodControl.Game
         public int Order { get { return 60; } }
         public string ProvidedFields { get { return "research{current/finishedCount/finished[]}"; } }
 
+        /// <summary>诊断只记一次，避免每张快照都刷屏</summary>
+        private static bool _diagLogged;
+
         public void Read(Map map, ColonySnapshot snap, SnapshotReadContext ctx)
         {
             var rm = Find.ResearchManager;
             if (rm == null) { ctx.Warn("ResearchManager 为 null"); return; }
 
+            // ⚠ **两次都读错，第二次才找到真原因**（2026-10-03，值得留档）：
+            //   ① 第一版用 `GetProperty("currentProj")` → 沉默拿到 null，`research.current` 恒空。
+            //   ② 查程序集元数据发现"它是个字段"，于是改用 `GetField("currentProj")`（默认只找 public）
+            //      —— **运行时仍然返回 null**，于是每张快照都报"读不到"。
+            //   ③ 真原因（用**运行时**反射打出来的字段清单 + 可见性对照确证）：
+            //      `RimWorld.ResearchManager.currentProj` 在 1.6 里是 **private 字段**，
+            //      公有侧**没有**"当前项目"的 getter（只有 `IsCurrentProject(proj)` / `GetProgress(proj)`）。
+            //   ⇒ 教训：**元数据里"有这个成员" ≠ 默认绑定能拿得到**；
+            //     凡是反射，必须显式写清 `BindingFlags`，并且在**运行时**验证（磁盘元数据会骗人）。
+            //
+            //   所以这里**先用公有 API**（遍历 + `IsCurrentProject`，不碰反射），
+            //   再退回"反射读 private 字段"兜底。
+            object v = null;
+            bool memberFound = false;
+
+            // ① 首选：公有 API —— 逐个问"这个项目是不是正在研究的那个"
             try
             {
-                var p = rm.GetType().GetProperty("currentProj");
-                var v = p != null ? p.GetValue(rm, null) : null;
-                snap.ResearchCurrent = v != null ? v.ToString() : "";
-                if (v == null) ctx.Warn("currentProj 读不到（可能名字变了）—— 若研究台在跑却一直是空，就是这里失效");
+                foreach (ResearchProjectDef d in DefDatabase<ResearchProjectDef>.AllDefsListForReading)
+                {
+                    if (d == null) continue;
+                    bool cur = false;
+                    try { cur = rm.IsCurrentProject(d); } catch (Exception) { }
+                    if (cur) { v = d; break; }
+                }
+                // 遍历本身成功了（没抛）⇒ 读法没坏；没找到就是**真的没在研究**
+                memberFound = true;
             }
-            catch (Exception e) { ctx.Warn("currentProj 失败：" + e.Message); }
+            catch (Exception e) { ctx.Warn("IsCurrentProject 遍历失败：" + e.Message); }
+
+            // ② 兜底：反射读 `currentProj`（★ 必须带 NonPublic —— 它是 private）
+            if (!memberFound)
+            {
+                try
+                {
+                    const System.Reflection.BindingFlags F =
+                        System.Reflection.BindingFlags.Public
+                        | System.Reflection.BindingFlags.NonPublic
+                        | System.Reflection.BindingFlags.Instance;
+
+                    var f = rm.GetType().GetField("currentProj", F);
+                    if (f != null) { memberFound = true; v = f.GetValue(rm); }
+                    else
+                    {
+                        var p = rm.GetType().GetProperty("currentProj", F);
+                        if (p != null) { memberFound = true; v = p.GetValue(rm, null); }
+                    }
+                }
+                catch (Exception e) { ctx.Warn("反射读 currentProj 失败：" + e.Message); }
+            }
+
+            snap.ResearchCurrent = v != null ? v.ToString() : "";
+            if (!memberFound)
+            {
+                // ★ 一次性诊断：说明白"为什么读不到"（本项目的纪律：失败必须带原因）
+                if (!_diagLogged)
+                {
+                    _diagLogged = true;
+                    try
+                    {
+                        Type t = rm.GetType();
+                        var flags = System.Reflection.BindingFlags.Public
+                                  | System.Reflection.BindingFlags.NonPublic
+                                  | System.Reflection.BindingFlags.Instance
+                                  | System.Reflection.BindingFlags.Static;
+                        var names = new List<string>();
+                        foreach (System.Reflection.FieldInfo fi in t.GetFields(flags)) names.Add(fi.Name);
+                        var props = new List<string>();
+                        foreach (System.Reflection.PropertyInfo pi in t.GetProperties(flags)) props.Add(pi.Name);
+                        Log.Message("[ColonyRecorder][诊断] research 读不到：运行时类型=" + t.AssemblyQualifiedName
+                            + " | 字段(" + names.Count + ")=" + string.Join(",", names.ToArray())
+                            + " | 属性(" + props.Count + ")=" + string.Join(",", props.ToArray()));
+                    }
+                    catch (Exception e2)
+                    {
+                        try { Log.Warning("[ColonyRecorder][诊断] 连诊断都失败了：" + e2.Message); } catch (Exception) { }
+                    }
+                }
+                ctx.Warn("currentProj 读不到（公有 API 与 private 字段反射都失败）");
+            }
 
             try
             {
@@ -539,9 +613,11 @@ namespace FoodControl.Game
                         snap.Designations[d.def.defName] = list;
                     }
                     if (list.Count < 1500) list.Add(new int[] { d.target.Cell.x, d.target.Cell.z });
+                    else ctx.Warn(d.def.defName + " 超过 1500 个，已截断");
                     ctx.ItemsRead++;
                 }
-                catch (Exception) { }
+                // ⚠ 记原因：静默吞掉会让"标记读不到"看起来像"这一局没有标记"（本项目的纪律）
+                catch (Exception e) { ctx.Warn("标记读取失败：" + e.Message); }
             }
         }
     }

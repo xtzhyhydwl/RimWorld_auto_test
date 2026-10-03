@@ -3,11 +3,10 @@ using System.Collections.Generic;
 using System.Text;
 using System.Globalization;
 using System.IO;
-using FoodControl.Core;
 using RimWorld;
 using Verse;
 
-namespace FoodControl.Game
+namespace ColonySnapshots
 {
     /// <summary>
     /// **殖民地状态录制器** —— 静默地按**游戏 tick** 间隔把殖民地状态写成快照。
@@ -34,7 +33,7 @@ namespace FoodControl.Game
     ///
     /// 本组件**只读**，且：
     /// - 不调用任何 domain / coordinator
-    /// - 不受 `FoodControlGameComponent.Enabled` 影响（那个开关只管自动化）
+    /// - 不受任何自动化开关影响（本 mod 里根本没有自动化的东西）
     /// - 自己独立的开关 `ColonyRecorder.Enabled`
     /// - 写盘失败只记警告，**绝不抛给游戏**
     /// </summary>
@@ -49,8 +48,10 @@ namespace FoodControl.Game
         /// <summary>上次采样的 tick</summary>
         private int _lastTick = int.MinValue;
 
-        /// <summary>已写快照数</summary>
-        private int _seq;
+        // ⚠ 这里**没有**自己的序号 —— 序号由 `SnapshotBuilder` 统一维护（`snap.Seq`）。
+        //   第一版留了一个 `_seq` 字段但没同步，于是 `snap.Seq` 恒为 0，
+        //   而 `snap.Seq % 10 == 0` 对 0 永远成立 → "每 10 张报一次"变成"每张都报"。
+        //   教训：**默认值刚好让条件恒真**的 bug 最难看出来。
 
         /// <summary>本会话的输出文件</summary>
         private string _file;
@@ -62,7 +63,14 @@ namespace FoodControl.Game
         {
         }
 
-        /// <summary>输出目录：存档目录下的 foodcontrol-snapshots/</summary>
+        /// <summary>
+        /// 输出目录：存档目录下的 `foodcontrol-snapshots/`。
+        ///
+        /// ⚠ 目录名**故意保持不变**（不改成 colony-snapshots）：分析端脚本
+        ///   `scripts/analyze-snapshots.mjs` 的 `SNAPSHOT_DIR` 与既有的
+        ///   `profiles/vanilla/foodcontrol-snapshots/` 都依赖这个名字，
+        ///   改名会让已有数据与工具链对不上。它只是个目录名，不影响本 mod 的独立性。
+        /// </summary>
         public static string OutDir
         {
             get
@@ -97,7 +105,7 @@ namespace FoodControl.Game
             catch (Exception e)
             {
                 // ★ 录制器**绝不能影响游戏** —— 吞掉一切
-                try { Log.Warning("[FoodControl][录制] tick 异常（已吞）：" + e.Message); } catch (Exception) { }
+                try { Log.Warning("[ColonyRecorder][录制] tick 异常（已吞）：" + e.Message); } catch (Exception) { }
             }
         }
 
@@ -121,12 +129,12 @@ namespace FoodControl.Game
                 // 每 10 张露一次脸 + **健康摘要**（回答用户说的"是否读取了足量"）
                 if (snap.Seq == 1 || snap.Seq % 10 == 0)
                 {
-                    try { Log.Message("[FoodControl][录制] " + HealthSummary(snap)); } catch (Exception) { }
+                    try { Log.Message("[ColonyRecorder][录制] " + HealthSummary(snap)); } catch (Exception) { }
                 }
             }
             catch (Exception e)
             {
-                try { Log.Warning("[FoodControl][录制] 采集失败（已吞）：" + e.Message); } catch (Exception) { }
+                try { Log.Warning("[ColonyRecorder][录制] 采集失败（已吞）：" + e.Message); } catch (Exception) { }
             }
         }
 
@@ -193,7 +201,7 @@ namespace FoodControl.Game
             // 文件名带启动时间，一次游戏会话一个文件（重新开档不会混在一起）
             string name = "colony-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + ".jsonl";
             _file = Path.Combine(dir, name);
-            try { Log.Message("[FoodControl][录制] 本次会话写入 " + _file); } catch (Exception) { }
+            try { Log.Message("[ColonyRecorder][录制] 本次会话写入 " + _file); } catch (Exception) { }
         }
 
         public override void ExposeData()

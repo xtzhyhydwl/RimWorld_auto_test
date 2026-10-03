@@ -22,6 +22,12 @@
 ★ **两条线都需要先读**：`docs/协作规范.md` + 各自的交接文件。
 ★ 本文件（STATUS.md）**偏自动化线**；快照线的完整说明在它自己的交接文件里。
 
+★ **快照线现状（2026-10-03 晚，与自动化线已物理隔离）**：
+录制器已独立成 mod `mods/ColonyRecorder`（`dsh.colonyrecorder`），源码在 `src/colonyrecorder/`，
+编译 `node scripts/build-recorder.mjs --deploy`；程序集与 FoodControl **零引用**（二进制扫描确证）。
+隔离实例的 ModsConfig **只加载它**、不加载 `dsh.foodcontrol`。分析端：`node scripts/analyze-snapshots.mjs`。
+⚠ 因此 `src/foodcontrol-game/` 与 `src/foodcontrol-core/` 里**已经没有**录制器那几个文件（含 `ColonySnapshot.cs`）。
+
 ---
 
 ## 当前在做什么

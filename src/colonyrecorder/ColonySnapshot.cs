@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace FoodControl.Core
+namespace ColonySnapshots
 {
     /// <summary>
     /// **殖民地状态快照**（纯数据，可序列化）。
@@ -236,7 +236,42 @@ namespace FoodControl.Core
 
         internal static string Q(string s)
         {
-            return SimpleJson.Quote(s);
+            return Quote(s);
+        }
+
+        /// <summary>
+        /// 把字符串转成带引号的 JSON 字面量（转义规则与原 `SimpleJson.Quote` **逐条一致**）。
+        ///
+        /// ⚠ 这里**故意复制**一份实现，而不是引用 FoodControl 的 `SimpleJson`：
+        ///   本 mod 是独立程序集，不能依赖 FoodControl.Core。
+        ///   转义规则必须与原实现一致，否则 JSONL 的往返一致性会被打破
+        ///   （`scripts/analyze-snapshots.mjs` 依赖现有字段格式）。
+        /// </summary>
+        private static string Quote(string s)
+        {
+            if (s == null) return "\"\"";
+            var sb = new StringBuilder(s.Length + 2);
+            sb.Append('"');
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                switch (c)
+                {
+                    case '"': sb.Append("\\\""); break;
+                    case '\\': sb.Append("\\\\"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    case '\b': sb.Append("\\b"); break;
+                    case '\f': sb.Append("\\f"); break;
+                    default:
+                        if (c < 0x20) sb.Append("\\u").Append(((int)c).ToString("x4"));
+                        else sb.Append(c);
+                        break;
+                }
+            }
+            sb.Append('"');
+            return sb.ToString();
         }
 
         internal static string N(double d)

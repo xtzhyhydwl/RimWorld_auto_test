@@ -1,8 +1,7 @@
 using System;
-using FoodControl.Core;
 using Verse;
 
-namespace FoodControl.Game
+namespace ColonySnapshots
 {
     /// <summary>
     /// **快照构建入口**（薄封装）。
@@ -72,6 +71,16 @@ namespace FoodControl.Game
         /// <param name="intervalTicks">设定的采样间隔（进快照，供分析端判断"漏采了没"）</param>
         public static ColonySnapshot Build(Map map, int tick, int intervalTicks)
         {
+            // ⚠ 换局 / 读档会让 tick **倒退**（新地图从 ~0 开始），而这两个静态量还停在上局。
+            //   不处理的话 `sincePrevTick` 会算成**负数**、序号会接着上局往下走 ——
+            //   采样密度的度量当场失真（而"度量失真是最难自己发现的"，正是这条线要防的）。
+            //   所以：看到 tick 倒退，就当"新的一局"，把采样状态清干净。
+            if (_lastTick != int.MinValue && tick < _lastTick)
+            {
+                _seq = 0;
+                _lastTick = int.MinValue;
+            }
+
             var sampling = new SamplingInfo
             {
                 IntervalTicks = intervalTicks,
