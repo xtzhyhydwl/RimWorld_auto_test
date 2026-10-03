@@ -50,6 +50,13 @@
    （或删掉该键让 prefs.json 重新播种），否则会继承用户设的中文。
 2. `ModsConfig.xml` 我们**从不写**（`src/` 里没有任何写它的代码）—— 用户加的 mod 不会被我们的启动流程重置。
 
+### ★ 接手"用户实际游玩录制"请看 [docs/交接-快照捕捉-接手.md](docs/交接-快照捕捉-接手.md)
+用户 2026-10-04 改了口径：**不再用隔离纯净实例，直接从 Steam 目录启动正常游戏**来测。
+启动前要确认游戏 `Mods\` 目录 + **默认档**的 `ModsConfig.xml` 里有 `ColonyRecorder`（录制器）与 `RimBridgeServer`（桥接）。
+**我已把 `<li>dsh.colonyrecorder</li>` 追加到默认档 `ModsConfig.xml` 的 `activeMods` 末尾**（2026-10-04 01:38:48，`RimBridgeServer` 本来就在）。
+数据会写到**默认存档目录**的 `foodcontrol-snapshots\`（不是 `profiles/vanilla/…`）⇒ 分析时必须显式传路径。
+⚠ 新面（`rooms/materials/pawnDetails/游戏内日期`）与整个操作事件流**从未在真游戏里产出过数据** —— 接手第一件事就是按那份交接文件核验。
+
 ---
 
 ## 当前在做什么
