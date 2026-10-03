@@ -87,6 +87,16 @@ namespace FoodControl.Core
         public int Height;
         public List<string> Tags = new List<string>();
 
+        /// <summary>
+        /// **行长不一致**的标记。
+        ///
+        /// 为什么需要它：`NormalizeSize()` 会按**最长的行**定宽度，
+        /// 所以"某行少写了一个字符"这种手写错误**不会**自然暴露 ——
+        /// 短的行的右端会被当成空地，于是样板会缺一块墙。
+        /// （我写测试时就踩了这个：以为会报错，结果静默通过了。）
+        /// </summary>
+        public bool RowLengthsDiffer;
+
         /// <summary>允许 mod 按地形旋转后再放</summary>
         public bool Rotatable = true;
         /// <summary>允许镜像</summary>
@@ -127,11 +137,20 @@ namespace FoodControl.Core
         {
             Height = Rows.Count;
             int w = 0;
+            bool differ = false;
             for (int i = 0; i < Rows.Count; i++)
             {
-                if (Rows[i] != null && Rows[i].Length > w) w = Rows[i].Length;
+                int len = Rows[i] == null ? 0 : Rows[i].Length;
+                if (len > w) w = len;
+            }
+            // 再走一遍判断是否齐长（要在 max 定下来之后）
+            for (int i = 0; i < Rows.Count; i++)
+            {
+                int len = Rows[i] == null ? 0 : Rows[i].Length;
+                if (len != w) { differ = true; break; }
             }
             Width = w;
+            RowLengthsDiffer = differ;
         }
 
         /// <summary>
@@ -157,16 +176,22 @@ namespace FoodControl.Core
             }
 
             // 行长是否一致
-            for (int z = 0; z < Rows.Count; z++)
+            // ⚠ 必须看 RowLengthsDiffer 这个标记，不能逐行跟 Width 比 ——
+            //   Width 是"最长行"的长度，所以短的行会被漏掉（我踩过）。
+            if (RowLengthsDiffer)
             {
-                if (Rows[z] == null)
+                for (int z = 0; z < Rows.Count; z++)
                 {
-                    errs.Add("第 " + z + " 行是 null");
-                    continue;
+                    int len = Rows[z] == null ? 0 : Rows[z].Length;
+                    if (len != Width)
+                        errs.Add("第 " + z + " 行长度 " + len + " != 宽度 " + Width);
                 }
-                if (Rows[z].Length != Width)
+            }
+            else
+            {
+                for (int z = 0; z < Rows.Count; z++)
                 {
-                    errs.Add("第 " + z + " 行长度 " + Rows[z].Length + " != 宽度 " + Width);
+                    if (Rows[z] == null) errs.Add("第 " + z + " 行是 null");
                 }
             }
 

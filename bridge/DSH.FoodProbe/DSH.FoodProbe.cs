@@ -1613,6 +1613,273 @@ namespace DSH.FoodProbe
             };
         }
 
+        // ── 样板捕捉（把玩家手造的建筑编码成模板）────────────────────
+        //
+        // 用户 2026-10-03 的方向：他自己在上帝模式里造样板房（卧室/仓库/厨房），
+        // 我们**扫描**并编码下来，之后直接抄。
+        // 所以这是整个"样板系统"的第一步，也是最紧急的一步 ——
+        // 没有它，用户造完了我也拿不到。
+
+        /// <summary>
+        /// 把一块矩形区域扫成"角色网格"。
+        ///
+        /// ## 关键设计：按**角色**分类，不是按具体 Def
+        ///
+        /// 用户要求「不必百分百还原，只要物块对得上」：
+        /// 床可以是别的床、墙可以是别的墙、光源可以是别的光源。
+        /// 所以这里只输出**角色代号**，并附上"游戏里实际用了什么"作为参考
+        /// （由 Node 侧决定要把哪些 Def 列进模板的 `accepts`）。
+        ///
+        /// ## 为什么要输出两遍（原始 + 裁剪）
+        ///
+        /// 用户手画的时候很难精确框到墙的外沿。所以：
+        ///   - `rawRows`：**原样**输出请求的矩形（便于人核对坐标）
+        ///   - `trimmedRows`：**裁到有内容的包围盒**（这才是可用的样板）
+        /// 裁剪结果连同偏移量一起给出，便于换算。
+        /// </summary>
+        public static object CaptureGridImpl(int x, int z, int w, int h)
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+            if (w <= 0 || h <= 0) return new { success = false, message = "宽高必须为正" };
+            if (w > 120 || h > 120) return new { success = false, message = "矩形过大（上限 120x120）" };
+            if (x < 0 || z < 0 || x + w > map.Size.x || z + h > map.Size.z)
+                return new { success = false, message = "矩形越界", mapSize = new { x = map.Size.x, z = map.Size.z } };
+
+            int W = w, H = h;
+            var codes = new char[W * H];      // '\0' = 空地
+            var legend = new Dictionary<char, object>();
+            var warnings = new List<string>();
+            int empty = 0, wallN = 0, doorN = 0, furnitureN = 0, lightN = 0, roofedN = 0;
+            var defsSeen = new Dictionary<string, int>();
+
+            try
+            {
+                for (int dz = 0; dz < H; dz++)
+                {
+                    for (int dx = 0; dx < W; dx++)
+                    {
+                        int cx = x + dx, cz = z + dz;
+                        var c = new IntVec3(cx, 0, cz);
+                        int i = dz * W + dx;
+
+                        try { if (map.roofGrid.Roofed(c)) roofedN++; } catch { }
+
+                        char best = '\0';
+                        int bestRank = int.MaxValue;
+                        string bestDef = null;
+
+                        List<Thing> things = null;
+                        try { things = c.GetThingList(map); } catch { }
+                        if (things != null)
+                        {
+                            for (int k = 0; k < things.Count; k++)
+                            {
+                                var t = things[k];
+                                if (t?.def == null) continue;
+                                if (t.def.category != ThingCategory.Building) continue;
+                                // 已建成 / 蓝图 / 框架（用户可能还没建完）
+                                if (!(t is Building || t is Blueprint || t is Frame)) continue;
+
+                                char sym; int rank; string role;
+                                ClassifyBuilding(t, out sym, out rank, out role);
+
+                                if (rank < bestRank)
+                                {
+                                    bestRank = rank;
+                                    best = sym;
+                                    bestDef = t.def.defName;
+                                }
+
+                                string key = t.def.defName;
+                                if (!defsSeen.ContainsKey(key)) defsSeen[key] = 0;
+                                defsSeen[key]++;
+                            }
+                        }
+
+                        if (best == '\0')
+                        {
+                            empty++;
+                            codes[i] = '\0';
+                        }
+                        else
+                        {
+                            codes[i] = best;
+                            if (best == 'W') wallN++;
+                            else if (best == 'D') doorN++;
+                            else if (best == 'L') lightN++;
+                            else furnitureN++;
+
+                            if (!legend.ContainsKey(best))
+                            {
+                                legend[best] = new
+                                {
+                                    symbol = best.ToString(),
+                                    role = RoleNameOf(best),
+                                    exampleDef = bestDef,
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = "扫描失败：" + e.Message };
+            }
+
+            // ── 原始行 ──
+            var rawRows = new List<string>();
+            for (int dz = 0; dz < H; dz++)
+            {
+                var sb = new System.Text.StringBuilder(W);
+                for (int dx = 0; dx < W; dx++)
+                {
+                    char c = codes[dz * W + dx];
+                    sb.Append(c == '\0' ? '.' : c);
+                }
+                rawRows.Add(sb.ToString());
+            }
+
+            // ── 裁剪到"有内容的包围盒"──
+            int minX = int.MaxValue, minZ = int.MaxValue, maxX = int.MinValue, maxZ = int.MinValue;
+            for (int dz = 0; dz < H; dz++)
+            {
+                for (int dx = 0; dx < W; dx++)
+                {
+                    if (codes[dz * W + dx] == '\0') continue;
+                    if (dx < minX) minX = dx;
+                    if (dx > maxX) maxX = dx;
+                    if (dz < minZ) minZ = dz;
+                    if (dz > maxZ) maxZ = dz;
+                }
+            }
+
+            var trimmed = new List<string>();
+            object trim = null;
+            if (minX <= maxX)
+            {
+                for (int dz = minZ; dz <= maxZ; dz++)
+                {
+                    var sb = new System.Text.StringBuilder(maxX - minX + 1);
+                    for (int dx = minX; dx <= maxX; dx++)
+                        sb.Append(codes[dz * W + dx] == '\0' ? '.' : codes[dz * W + dx]);
+                    trimmed.Add(sb.ToString());
+                }
+                trim = new
+                {
+                    offsetX = x + minX,
+                    offsetZ = z + minZ,
+                    width = maxX - minX + 1,
+                    height = maxZ - minZ + 1,
+                    note = "trimmedRows 是以这组坐标/尺寸裁剪后的样板；用它对得上墙的外沿。",
+                };
+            }
+            else
+            {
+                warnings.Add("这块矩形里**没有任何建筑** —— 是不是框错位置了？");
+            }
+
+            if (wallN == 0) warnings.Add("没扫到墙 —— 样板至少要有一圈墙才像房子");
+            if (doorN == 0) warnings.Add("没扫到门 —— 全封闭的房子小人进不去");
+            if (furnitureN == 0 && lightN == 0) warnings.Add("没扫到家具/光源（可能还没放）");
+            if (roofedN > 0) warnings.Add("这块区域里有 " + roofedN + " 格**有屋顶**（roof 只做统计，不进样板）");
+
+            return new
+            {
+                success = true,
+                requested = new { x, z, w, h },
+                mapSize = new { x = map.Size.x, z = map.Size.z },
+                counts = new
+                {
+                    wallLike = wallN,
+                    doorLike = doorN,
+                    furniture = furnitureN,
+                    light = lightN,
+                    empty,
+                    roofedCells = roofedN,
+                },
+                rawRows,
+                trimmedRows = trimmed,
+                trim,
+                legend = legend.Values,
+                defsSeen,
+                warnings,
+                note = "rawRows = 你请求的矩形原样；trimmedRows = 裁到内容包围盒（这才是样板）。"
+                     + "代号：W 墙 / D 门 / B 床 / L 光源 / T 桌 / S 座 / E 储物 / C 工作台 / A 其他家具。",
+            };
+        }
+
+        /// <summary>把一个建筑/蓝图分类成角色代号 + 优先级（数值小的赢）</summary>
+        private static void ClassifyBuilding(Thing t, out char sym, out int rank, out string role)
+        {
+            string dn = t.def.defName ?? "";
+            string low = dn.ToLowerInvariant();
+
+            // 门优先于墙（门也是 Building）
+            if (low.Contains("door") || t is Blueprint_Door)
+            {
+                sym = 'D'; rank = 0; role = "door"; return;
+            }
+            if (low.Contains("wall") || (t.def.building != null && t.def.building.isWall))
+            {
+                sym = 'W'; rank = 1; role = "wall"; return;
+            }
+            if (low.Contains("torch") || low.Contains("lamp") || low.Contains("light") || low.Contains("campfire"))
+            {
+                sym = 'L'; rank = 2; role = "light"; return;
+            }
+            if (low.Contains("bed"))
+            {
+                sym = 'B'; rank = 3; role = "bed"; return;
+            }
+            if (low.Contains("table"))
+            {
+                sym = 'T'; rank = 4; role = "table"; return;
+            }
+            if (low.Contains("stool") || low.Contains("chair") || low.Contains("bench"))
+            {
+                sym = 'S'; rank = 5; role = "seat"; return;
+            }
+            if (low.Contains("shelf") || low.Contains("stockpile"))
+            {
+                sym = 'E'; rank = 6; role = "storage"; return;
+            }
+            if (low.Contains("workbench") || low.Contains("stove") || low.Contains("butcher"))
+            {
+                sym = 'C'; rank = 7; role = "workbench"; return;
+            }
+
+            sym = 'A'; rank = 9; role = "furniture"; return;
+        }
+
+        private static string RoleNameOf(char sym)
+        {
+            switch (sym)
+            {
+                case 'W': return "wall";
+                case 'D': return "door";
+                case 'B': return "bed";
+                case 'L': return "light";
+                case 'T': return "table";
+                case 'S': return "seat";
+                case 'E': return "storage";
+                case 'C': return "workbench";
+                default: return "furniture";
+            }
+        }
+
+        [Tool("foodprobe/capture_grid",
+            Description = "把一块矩形区域扫成建筑样板（角色网格）。用于把玩家手造的样板房编码下来。只读。")]
+        public object CaptureGrid(
+            [ToolParameter(Description = "起点 x")] int x,
+            [ToolParameter(Description = "起点 z")] int z,
+            [ToolParameter(Description = "宽")] int w,
+            [ToolParameter(Description = "高")] int h)
+        {
+            return CaptureGridImpl(x, z, w, h);
+        }
+
         [Tool("foodprobe/patches",
             Description = "查 TerrainGrid.SetTerrain / Designator_Build.DesignateSingleCell 等有没有被 Harmony patch。只读。")]
         public object Patches()

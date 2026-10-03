@@ -23,6 +23,7 @@ public static class CoreTests
         RunSiteSelectionTests();
         RunStockpileTests();
         RunBuildSiteTests();
+        RunTemplateTests();
 
         Console.WriteLine();
         Console.WriteLine(string.Format("=== 通过 {0} / 失败 {1} ===", _pass, _fail));
@@ -956,6 +957,156 @@ public static class CoreTests
             Eq("默认每殖民者一床", d.BedPerColonist, true);
             Eq("默认火把 1 个", d.TorchCount, 1);
         }
+    }
+
+    // ---------------- 建筑样板 ----------------
+
+    /// <summary>造一个 5x5 的小样板：一圈墙 + 南边中间一个门 + 屋里一个床/光源</summary>
+    private static BuildTemplate MakeSmallTemplate()
+    {
+        var t = new BuildTemplate
+        {
+            Id = "test-room-5x5",
+            Name = "测试小房",
+            Origin = "user",
+            Rows = new List<string>
+            {
+                "WWWWW",
+                "WBL.W",
+                "W...W",
+                "W...D",
+                "WWWWW",
+            },        };
+        t.Roles['W'] = new TemplateRole { Symbol = 'W', Name = "wall", Accepts = new List<string> { "Wall" }, IsWallLike = true };
+        t.Roles['D'] = new TemplateRole { Symbol = 'D', Name = "door", Accepts = new List<string> { "Door" }, IsDoorLike = true };
+        t.Roles['B'] = new TemplateRole { Symbol = 'B', Name = "bed", Accepts = new List<string> { "Bed", "DoubleBed" }, IsFurniture = true };
+        t.Roles['L'] = new TemplateRole { Symbol = 'L', Name = "light", Accepts = new List<string> { "TorchLamp" }, IsFurniture = true };
+        t.NormalizeSize();
+        return t;
+    }
+
+    private static void RunTemplateTests()
+    {
+        Console.WriteLine();
+        Console.WriteLine("-- BuildTemplate（建筑样板） --");
+
+        BuildTemplate t = MakeSmallTemplate();
+        Eq("尺寸推出来了", t.Width + "x" + t.Height, "5x5");
+
+        // ── 校验 ──
+        List<string> errs = t.Validate();
+        bool hasHardError = false;
+        for (int i = 0; i < errs.Count; i++)
+        {
+            // "定义了没用到" 只是警告，不算硬错
+            if (errs[i].IndexOf("可清理") < 0) hasHardError = true;
+        }
+        True("合法样板校验通过（无硬错误）", !hasHardError,
+            errs.Count > 0 ? string.Join(" / ", errs.ToArray()) : "无错误");
+
+        // ── 缺门 → 必须报错（全封闭房子小人进不去）──
+        var noDoor = MakeSmallTemplate();
+        noDoor.Rows[3] = "W...W";
+        bool gotDoorErr = false;
+        foreach (string e in noDoor.Validate()) if (e.IndexOf("门") >= 0) gotDoorErr = true;
+        True("★ 没有门时校验报错（全封闭的房子进不去）", gotDoorErr);
+
+        // ── 缺墙 → 必须报错 ──
+        var noWall = MakeSmallTemplate();
+        for (int i = 0; i < noWall.Rows.Count; i++) noWall.Rows[i] = noWall.Rows[i].Replace('W', '.');
+        bool gotWallErr = false;
+        foreach (string e in noWall.Validate()) if (e.IndexOf("墙") >= 0) gotWallErr = true;
+        True("★ 没有墙时校验报错", gotWallErr);
+
+        // ── 用了未定义的代号 → 必须报错 ──
+        var badSym = MakeSmallTemplate();
+        badSym.Roles.Remove('B');
+        bool gotSymErr = false;
+        foreach (string e in badSym.Validate()) if (e.IndexOf("没有定义") >= 0) gotSymErr = true;
+        True("★ 用了未定义的代号时校验报错", gotSymErr);
+
+        // ── 行长不一致 → 必须报错 ──
+        // ⚠ 必须真的写成**更短**的行。我第一次写成 "W...." —— 那也是 5 个字符，
+        //   跟其他行一样长，所以根本不是"不一致"（测试白写）。
+        var badRow = MakeSmallTemplate();
+        badRow.Rows[2] = "W...";
+        bool gotRowErr = false;
+        foreach (string e in badRow.Validate()) if (e.IndexOf("长度") >= 0) gotRowErr = true;
+        True("★ 行长不一致时报错", gotRowErr,
+            string.Join(" / ", badRow.Validate().ToArray()));
+
+        // ── 角色计数 ──
+        // ⚠ 外圈 16 格里有 1 格是门，所以**墙是 15 不是 16**（这里我一开始写错了）
+        Dictionary<string, int> counts = t.CountByRole();
+        Eq("墙 15 格（外圈 16 减去 1 个门）", counts.ContainsKey("W") ? counts["W"] : 0, 15);
+        Eq("门 1 格", counts.ContainsKey("D") ? counts["D"] : 0, 1);
+        Eq("床 1 格", counts.ContainsKey("B") ? counts["B"] : 0, 1);
+        Eq("光源 1 格", counts.ContainsKey("L") ? counts["L"] : 0, 1);
+        Eq("墙+门 = 外圈 16 格", (counts.ContainsKey("W") ? counts["W"] : 0) + (counts.ContainsKey("D") ? counts["D"] : 0), 16);
+
+        // ── ★ 旋转 90° ──
+        BuildTemplate r90 = t.Rotated(1);
+        Eq("★ 旋转 90° 后尺寸仍是 5x5", r90.Width + "x" + r90.Height, "5x5");
+        Dictionary<string, int> rc = r90.CountByRole();
+        Eq("★ 旋转后墙格数不变", rc.ContainsKey("W") ? rc["W"] : 0, 15);
+        Eq("★ 旋转后门还在", rc.ContainsKey("D") ? rc["D"] : 0, 1);
+        Eq("★ 旋转后床还在", rc.ContainsKey("B") ? rc["B"] : 0, 1);
+
+        BuildTemplate r360 = t.Rotated(4);
+        bool sameAsOrig = r360.Width == t.Width && r360.Height == t.Height;
+        if (sameAsOrig)
+        {
+            for (int z = 0; z < t.Height && sameAsOrig; z++)
+                for (int x = 0; x < t.Width; x++)
+                    if (r360.SymbolAt(x, z) != t.SymbolAt(x, z)) { sameAsOrig = false; break; }
+        }
+        True("★ 旋转 4 次 = 原样", sameAsOrig);
+
+        // ── ★ 镜像 ──
+        BuildTemplate mir = t.Mirrored();
+        Eq("★ 镜像后尺寸不变", mir.Width + "x" + mir.Height, "5x5");
+        Dictionary<string, int> mc = mir.CountByRole();
+        Eq("★ 镜像后门还在", mc.ContainsKey("D") ? mc["D"] : 0, 1);
+
+        // ── ★ JSON 往返 ──
+        string json = TemplateJson.Write(t);
+        True("JSON 输出非空", json.Length > 50, json.Length + " 字符");
+        BuildTemplate back = TemplateJson.Read(json);
+        Eq("★ JSON 往返：id 一致", back.Id, t.Id);
+        Eq("★ JSON 往返：尺寸一致", back.Width + "x" + back.Height, t.Width + "x" + t.Height);
+        Eq("★ JSON 往返：角色数一致", back.Roles.Count, t.Roles.Count);
+
+        bool gridSame = back.Rows.Count == t.Rows.Count;
+        if (gridSame)
+        {
+            for (int i = 0; i < t.Rows.Count; i++)
+                if (back.Rows[i] != t.Rows[i]) { gridSame = false; break; }
+        }
+        True("★ JSON 往返：逐格完全一致", gridSame,
+            gridSame ? "" : "原始 " + string.Join("|", t.Rows.ToArray()) + " vs 回来 " + string.Join("|", back.Rows.ToArray()));
+
+        TemplateRole backBed;
+        if (back.Roles.TryGetValue('B', out backBed))
+        {
+            True("★ JSON 往返：床槽的 accepts 列表完整",
+                backBed.Accepts.Count == 2 && backBed.Accepts[0] == "Bed" && backBed.Accepts[1] == "DoubleBed",
+                string.Join(",", backBed.Accepts.ToArray()));
+            True("★ JSON 往返：家具标记保留", backBed.IsFurniture);
+        }
+        else
+        {
+            True("★ JSON 往返：床槽的 accepts 列表完整", false, "Roles 里没有 B");
+        }
+
+        // ── 解析健壮性 ──
+        bool threw = false;
+        try { TemplateJson.Read("{ not json"); } catch (Exception) { threw = true; }
+        True("坏 JSON 会抛异常（而不是静默返回半个样板）", threw);
+
+        var empty = new BuildTemplate();
+        threw = false;
+        try { TemplateJson.Read(TemplateJson.Write(empty)); } catch (Exception) { threw = true; }
+        True("空样板不该在序列化往返时抛异常", !threw);
     }
 
     // ---------------- 工具 ----------------
