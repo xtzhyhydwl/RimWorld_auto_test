@@ -755,6 +755,135 @@ namespace DSH.FoodProbe
             };
         }
 
+        [Tool("foodprobe/peaceful",
+            Description = "★ 关掉所有**威胁类事件**（袭击/发狂动物/虫灾等），用于观察纯粹的运营表现。会改游戏状态。")]
+        public object Peaceful(
+            [ToolParameter(Description = "true = 关掉威胁（默认）；false = 恢复备份的原始概率")] bool enable = true,
+            [ToolParameter(Description = "true = 只报告会关哪些，不真的改")] bool dryRun = false)
+        {
+            try
+            {
+                // 首次调用时把原始 baseChance 备份下来，方便恢复
+                if (_threatBackup.Count == 0)
+                {
+                    foreach (var d in DefDatabase<IncidentDef>.AllDefsListForReading)
+                    {
+                        if (d == null) continue;
+                        _threatBackup[d.defName] = d.baseChance;
+                    }
+                }
+
+                var touched = new List<object>();
+                int changed = 0;
+
+                foreach (var d in DefDatabase<IncidentDef>.AllDefsListForReading)
+                {
+                    if (d == null) continue;
+
+                    string cat = d.category != null ? d.category.defName : "";
+                    // ★ 判定"是不是威胁"：既看分类名，也看 defName 里的关键词。
+                    //   为什么要两条：分类在不同 DLC/版本下可能改名或新增
+                    //   （比如 Odyssey 加了新的威胁类），只靠分类会漏。
+                    bool isThreat = IsThreatName(cat) || IsThreatName(d.defName);
+
+                    if (enable && isThreat)
+                    {
+                        if (d.baseChance != 0f)
+                        {
+                            if (!dryRun) d.baseChance = 0f;
+                            changed++;
+                        }
+                        if (touched.Count < 40)
+                            touched.Add(new { defName = d.defName, category = cat, was = _threatBackup.ContainsKey(d.defName) ? _threatBackup[d.defName] : d.baseChance });
+                    }
+                    else if (!enable && isThreat)
+                    {
+                        float orig;
+                        if (_threatBackup.TryGetValue(d.defName, out orig) && d.baseChance != orig)
+                        {
+                            if (!dryRun) d.baseChance = orig;
+                            changed++;
+                        }
+                    }
+                }
+
+                // 顺便把难度上的威胁开关也关掉（双保险：即使有 def 漏网，难度层也拦一道）
+                string diffNote = "";
+                try
+                {
+                    if (Find.Storyteller != null && Find.Storyteller.difficulty != null)
+                    {
+                        var diff = Find.Storyteller.difficulty;
+                        diffNote = string.Format("难度：allowBigThreats={0} allowIntroThreats={1} allowExtremeWeather={2}",
+                            diff.allowBigThreats, diff.allowIntroThreats, diff.allowExtremeWeatherIncidents);
+                    }
+                }
+                catch (Exception e2) { diffNote = "读难度失败：" + e2.Message; }
+
+                return new
+                {
+                    success = true,
+                    enable,
+                    dryRun,
+                    changed,
+                    touched,
+                    touchedCount = touched.Count,
+                    backupSize = _threatBackup.Count,
+                    difficulty = diffNote,
+                    note = "★ 把威胁类 IncidentDef 的 baseChance 设为 0（袭击/发狂动物/虫灾等）。"
+                         + "判定用**分类名 + defName 关键词**双条件 —— 只靠分类会在 DLC 新增威胁时漏掉。"
+                         + "首次调用会备份原始概率，`enable=false` 可恢复。"
+                         + "⚠ 这是**测试夹具**，不是 mod 行为。目的是把'运营表现'和'运气'分开看。",
+                };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = "peaceful 失败：" + e.Message, stack = e.StackTrace };
+            }
+        }
+
+        /// <summary>
+        /// 威胁关键词（分类名或 defName 里出现就算威胁）。
+        /// </summary>
+        private static bool IsThreatName(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return false;
+
+            // ★ **先排除友方/中性的**（否则 "Wanderer" 会误伤 `WandererJoin`（有人加入）、
+            //   "Raid" 会误伤 `RaidFriendly`（友军来袭）—— 这两个都是好事，不该关掉）。
+            //   我第一版就误伤了它们，dry-run 列表里一眼看出来。
+            string[] friendly = new string[]
+            {
+                "Friendly", "Ally", "AllyJoin", "Join", "Refugee", "Neutral",
+                "Trade", "Trader", "Gift", "Reward", "Boon", "Goodwill",
+            };
+            for (int i = 0; i < friendly.Length; i++)
+            {
+                if (s.IndexOf(friendly[i], StringComparison.OrdinalIgnoreCase) >= 0) return false;
+            }
+
+            // ⚠ 同时排除**疾病**：疾病不是"威胁事件"，而是前期运营的一部分
+            //   （而且关掉疾病会让验收过于理想化）。用户要的是"纯粹运营表现"，
+            //   疾病算运营压力，不算突袭。
+            if (s.IndexOf("Disease", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+
+            string[] keys = new string[]
+            {
+                "Threat", "Raid", "Manhunter", "Infestation", "Hive", "Siege",
+                "Mech", "Cluster", "Ambush", "Assault", "Predator", "AnimalAttack",
+                "AnimalInsanity", "Anomaly", "Entity", "Shambler", "Fleshbeast",
+                "ShipPartCrash", "ProblemCauser", "Obelisk",
+            };
+            for (int i = 0; i < keys.Length; i++)
+            {
+                if (s.IndexOf(keys[i], StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            }
+            return false;
+        }
+
+        /// <summary>威胁事件的原始 baseChance 备份（供恢复）</summary>
+        private static readonly Dictionary<string, float> _threatBackup = new Dictionary<string, float>();
+
         [Tool("foodprobe/health", Description = "自检：FoodControl mod 加载了吗、内部类型和静态入口在不在。只读。")]
         public object Health()
         {
