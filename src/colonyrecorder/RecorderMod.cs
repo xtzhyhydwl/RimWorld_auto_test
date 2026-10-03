@@ -38,10 +38,16 @@ namespace ColonySnapshots
             {
                 string dir = ColonyRecorder.OutDir;
                 Log.Message(string.Format(
-                    "[ColonyRecorder] 只读殖民地快照录制器已加载（packageId={0}）；"
-                    + "每 {1} 游戏 tick 追加一行 JSONL 到：{2}（不改地图，失败只记警告）",
+                    "[ColonyRecorder] 只读殖民地录制器已加载（packageId={0}），**两套并列系统**，都只读、不改地图："
+                    + "\n  ① 时间驱动·快照：每 {1} 游戏 tick 追加一行 JSONL → colony-<殖民地名>-<mapId>.jsonl"
+                    + "（文件名 = colony-<殖民地名>-<mapId>.jsonl，**一个殖民地一个文件、跨会话追加**）"
+                    + "\n  ② 事件驱动·操作：每 {2} 游戏 tick 轮询一次状态差分，把**变化**写成事件 → actions-<殖民地名>-<mapId>.jsonl"
+                    + "（首次进入地图额外写一条第 0 层 `buildability` 可建造性；单条事件最多 400 格，超出给 count+truncated）"
+                    + "\n  输出目录（两者同一个目录）：{3}"
+                    + "\n  失败只记警告，绝不抛给游戏。",
                     PackageId,
                     ColonyRecorder.IntervalTicks,
+                    PlayerActionObserver.IntervalTicks,
                     string.IsNullOrEmpty(dir) ? "（暂时取不到存档目录，首次采样时再试）" : dir));
             }
             catch (Exception e)

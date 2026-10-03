@@ -119,7 +119,7 @@ namespace ColonySnapshots
                 ColonySnapshot snap = SnapshotBuilder.Build(map, tick, IntervalTicks);
                 snap.WallClock = DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
 
-                EnsureFile();
+                EnsureFile(map, snap);
                 if (string.IsNullOrEmpty(_file)) return;
 
                 // JSONL：一行一张快照，追加写
@@ -191,17 +191,95 @@ namespace ColonySnapshots
             return sb.ToString();
         }
 
-        private void EnsureFile()
+        /// <summary>
+        /// ★ **一个殖民地一个文件，跨会话追加**（用户 2026-10-03 明确要求）。
+        ///
+        /// ## 为什么要改（用户实测遇到的问题）
+        ///
+        /// 老实现是"**一次游戏会话一个文件**"：`colony-<启动时间>.jsonl`。
+        /// 用户存档 → 读档一次，就分裂成**多个文件**，而且从文件名**看不出属于哪个殖民地**。
+        ///
+        /// ## 新规则
+        ///
+        /// 文件名 = `colony-<殖民地名>-<mapId>.jsonl`，**追加**写：
+        /// - 殖民地名做文件系统安全化（去非法字符、截断长度），拿不到就用 `unknown`
+        /// - 用 `mapId` 区分同一殖民地的不同地图（分基地 / 临时地图）
+        /// - 每次会话加载时 `Log.Message` 说清楚"本次会话**追加**到 <路径>"
+        ///
+        /// ⚠ 老的 `colony-<时间>.jsonl` **一个都不动**（那是用户的数据）。
+        /// </summary>
+        private void EnsureFile(Map map, ColonySnapshot snap)
         {
             if (!string.IsNullOrEmpty(_file)) return;
             string dir = OutDir;
             if (string.IsNullOrEmpty(dir)) return;
 
-            Directory.CreateDirectory(dir);
-            // 文件名带启动时间，一次游戏会话一个文件（重新开档不会混在一起）
-            string name = "colony-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + ".jsonl";
+            try { Directory.CreateDirectory(dir); } catch (Exception) { return; }
+
+            int mapId = 0;
+            try { mapId = map != null ? map.uniqueID : 0; } catch (Exception) { }
+            string colony = snap != null ? snap.ColonyName : "";
+            string safe = FileSafe(colony);
+
+            // 换局（不同殖民地/不同地图）时换文件 —— 同一个殖民地跨会话是**同一个文件**
+            string name = "colony-" + safe + "-" + mapId + ".jsonl";
             _file = Path.Combine(dir, name);
-            try { Log.Message("[ColonyRecorder][录制] 本次会话写入 " + _file); } catch (Exception) { }
+
+            bool existed = false;
+            try { existed = File.Exists(_file); } catch (Exception) { }
+
+            try
+            {
+                Log.Message("[ColonyRecorder][录制] 本次会话**追加**到 " + _file
+                    + (existed ? "（文件已存在，接着往里写）" : "（新文件）")
+                    + "；殖民地名=" + (string.IsNullOrEmpty(colony) ? "（拿不到，用 unknown）" : colony));
+            }
+            catch (Exception) { }
+        }
+
+        /// <summary>
+        /// 把殖民地名变成**文件系统安全**的名字。
+        ///
+        /// 规则：非法字符（`Path.GetInvalidFileNameChars()`）→ `_`；
+        ///       只留字母/数字/中文/`-`/`_`；连续 `_` 压成一个；
+        ///       截断 40 字符；结果为空 → `unknown`。
+        /// </summary>
+        internal static string FileSafe(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "unknown";
+
+            var sb = new StringBuilder(name.Length);
+            char[] bad = Path.GetInvalidFileNameChars();
+            for (int i = 0; i < name.Length; i++)
+            {
+                char c = name[i];
+                bool ok = true;
+                for (int j = 0; j < bad.Length; j++) if (bad[j] == c) { ok = false; break; }
+
+                if (ok)
+                {
+                    // 只留"看得懂"的字符：ASCII 字母数字 + 中文 + - _
+                    bool keep = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                             || (c >= '0' && c <= '9') || c == '-' || c == '_'
+                             || c > 0x7F;                      // 中文等非 ASCII 一律保留（NTFS 支持）
+                    if (!keep) ok = false;
+                }
+
+                if (ok)
+                {
+                    // 连续 `_` 压成一个（`_` 本身是合法字符，但重复没意义）
+                    if (c == '_' && sb.Length > 0 && sb[sb.Length - 1] == '_') continue;
+                    sb.Append(c);
+                }
+                else
+                {
+                    if (sb.Length > 0 && sb[sb.Length - 1] != '_') sb.Append('_');
+                }
+            }
+
+            string s = sb.ToString().Trim('_', '.', ' ');
+            if (s.Length > 40) s = s.Substring(0, 40).Trim('_', '.', ' ');
+            return string.IsNullOrEmpty(s) ? "unknown" : s;
         }
 
         public override void ExposeData()

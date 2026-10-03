@@ -173,8 +173,38 @@ async function main() {
       process.exit(1);
     }
     fs.mkdirSync(DEPLOY_DIR, { recursive: true });
-    fs.copyFileSync(OUT_DLL, dest);
-    console.log(`\n已部署 ${path.relative(WS, dest)}`);
+
+    // ⚠ 实测坑（2026-10-03）：`fs.copyFileSync` 覆盖一个**已被运行中的 Mono 映射**的 DLL 时，
+    //   Node 报 `UNKNOWN: unknown error`（底层是 Windows 的
+    //   `ERROR_USER_MAPPED_FILE`：请求的操作无法在使用用户映射区域打开的文件上执行）。
+    //   但那个文件在**目录项层面可以删除**（删完剩下的映射锚在已删除的 inode 上，
+    //   运行中的游戏不受影响，反正它也不会热加载 DLL）。
+    //   ⇒ 所以复制失败就退化为 **先删后拷**；再不行才真的报错（让用户 stop 游戏）。
+    let copied = false;
+    let firstErr = null;
+    try {
+      fs.copyFileSync(OUT_DLL, dest);
+      copied = true;
+    } catch (err) {
+      firstErr = err;
+      try {
+        if (fs.existsSync(dest)) fs.rmSync(dest, { force: true });
+        fs.copyFileSync(OUT_DLL, dest);
+        copied = true;
+      } catch {
+        copied = false;
+      }
+    }
+
+    if (!copied) {
+      console.error(`\n✗ 部署失败：${path.relative(WS, dest)} 写不进去`);
+      console.error('  底层错误：' + (firstErr?.message || '未知'));
+      console.error('  ⇒ 先执行： node src/cli.js stop  再重新 --deploy');
+      process.exit(1);
+    }
+
+    const kb = (fs.statSync(dest).size / 1024).toFixed(1);
+    console.log(`\n已部署 ${path.relative(WS, dest)}  (${kb} KB)`);
     console.log('\n⚠ 正在运行的游戏不会热加载 DLL —— 要重启实例才生效。');
     console.log('  ⚠ 游戏目录里还需要一个 junction 指向 mods/ColonyRecorder 才能被游戏看到（那步不在本脚本里）。');
   } else {

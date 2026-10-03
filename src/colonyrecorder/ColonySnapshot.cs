@@ -38,6 +38,39 @@ namespace ColonySnapshots
         /// <summary>地图 id</summary>
         public int MapId;
 
+        /// <summary>
+        /// ★ **游戏绝对 tick**（= 游戏内 tick + 起始绝对 tick）。
+        ///
+        /// ⚠ 为什么必须记它（2026-10-03 用户实测发现的坑）：
+        ///   `Day = tick / 60000` 只是"**殖民地建立以来**的天数"（用户那局是 29），
+        ///   **不是游戏内日期**（真实是 year 5500 / day-of-year 40.5 / Septober）。
+        ///   用户因此以为"数据被截断了"。要算真实日期/季节，只有 `Tick` 不够 ——
+        ///   必须 `absTick = ticksGame + gameStartAbsTick`（存档里实测：
+        ///   `<ticksGame>1761003</ticksGame>` + `<gameStartAbsTick>670000</gameStartAbsTick>`）。
+        /// </summary>
+        public int AbsTick;
+
+        /// <summary>游戏内年份（如 5500）</summary>
+        public int Year;
+
+        /// <summary>象限（Aprimay / Jugust / Septober / Decembary）</summary>
+        public string Quadrum = "";
+
+        /// <summary>本象限内第几天（1..15）</summary>
+        public int DayOfQuadrum;
+
+        /// <summary>绝对年内第几天（1..60）</summary>
+        public int DayOfYear;
+
+        /// <summary>人话日期（`GenDate.DateFullStringAt`，可能本地化）</summary>
+        public string DateText = "";
+
+        /// <summary>殖民地 / 定居点名（拿不到就空串）</summary>
+        public string ColonyName = "";
+
+        /// <summary>地图名（拿不到就空串）</summary>
+        public string MapName = "";
+
         /// <summary>真实时间（仅用于排查，不用于采样）</summary>
         public string WallClock = "";
 
@@ -55,6 +88,34 @@ namespace ColonySnapshots
 
         /// <summary>小人状态</summary>
         public List<SnapPawn> Pawns = new List<SnapPawn>();
+
+        /// <summary>
+        /// ★ **殖民者明细**（一人一条，追加面，不动 `pawns[]`）。
+        ///
+        /// 用户 2026-10-03：
+        /// > 「**以一个殖民者为单位**，有新的殖民者就在总的殖民者当中新加一个对象，
+        /// >  这个对象会记录殖民者的**各种状态**。」
+        /// </summary>
+        public List<SnapPawnDetail> PawnDetails = new List<SnapPawnDetail>();
+
+        /// <summary>
+        /// ★ **房间**（追加面）。
+        ///
+        /// 用户最在意的面：
+        /// > 「一个房间在**不同时间段承担多种职责**」「13×13 的大房间可能**被一隔为二**」
+        /// > 「主要关注**变化**」
+        /// </summary>
+        public List<SnapRoom> Rooms = new List<SnapRoom>();
+
+        /// <summary>
+        /// ★ **建筑材料**（追加面）：`{ 建筑def: { 材质def: 个数 } }`。
+        ///
+        /// 用户：
+        /// > 「主要用来建筑的**材料有什么变化**……早期用木头，后来逐步换成石砖，
+        /// >  外墙用防御更高的石砖，防火防袭击……钢铁有战略意义」
+        /// </summary>
+        public Dictionary<string, Dictionary<string, int>> Materials =
+            new Dictionary<string, Dictionary<string, int>>();
 
         /// <summary>生产队列</summary>
         public List<SnapBill> Bills = new List<SnapBill>();
@@ -114,6 +175,18 @@ namespace ColonySnapshots
             sb.Append(",\"seq\":").Append(Seq);
             sb.Append(",\"wallClock\":").Append(Q(WallClock));
 
+            // ── ★ 游戏内日期 / 殖民地身份（**追加**字段，老字段一个不动）──
+            //    注意：这些全部**必须放在 `wallClock` 之后、`zones` 之前**，
+            //    以保证老字段的相对顺序也不变（分析端 `analyze-snapshots.mjs` 只按名字取）。
+            sb.Append(",\"absTick\":").Append(AbsTick);
+            sb.Append(",\"year\":").Append(Year);
+            sb.Append(",\"quadrum\":").Append(Q(Quadrum));
+            sb.Append(",\"dayOfQuadrum\":").Append(DayOfQuadrum);
+            sb.Append(",\"dayOfYear\":").Append(DayOfYear);
+            sb.Append(",\"dateText\":").Append(Q(DateText));
+            sb.Append(",\"colonyName\":").Append(Q(ColonyName));
+            sb.Append(",\"mapName\":").Append(Q(MapName));
+
             // zones
             sb.Append(",\"zones\":[");
             for (int i = 0; i < Zones.Count; i++)
@@ -142,6 +215,43 @@ namespace ColonySnapshots
                 sb.Append(Q(kv.Key)).Append(":[");
                 WriteCells(sb, kv.Value);
                 sb.Append(']');
+            }
+            sb.Append('}');
+
+            // ── ★ 殖民者明细（Order 45）──
+            sb.Append(",\"pawnDetails\":[");
+            for (int i = 0; i < PawnDetails.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                PawnDetails[i].Write(sb);
+            }
+            sb.Append(']');
+
+            // ── ★ 房间（Order 46）──
+            sb.Append(",\"rooms\":[");
+            for (int i = 0; i < Rooms.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                Rooms[i].Write(sb);
+            }
+            sb.Append(']');
+
+            // ── ★ 建筑材料（Order 47）：{建筑def:{材质def:个数}} ──
+            sb.Append(",\"materials\":{");
+            first = true;
+            foreach (var kv in Materials)
+            {
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append(Q(kv.Key)).Append(":{");
+                bool f2 = true;
+                foreach (var skv in kv.Value)
+                {
+                    if (!f2) sb.Append(',');
+                    f2 = false;
+                    sb.Append(Q(skv.Key)).Append(':').Append(skv.Value);
+                }
+                sb.Append('}');
             }
             sb.Append('}');
 
@@ -278,6 +388,34 @@ namespace ColonySnapshots
         {
             if (double.IsNaN(d) || double.IsInfinity(d)) return "0";
             return d.ToString("F1", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>写一个字符串数组</summary>
+        internal static void WriteStrings(StringBuilder sb, List<string> list)
+        {
+            if (list == null) return;
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(Q(list[i]));
+            }
+        }
+
+        /// <summary>写 `{"key":int}`（材质统计用）</summary>
+        internal static void WriteCountMap(StringBuilder sb, Dictionary<string, int> map)
+        {
+            sb.Append('{');
+            if (map != null)
+            {
+                bool first = true;
+                foreach (var kv in map)
+                {
+                    if (!first) sb.Append(',');
+                    first = false;
+                    sb.Append(Q(kv.Key)).Append(':').Append(kv.Value);
+                }
+            }
+            sb.Append('}');
         }
     }
 
@@ -475,6 +613,194 @@ namespace ColonySnapshots
                 sb.Append(ColonySnapshot.Q(NegativeThoughts[i]));
             }
             sb.Append("]}");
+        }
+    }
+
+    /// <summary>
+    /// ★ **一个殖民者的明细**（Order 45 的 `pawnDetail` 面）。
+    ///
+    /// 这是 `pawns[]` 的**追加面**，不是替换：`pawns[]` 里的
+    /// `mood` / `food` / `expectation` 在这里**逐字同名重复一份**，
+    /// 方便交叉核对（两份对不上 = 有一边读法坏了）。
+    /// </summary>
+    public sealed class SnapPawnDetail
+    {
+        public string Name = "";
+        /// <summary>Colonist / Slave / Prisoner / Guest / ColonistMech / Subhuman / Animal / Other</summary>
+        public string Kind = "";
+        public string Gender = "";
+        public double Age;
+        /// <summary>主武器：`defName` 或 `defName(品质)`</summary>
+        public string Weapon = "";
+        /// <summary>穿的：`defName` 或 `defName(品质/材质)`</summary>
+        public List<string> Apparel = new List<string>();
+        public List<SnapSkill> Skills = new List<SnapSkill>();
+        public List<string> Traits = new List<string>();
+        public SnapHealth Health = new SnapHealth();
+        public double Mood;
+        public double Food;
+        public string Expectation = "";
+        public List<SnapWorkPriority> WorkPriorities = new List<SnapWorkPriority>();
+
+        public void Write(StringBuilder sb)
+        {
+            sb.Append("{\"name\":").Append(ColonySnapshot.Q(Name));
+            sb.Append(",\"kind\":").Append(ColonySnapshot.Q(Kind));
+            sb.Append(",\"gender\":").Append(ColonySnapshot.Q(Gender));
+            sb.Append(",\"age\":").Append(ColonySnapshot.N(Age));
+            sb.Append(",\"weapon\":").Append(ColonySnapshot.Q(Weapon));
+            sb.Append(",\"apparel\":[");
+            ColonySnapshot.WriteStrings(sb, Apparel);
+            sb.Append("],\"skills\":[");
+            for (int i = 0; i < Skills.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                Skills[i].Write(sb);
+            }
+            sb.Append("],\"traits\":[");
+            ColonySnapshot.WriteStrings(sb, Traits);
+            sb.Append("],\"health\":");
+            Health.Write(sb);
+            sb.Append(",\"mood\":").Append(ColonySnapshot.N(Mood));
+            sb.Append(",\"food\":").Append(ColonySnapshot.N(Food));
+            sb.Append(",\"expectation\":").Append(ColonySnapshot.Q(Expectation));
+            sb.Append(",\"workPriorities\":[");
+            for (int i = 0; i < WorkPriorities.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                WorkPriorities[i].Write(sb);
+            }
+            sb.Append("]}");
+        }
+    }
+
+    /// <summary>一个技能（`pawnDetail.skills[]`）</summary>
+    public sealed class SnapSkill
+    {
+        public string Def = "";
+        public int Level;
+        /// <summary>激情（None / Minor / Major），读不到就空串</summary>
+        public string Passion = "";
+
+        public void Write(StringBuilder sb)
+        {
+            sb.Append("{\"def\":").Append(ColonySnapshot.Q(Def));
+            sb.Append(",\"level\":").Append(Level);
+            sb.Append(",\"passion\":").Append(ColonySnapshot.Q(Passion));
+            sb.Append('}');
+        }
+    }
+
+    /// <summary>健康概括（`pawnDetail.health`）</summary>
+    public sealed class SnapHealth
+    {
+        /// <summary>`HealthUtility.GetGeneralConditionLabel` 的概括（拿不到就空串）</summary>
+        public string Summary = "";
+        public bool Downed;
+        /// <summary>关键能力值：Consciousness / Moving / Manipulation / Sight</summary>
+        public List<SnapCapacity> Capacities = new List<SnapCapacity>();
+
+        public void Write(StringBuilder sb)
+        {
+            sb.Append("{\"summary\":").Append(ColonySnapshot.Q(Summary));
+            sb.Append(",\"downed\":").Append(Downed ? "true" : "false");
+            sb.Append(",\"capacities\":[");
+            for (int i = 0; i < Capacities.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                Capacities[i].Write(sb);
+            }
+            sb.Append("]}");
+        }
+    }
+
+    /// <summary>一个能力值（0..1）</summary>
+    public sealed class SnapCapacity
+    {
+        public string Def = "";
+        public double Level;
+
+        public void Write(StringBuilder sb)
+        {
+            sb.Append("{\"def\":").Append(ColonySnapshot.Q(Def));
+            sb.Append(",\"level\":").Append(ColonySnapshot.N(Level));
+            sb.Append('}');
+        }
+    }
+
+    /// <summary>一条工作优先级（`pawnDetail.workPriorities[]`）</summary>
+    public sealed class SnapWorkPriority
+    {
+        public string WorkType = "";
+        public int Priority;
+
+        public void Write(StringBuilder sb)
+        {
+            sb.Append("{\"workType\":").Append(ColonySnapshot.Q(WorkType));
+            sb.Append(",\"priority\":").Append(Priority);
+            sb.Append('}');
+        }
+    }
+
+    /// <summary>
+    /// ★ **一个房间**（Order 46 的 `rooms` 面）。
+    ///
+    /// 用户最在意的是**变化**：一个房间昨天是卧室、今天是储藏区；
+    /// 13×13 的大房间被一隔为二；外墙从木头换成石砖。
+    /// 所以这里既记"职责"（`role`），也记**空间边界**（`rect`/`cellCount`）
+    /// 和**材质构成**（`wallMaterials`/`floorMaterials`）——
+    /// 三者合起来才能看出"隔断"和"换材"。
+    /// </summary>
+    public sealed class SnapRoom
+    {
+        /// <summary>稳定 id（`Room.ID`）</summary>
+        public int Id;
+        /// <summary>房间职责：`RoomRoleDef.defName`（Bedroom / Kitchen / Stockpile / Workshop / Barracks / None …）</summary>
+        public string Role = "";
+        /// <summary>职责的人话名（`RoomRoleDef.LabelCap`）</summary>
+        public string RoleLabel = "";
+        /// <summary>房间名（床的 `RoomOwnerName`，没有就空串）</summary>
+        public string Label = "";
+        public int CellCount;
+        /// <summary>`[x, z, w, h]`（`Room.ExtentsClose`）</summary>
+        public int[] Rect = new int[] { 0, 0, 0, 0 };
+        /// <summary>有顶格数 == 格数（全有顶）</summary>
+        public bool Roofed;
+        /// <summary>没顶的格子数（>0 = 部分露天）</summary>
+        public int OpenRoofCount;
+        public bool IsPrisonCell;
+        public double Temperature;
+        /// <summary>美观（`RoomStatDef` "Beauty" 的房间分；读不到为 0）</summary>
+        public double Beauty;
+        /// <summary>边界上的墙/门：`{defName: 段数}`</summary>
+        public Dictionary<string, int> WallMaterials = new Dictionary<string, int>();
+        /// <summary>地板：`{terrainDefName: 格数}`</summary>
+        public Dictionary<string, int> FloorMaterials = new Dictionary<string, int>();
+        /// <summary>房间里的东西：`{defName[材质]: 个数}`（边界上的墙/门 + 房间内部的物品）</summary>
+        public Dictionary<string, int> Buildings = new Dictionary<string, int>();
+
+        public void Write(StringBuilder sb)
+        {
+            sb.Append("{\"id\":").Append(Id);
+            sb.Append(",\"role\":").Append(ColonySnapshot.Q(Role));
+            sb.Append(",\"roleLabel\":").Append(ColonySnapshot.Q(RoleLabel));
+            sb.Append(",\"label\":").Append(ColonySnapshot.Q(Label));
+            sb.Append(",\"cellCount\":").Append(CellCount);
+            sb.Append(",\"rect\":[")
+              .Append(Rect[0]).Append(',').Append(Rect[1]).Append(',')
+              .Append(Rect[2]).Append(',').Append(Rect[3]).Append(']');
+            sb.Append(",\"roofed\":").Append(Roofed ? "true" : "false");
+            sb.Append(",\"openRoofCount\":").Append(OpenRoofCount);
+            sb.Append(",\"isPrisonCell\":").Append(IsPrisonCell ? "true" : "false");
+            sb.Append(",\"temperature\":").Append(ColonySnapshot.N(Temperature));
+            sb.Append(",\"beauty\":").Append(ColonySnapshot.N(Beauty));
+            sb.Append(",\"wallMaterials\":");
+            ColonySnapshot.WriteCountMap(sb, WallMaterials);
+            sb.Append(",\"floorMaterials\":");
+            ColonySnapshot.WriteCountMap(sb, FloorMaterials);
+            sb.Append(",\"buildings\":");
+            ColonySnapshot.WriteCountMap(sb, Buildings);
+            sb.Append('}');
         }
     }
 

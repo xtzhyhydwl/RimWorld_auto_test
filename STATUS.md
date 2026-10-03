@@ -22,11 +22,28 @@
 ★ **两条线都需要先读**：`docs/协作规范.md` + 各自的交接文件。
 ★ 本文件（STATUS.md）**偏自动化线**；快照线的完整说明在它自己的交接文件里。
 
-★ **快照线现状（2026-10-03 晚，与自动化线已物理隔离）**：
+★ **快照线现状（2026-10-03 晚 → 10-04 凌晨，与自动化线已物理隔离）**：
 录制器已独立成 mod `mods/ColonyRecorder`（`dsh.colonyrecorder`），源码在 `src/colonyrecorder/`，
 编译 `node scripts/build-recorder.mjs --deploy`；程序集与 FoodControl **零引用**（二进制扫描确证）。
-隔离实例的 ModsConfig **只加载它**、不加载 `dsh.foodcontrol`。分析端：`node scripts/analyze-snapshots.mjs`。
+隔离实例的 ModsConfig **只加载它**、不加载 `dsh.foodcontrol`。
 ⚠ 因此 `src/foodcontrol-game/` 与 `src/foodcontrol-core/` 里**已经没有**录制器那几个文件（含 `ColonySnapshot.cs`）。
+
+**10-04 凌晨新增（详见 `docs/交接-快照捕捉.md`）**：
+- **两套并列系统**：快照（时间驱动，`colony-<名>-<mapId>.jsonl`，**一个殖民地一个文件、跨会话追加**）
+  + **操作事件观察者**（事件驱动，`actions-<名>-<mapId>.jsonl`，`PlayerActionObserver`，每 30 tick 差分，
+  含一次性 `buildability` 第 0 层 RLE 地图）。
+- 快照新面：游戏内日期（`absTick/year/quadrum/dayOfYear/dateText`）、`rooms`（职能/隔开/**墙材质**/地板/家具）、
+  `materials`（建筑按 def+材质）、`pawnDetails`（身份/装备/技能/健康）。
+- 分析端：`node scripts/analyze-snapshots.mjs [文件…] --focus all|rooms|materials|buildings|pawns|basics`（多文件拼接）；
+  单张查看：`node scripts/show-snapshot.mjs [--index N|--last]`。
+
+⚠ **给自动化线的两条跨线提醒**：
+1. `src/prefs.js` 已改（用户 2026-10-04 要求："游戏设置每次启动都被重置"）：
+   **只有『窗口/安全』6 个键每次强制**，其余（`langFolderName`/`devMode`/`uiScale`/`volumeMusic`/`pauseOnLoad`…）
+   **只在缺失时播种一次**，之后以游戏里存下来的为准。
+   ⇒ **若自动化测试依赖英文界面，必须在 `profiles/<x>/Config/Prefs.xml` 里显式把 `langFolderName` 设为 `English`**
+   （或删掉该键让 prefs.json 重新播种），否则会继承用户设的中文。
+2. `ModsConfig.xml` 我们**从不写**（`src/` 里没有任何写它的代码）—— 用户加的 mod 不会被我们的启动流程重置。
 
 ---
 
