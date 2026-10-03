@@ -864,5 +864,192 @@ namespace DSH.FoodProbe
         {
             return UnforbidAllImpl(onlyItems);
         }
+
+        // ── mod 内部的一次性初始化钩子 ─────────────────────────────────
+        //
+        // 探针自己也能 `unforbid_all`，但**测试要走 mod 自己的代码路径** ——
+        // 否则测的是探针，不是 mod。
+
+        [Tool("foodprobe/run_setup",
+            Description = "调 mod 自己的一次性初始化（允许所有物资），返回一行结果。")]
+        public object RunSetup()
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+
+            var comp = FindType(asm, "FoodControlGameComponent");
+            if (comp == null) return new { success = false, message = "找不到 FoodControlGameComponent" };
+
+            try
+            {
+                var r = CallStatic(comp, "RunUnforbidNow");
+                if (r == null)
+                {
+                    return new
+                    {
+                        success = false,
+                        message = "FoodControlGameComponent 上没有 RunUnforbidNow()。现有静态方法："
+                            + string.Join(", ", comp.GetMethods(ANY_STATIC).Select(m => m.Name).Distinct().ToArray()),
+                    };
+                }
+                return new { success = true, result = r.ToString() };
+            }
+            catch (Exception e)
+            {
+                return new
+                {
+                    success = false,
+                    message = "调用 RunUnforbidNow 抛异常",
+                    exception = e.GetType().FullName,
+                    detail = e.Message,
+                };
+            }
+        }
+
+        [Tool("foodprobe/forbid_some",
+            Description = "测试夹具：把若干可搬运物品设成禁取（用于验证 mod 的解锁逻辑）。count 默认 8。")]
+        public object ForbidSome(
+            [ToolParameter(Description = "禁取多少个堆叠，默认 8")] int count = 8,
+            [ToolParameter(Description = "true = 只挑建材（木/石/钢）；false = 任意物品")] bool preferStuff = true)
+        {
+            return ForbidSomeImpl(count, preferStuff);
+        }
+
+        /// <summary>
+        /// 造夹具：把若干物品设成 forbidden。
+        ///
+        /// **为什么需要它**：新开的 debug 殖民地**时有时无**禁取物（实测遇到过 0 个）。
+        /// 没有夹具的话，S1 的验证会变成"验证了一个空场景" —— 看起来通过，其实什么都没测。
+        /// 有了它就能**确定性地**复现"有禁取物"的前置条件。
+        /// </summary>
+        public static object ForbidSomeImpl(int count, bool preferStuff)
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            var picked = new List<object>();
+            int changed = 0;
+
+            // 两遍：先按偏好挑，不够再放宽
+            for (int pass = 0; pass < 2 && changed < count; pass++)
+            {
+                foreach (var th in map.listerThings.AllThings.ToList())
+                {
+                    if (changed >= count) break;
+                    try
+                    {
+                        if (th?.def == null) continue;
+                        if (th.def.category != ThingCategory.Item) continue;
+
+                        var comp = th.TryGetComp<CompForbiddable>();
+                        if (comp == null || comp.Forbidden) continue;
+
+                        if (pass == 0 && preferStuff && !th.def.IsStuff) continue;
+                        // pass 1：放宽到任意物品
+
+                        comp.Forbidden = true;
+                        changed++;
+                        if (picked.Count < 12)
+                        {
+                            picked.Add(new
+                            {
+                                def = th.def.defName,
+                                stackCount = th.stackCount,
+                                isStuff = th.def.IsStuff,
+                            });
+                        }
+                    }
+                    catch { }
+                }
+            }
+
+            // 回读确认
+            int nowForbidden = 0;
+            foreach (var th in map.listerThings.AllThings)
+            {
+                try
+                {
+                    var c = th.TryGetComp<CompForbiddable>();
+                    if (c != null && c.Forbidden && th.def != null && th.def.category == ThingCategory.Item) nowForbidden++;
+                }
+                catch { }
+            }
+
+            return new
+            {
+                success = true,
+                requested = count,
+                changed,
+                totalForbiddenItemsNow = nowForbidden,
+                picked,
+                verdict = changed == count ? "夹具就绪" : string.Format("只造出 {0}/{1} 个（可搬运物品不够）", changed, count),
+            };
+        }
+
+        [Tool("foodprobe/reset_setup",
+            Description = "重置 mod 的\"一次性初始化已做过\"标记，让下次 tick 重跑。")]
+        public object ResetSetup()
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+
+            var comp = FindType(asm, "FoodControlGameComponent");
+            if (comp == null) return new { success = false, message = "找不到 FoodControlGameComponent" };
+
+            try
+            {
+                var r = CallStatic(comp, "ResetSetupFlags");
+                return new { success = r != null, result = r == null ? "没有 ResetSetupFlags()" : r.ToString() };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message };
+            }
+        }
+
+        [Tool("foodprobe/materials",
+            Description = "数一下手上能用于建造的建材（按 def 分堆）—— S4「按现有资源选材质」的输入。只读。")]
+        public object Materials()
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+
+            var comp = FindType(asm, "FoodControlGameComponent");
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            // 优先走 mod 自己的代码（测的是 mod 的判据，不是探针的）
+            if (comp != null)
+            {
+                try
+                {
+                    var r = CallStatic(comp, "CountMaterialsJson");
+                    if (r != null) return new { success = true, source = "mod", raw = r.ToString() };
+                }
+                catch (Exception) { }
+            }
+
+            // 退路：探针自己数（mod 没加载时仍能给出参考）
+            var counts = new Dictionary<string, int>();
+            foreach (var th in map.listerThings.AllThings)
+            {
+                try
+                {
+                    if (th?.def == null) continue;
+                    if (th.def.category != ThingCategory.Item) continue;
+                    if (!th.def.IsStuff) continue;
+                    if (!counts.ContainsKey(th.def.defName)) counts[th.def.defName] = 0;
+                    counts[th.def.defName] += th.stackCount;
+                }
+                catch { }
+            }
+            return new
+            {
+                success = true,
+                source = "probe",
+                count = counts.Count,
+                materials = counts.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
+            };
+        }
     }
 }

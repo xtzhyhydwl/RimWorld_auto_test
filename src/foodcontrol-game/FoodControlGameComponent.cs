@@ -111,6 +111,15 @@ namespace FoodControl.Game
             try
             {
                 Scribe_Values.Look(ref _lastRunDay, "foodControlLastRunDay", int.MinValue);
+
+                // 初始化操作也按"天"去重，所以把"上次做过的日"一起存
+                int setupDay = ColonySetup.LastSetupDay;
+                Scribe_Values.Look(ref setupDay, "foodControlSetupDay", int.MinValue);
+                ColonySetup.LastSetupDay = setupDay;
+
+                int totalUnforbidden = ColonySetup.TotalUnforbidden;
+                Scribe_Values.Look(ref totalUnforbidden, "foodControlTotalUnforbidden", 0);
+                ColonySetup.TotalUnforbidden = totalUnforbidden;
             }
             catch (Exception e)
             {
@@ -125,6 +134,15 @@ namespace FoodControl.Game
         /// ⚠ **整个方法体必须在 try/catch 里**：这是设计要求（mod 异常绝不能把游戏搞崩）。
         ///   游戏自己虽然也包了一层 try/catch（只是 `Log.Error(exception.ToString())`），
         ///   但那样一次决策失败会变成一堆红字，我们宁可自己吞掉并把原因写进遥测。
+        ///
+        /// ## ⚠ 这里曾经犯过一个错（值得留档）
+        ///
+        /// 最初的写法是把"允许所有物资"当成**一次性初始化**，在进地图后**立刻**做一次、
+        /// 之后永不重复。实测发现它**在地图刚生成、debug 开局的物资还没刷出来时就跑了** ——
+        /// 扫到 0 个禁取物，然后标记"已完成"，**此后 49 个被禁取物品永远没人解锁**。
+        ///
+        /// 教训：「只做一次」这个前提本身就是错的。游戏里随时可能出现新的禁取物
+        /// （空投、商队、新生成的东西）。**改成跟着日闭环每天检查一次**（幂等、开销可忽略）。
         /// </summary>
         public override void GameComponentTick()
         {
@@ -142,10 +160,27 @@ namespace FoodControl.Game
                 Map map = Verse.Find.CurrentMap;
                 if (map == null || !map.IsPlayerHome) return;
 
+                int day = CalendarDay(map);
+
+                // ── ① 每日一次的家务（允许物资等），与决策时段无关 ──
+                //    放在时段判断**之前**：家务活没理由等到 8 点，而且新殖民地往往是半夜开局的。
+                try
+                {
+                    SetupActionResult setup = ColonySetup.Tick(map, day);
+                    if (setup != null && setup.Changed > 0)
+                    {
+                        try { Log.Message("[FoodControl] 初始化：" + setup); } catch (Exception) { }
+                    }
+                }
+                catch (Exception e)
+                {
+                    try { Log.Error("[FoodControl] 初始化异常（已吞掉）：" + e); } catch (Exception) { }
+                }
+
+                // ── ② 每日决策闭环（受时段限制）──
                 int hour = GenLocalDate.HourOfDay(map);
                 if (hour < DecisionHourFrom || hour > DecisionHourTo) return;
 
-                int day = CalendarDay(map);
                 if (day == _lastRunDay) return;         // 今天已经跑过了
                 _lastRunDay = day;
 
@@ -213,6 +248,72 @@ namespace FoodControl.Game
         public string LastTelemetryLine
         {
             get { return Telemetry.LastLine; }
+        }
+
+        // ------------------------------------------------------------------
+        // 一次性初始化的测试钩子
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// **静态测试钩子**：立刻跑一次"允许所有被禁取物资"，并返回一行结果。
+        ///
+        /// 为什么放在这个类上而不是 `ColonySetup` 上：
+        ///   探针 `DSH.FoodProbe` 是按 `FoodControl.Game.<类型名>` 找类型的，
+        ///   而它已经知道 `FoodControlGameComponent` 这个名字。把钩子放这里，
+        ///   探针不用改 `FindType` 的搜索逻辑。
+        ///
+        /// ⚠ 必须是 **public static、0 个参数**（探针是 `CallStatic(t, "名字")` 调进来的）。
+        /// </summary>
+        public static string RunUnforbidNow()
+        {
+            try
+            {
+                Map map = Verse.Find.CurrentMap;
+                if (map == null) return "没有当前地图";
+                SetupActionResult r = ColonySetup.RunNow(map);
+                if (r == null) return "ColonySetup.RunNow 返回 null";
+                return r.ToString();
+            }
+            catch (Exception e)
+            {
+                try { Log.Error("[FoodControl] RunUnforbidNow 异常：" + e); } catch (Exception) { }
+                return "RunUnforbidNow 异常：" + e.Message;
+            }
+        }
+
+        /// <summary>**静态测试钩子**：数一下手上能用于建造的建材（S4 的输入）。</summary>
+        public static string CountMaterialsJson()
+        {
+            try
+            {
+                Map map = Verse.Find.CurrentMap;
+                if (map == null) return "{\"error\":\"没有当前地图\"}";
+                var counts = ColonySetup.CountBuildingMaterials(map);
+                var parts = new List<string>();
+                foreach (var kv in counts)
+                {
+                    parts.Add("\"" + kv.Key.Replace("\"", "'") + "\":" + kv.Value);
+                }
+                return "{\"count\":" + counts.Count + ",\"materials\":{" + string.Join(",", parts.ToArray()) + "}}";
+            }
+            catch (Exception e)
+            {
+                return "{\"error\":\"" + e.Message.Replace("\"", "'") + "\"}";
+            }
+        }
+
+        /// <summary>**静态测试钩子**：重置"今天已做过初始化"标记，让下次 tick 重跑。</summary>
+        public static string ResetSetupFlags()
+        {
+            try
+            {
+                ColonySetup.ResetForTesting();
+                return "已重置（下次调用会重跑初始化）";
+            }
+            catch (Exception e)
+            {
+                return "重置失败：" + e.Message;
+            }
         }
 
         public int CycleCount
