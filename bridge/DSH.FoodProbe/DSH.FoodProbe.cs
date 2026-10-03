@@ -1038,6 +1038,166 @@ namespace DSH.FoodProbe
             }
         }
 
+        [Tool("foodprobe/place_blueprints",
+            Description = "★ 按**给定顺序**放一组墙蓝图（用于实测\"建造顺序是否 = 放置顺序\"）。会改地图。")]
+        public object PlaceBlueprints(
+            [ToolParameter(Description = "JSON 数组：[[x,z],[x,z],...]，**按数组顺序放置**")] string cellsJson,
+            [ToolParameter(Description = "建筑 Def，默认 Wall")] string defName = "Wall",
+            [ToolParameter(Description = "材料 defName，默认 WoodLog")] string stuffDefName = "WoodLog")
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            try
+            {
+                // ⚠ 探针**不引用 Core**（它是独立程序集），所以不能用 `SimpleJson`。
+                //   这里只需要解析固定格式 `[[x,z],[x,z],...]`，手写一个极简解析即可。
+                var pairs = ParseCellPairs(cellsJson);
+                if (pairs == null || pairs.Count == 0)
+                    return new { success = false, message = "解析不出坐标对，期望格式 [[x,z],[x,z],...]" };
+
+                ThingDef def = DefDatabase<ThingDef>.GetNamedSilentFail(defName);
+                if (def == null) return new { success = false, message = "找不到 Def " + defName };
+                ThingDef stuff = DefDatabase<ThingDef>.GetNamedSilentFail(stuffDefName);
+
+                var placed = new List<object>();
+                for (int i = 0; i < pairs.Count; i++)
+                {
+                    int x = pairs[i][0], z = pairs[i][1];
+                    var c = new IntVec3(x, 0, z);
+
+                    bool ok = false;
+                    string err = null;
+                    try
+                    {
+                        var report = GenConstruct.CanPlaceBlueprintAt(def, c, Rot4.North, map, true, null, null, stuff, false, false, false);
+                        if (!report.Accepted) { err = report.Reason; }
+                        else
+                        {
+                            var bp = GenConstruct.PlaceBlueprintForBuild(def, c, map, Rot4.North, Faction.OfPlayer, stuff, null, null, true);
+                            ok = bp != null;
+                            if (!ok) err = "PlaceBlueprintForBuild 返回 null";
+                        }
+                    }
+                    catch (Exception e) { err = e.Message; }
+
+                    placed.Add(new { order = i, x, z, ok, error = err });
+                }
+
+                return new
+                {
+                    success = true,
+                    defName,
+                    stuff = stuffDefName,
+                    count = placed.Count,
+                    placed,
+                    note = "★ 按**数组顺序**放置蓝图。用于实测：小人先建哪一个？"
+                         + "（在 [x,z] 和 [x2,z2] 各放一堵，看谁先变成框架/先建成。）",
+                };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message };
+            }
+        }
+
+        [Tool("foodprobe/frames_in_rect",
+            Description = "★ 列出矩形内的**框架/蓝图**及其位置（判断谁先被施工）。只读。")]
+        public object FramesInRect(
+            [ToolParameter(Description = "起始 x")] int x = 0,
+            [ToolParameter(Description = "起始 z")] int z = 0,
+            [ToolParameter(Description = "宽")] int w = 20,
+            [ToolParameter(Description = "高")] int h = 20)
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            try
+            {
+                var frames = new List<object>();
+                var blueprints = new List<object>();
+                var built = new List<object>();
+
+                for (int dz = 0; dz < h; dz++)
+                {
+                    for (int dx = 0; dx < w; dx++)
+                    {
+                        int cx = x + dx, cz = z + dz;
+                        var c = new IntVec3(cx, 0, cz);
+                        if (!c.InBounds(map)) continue;
+
+                        foreach (Thing t in c.GetThingList(map))
+                        {
+                            if (t is Frame f)
+                            {
+                                frames.Add(new { x = cx, z = cz, defName = f.def?.defName, workDone = f.workDone });
+                            }
+                            else if (t is Blueprint b)
+                            {
+                                blueprints.Add(new { x = cx, z = cz, defName = b.def?.defName });
+                            }
+                            else if (t is Building bd && bd.def != null
+                                     && bd.def.defName.IndexOf("Wall", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                built.Add(new { x = cx, z = cz, defName = bd.def.defName });
+                            }
+                        }
+                    }
+                }
+
+                return new
+                {
+                    success = true,
+                    rect = new { x, z, w, h },
+                    frameCount = frames.Count,
+                    blueprintCount = blueprints.Count,
+                    builtCount = built.Count,
+                    frames,
+                    blueprints,
+                    built,
+                    note = "★ 判定\"谁先被建\"：**框架有进度**说明正在建它。"
+                         + "如果 A 先放、B 后放，而 B 先出现框架进度 → **放置顺序不决定施工顺序**。",
+                };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message, stack = e.StackTrace };
+            }
+        }
+
+        /// <summary>
+        /// 解析固定格式 `[[x,z],[x,z],...]` → 坐标对列表。
+        ///
+        /// 为什么手写：探针**不引用 Core**（独立程序集），拿不到 `SimpleJson`。
+        /// 而这里只需要这一种格式，手写比引入依赖简单。
+        /// </summary>
+        private static List<int[]> ParseCellPairs(string s)
+        {
+            var result = new List<int[]>();
+            if (string.IsNullOrEmpty(s)) return result;
+
+            // 找所有 [数字,数字]
+            int i = 0;
+            while (i < s.Length)
+            {
+                int open = s.IndexOf('[', i);
+                if (open < 0) break;
+                int close = s.IndexOf(']', open);
+                if (close < 0) break;
+
+                string inner = s.Substring(open + 1, close - open - 1);
+                string[] parts = inner.Split(',');
+                if (parts.Length >= 2)
+                {
+                    int a, b;
+                    if (int.TryParse(parts[0].Trim(), out a) && int.TryParse(parts[1].Trim(), out b))
+                        result.Add(new int[] { a, b });
+                }
+                i = close + 1;
+            }
+            return result;
+        }
+
         [Tool("foodprobe/health", Description = "自检：FoodControl mod 加载了吗、内部类型和静态入口在不在。只读。")]
         public object Health()
         {

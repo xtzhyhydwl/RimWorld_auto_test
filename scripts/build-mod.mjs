@@ -86,6 +86,11 @@ function gameRefs(managed) {
     'System.Core.dll',
     'netstandard.dll',
     'UnityEngine.CoreModule.dll',
+    // ⚠ `UnityEngine.GUIStyle` / `GUI` / `GUIContent` 在 **IMGUIModule** 里，
+    //   不在 CoreModule —— 只引 CoreModule 会报 "命名空间 UnityEngine 中不存在 GUIStyle"。
+    //   （鼠标坐标覆盖层需要即时模式 GUI，所以才要它。）
+    'UnityEngine.IMGUIModule.dll',
+    'UnityEngine.TextRenderingModule.dll',   // GUIContent/字体相关也在这里
     'Assembly-CSharp.dll',
   ];
   const refs = names.map((n) => path.join(managed, n));
