@@ -108,11 +108,17 @@ async function main() {
     record('能读到基线蓝图数', before != null, JSON.stringify(before));
     log(`  基线：蓝图 ${before?.total}（墙 ${before?.walls} / 门 ${before?.doors}）`);
 
-    // ── 4. ★ 跑一次样板建造 ──
-    log('\n=== 4. 跑样板建造 ===');
-    const run = await call('foodprobe/run_template_build', {}, 120000)
+    // ── 4. ★ 跑一次样板建造（**强制模式**）──
+    //
+    // ⚠ 为什么必须用 force：debug 开局的殖民地**自带墙/蓝图**（实测 12~22 个），
+    //   所以"已有住处就跳过"的守卫会**正确地**拒绝盖房 —— 那样就永远验不到建造本身。
+    //   守卫是对的，是测试需要一条绕过它的路。
+    //   （我第一版就卡在这里：脚本报"蓝图数没增加"，实际是守卫按预期工作，
+    //     测的不是"能不能盖"而是"守卫拦不拦"。测错了对象。）
+    log('\n=== 4. 强制跑样板建造（绕过"已有住处"守卫）===');
+    const run = await call('foodprobe/run_template_build', { force: true }, 120000)
       .catch((e) => ({ success: false, message: e.message }));
-    record('run_template_build 可调用', run?.success === true,
+    record('run_template_build(force) 可调用', run?.success === true,
       (run?.result || run?.message || '').slice(0, 320));
     log(`  结果：${run?.result || run?.message}`);
 
@@ -131,28 +137,32 @@ async function main() {
       delta >= 40 && delta <= 60,
       `+${delta}（样板 13x13 四门 = 44 墙 + 4 门 = 48）`);
 
+    // 门也必须真的放下了（不是只放下墙 —— 没有门的房子小人进不去）
+    const doorDelta = (after?.doors ?? 0) - (before?.doors ?? 0);
+    record('★★ 门也放下了（没有门的房子进不去）', doorDelta >= 3,
+      `门 +${doorDelta}（期望 4）`);
+
     // 两边对账：mod 自述 vs 桥接实测
     if (run?.success === true && run.result) {
       const m = /放下 (\d+) 格/.exec(String(run.result));
       if (m) {
         const claimed = Number(m[1]);
-        record('★ mod 自述的"放下格数"与桥接增量接近',
-          Math.abs(claimed - delta) <= 8,
+        record('★ mod 自述的"放下格数"与桥接增量一致',
+          claimed === delta,
           `mod 说 ${claimed}，桥接实测 +${delta}`);
       } else {
-        record('★ mod 自述的"放下格数"与桥接增量接近', null, '自述里没解析到"放下 N 格"');
+        record('★ mod 自述的"放下格数"与桥接增量一致', null, '自述里没解析到"放下 N 格"');
       }
     }
 
-    // ── 6. 幂等：不该无限增殖 ──
-    log('\n=== 6. 幂等 ===');
-    const run2 = await call('foodprobe/run_template_build', {}, 120000)
+    // ── 6. ★ 守卫：非强制模式**不应该**再盖一间 ──
+    log('\n=== 6. 守卫（这条测的是"该拦的有没有拦住"）===');
+    const guarded = await call('foodprobe/run_template_build', {}, 120000)
       .catch((e) => ({ success: false, message: e.message }));
-    const after2 = await countBlueprints();
-    record('重复调用不报错', run2?.success === true, (run2?.result || '').slice(0, 160));
-    record('★ 不重复盖第二间（有住处守卫）',
-      (after2?.total ?? 0) <= (after?.total ?? 0) + 4,
-      `${after?.total} → ${after2?.total}`);
+    const afterGuard = await countBlueprints();
+    record('非强制模式调用不报错', guarded?.success === true, (guarded?.result || '').slice(0, 160));
+    record('★ 已有住处时不再盖第二间（守卫生效）', (afterGuard?.total ?? 0) === (after?.total ?? 0),
+      `${after?.total} → ${afterGuard?.total}；自述：${(guarded?.result || '').slice(0, 80)}`);
   } finally {
     client.close();
   }
