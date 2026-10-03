@@ -498,6 +498,22 @@ namespace FoodControl.Game
                         try
                         {
                             if (!GenGrid.Walkable(c, map)) ok = false;
+
+                            // ★★ **不许盖到种植区上**（用户 2026-10-03 指出的硬伤）
+                            //
+                            // 用户原话：
+                            //   「你在种植区上面盖房子……一旦你把墙体封闭之后，
+                            //    种植区上面就覆盖了房顶，**植物没法得到光照，它是不会长大的**。
+                            //    所以那种等于说**没种**。」
+                            //
+                            // 这是**双重损失**：田废了（少一份收成），而 mod 还以为在种
+                            // （产能估算偏高 → 决策以为粮够 → 不再开新田）。
+                            //
+                            // ⚠ 光排除"这格有建筑"是不够的 —— 墙**不会**和种植区格重叠，
+                            //   出问题的是**墙围起来之后自动生成的那片屋顶**。
+                            //   所以必须**直接按种植区格排除**。
+                            if (ok && IsInAnyGrowingZone(map, x, z)) ok = false;
+
                             if (ok)
                             {
                                 List<Thing> ts = c.GetThingList(map);
@@ -614,6 +630,39 @@ namespace FoodControl.Game
                 }
             }
             return -1;
+        }
+
+        /// <summary>
+        /// 这一格**在不在任何种植区里**。
+        ///
+        /// 用途：建筑选址必须排除种植区格 —— 否则墙围起来会长屋顶，
+        /// 被盖住的种植区格**得不到光照、植物不生长**（用户 2026-10-03 指出的硬伤）。
+        /// </summary>
+        public static bool IsInAnyGrowingZone(Map map, int x, int z)
+        {
+            if (map == null) return false;
+            try
+            {
+                var c = new IntVec3(x, 0, z);
+                if (!c.InBounds(map)) return false;
+
+                // 优先问 ZoneAt（O(1)），拿不到再退回遍历
+                Zone zoneAt = null;
+                try { zoneAt = map.zoneManager.ZoneAt(c); }
+                catch (Exception) { }
+                if (zoneAt is Zone_Growing) return true;
+                if (zoneAt != null) return false;      // 是别的区（储藏区等），不算种植区
+
+                foreach (Zone zn in map.zoneManager.AllZones)
+                {
+                    var g = zn as Zone_Growing;
+                    if (g == null) continue;
+                    try { if (g.cells != null && g.cells.Contains(c)) return true; }
+                    catch (Exception) { }
+                }
+            }
+            catch (Exception) { }
+            return false;
         }
 
         /// <summary>数"手上能用于建造的材料"：stuff defName → 数量（可搬运的）</summary>

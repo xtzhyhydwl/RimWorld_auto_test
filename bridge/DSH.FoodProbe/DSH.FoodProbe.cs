@@ -884,6 +884,160 @@ namespace DSH.FoodProbe
         /// <summary>威胁事件的原始 baseChance 备份（供恢复）</summary>
         private static readonly Dictionary<string, float> _threatBackup = new Dictionary<string, float>();
 
+        [Tool("foodprobe/roof_stats",
+            Description = "★ 查种植区/屋顶的关系：种植区里有多少格被屋顶盖住（被盖住的格植物不生长）。只读。")]
+        public object RoofStats()
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            try
+            {
+                var zones = new List<object>();
+                int totalRoofed = 0, totalCells = 0;
+
+                foreach (var z in map.zoneManager.AllZones)
+                {
+                    var g = z as Zone_Growing;
+                    if (g == null) continue;
+
+                    int cells = 0, roofed = 0, nonArable = 0;
+                    var samples = new List<string>();
+
+                    foreach (IntVec3 c in g.cells)
+                    {
+                        cells++;
+                        bool isRoofed = false;
+                        try { isRoofed = map.roofGrid.Roofed(c); }
+                        catch (Exception) { }
+                        if (isRoofed)
+                        {
+                            roofed++;
+                            if (samples.Count < 8) samples.Add("屋顶(" + c.x + "," + c.z + ")");
+                        }
+                        bool arable = false;
+                        // ⚠ 判"能不能种"要用**肥力**，不是 terrain affordances。
+                        //   `TerrainAffordanceDefOf.GrowSoil` **不存在**（GrowSoil 只是 XML 里
+                        //   一个 affordance 名字，没有 DefOf 字段）—— 这个坑我自己的
+                        //   `PlotPlanner.cs:313` 里就记着，结果还是又踩了一次。
+                        //   游戏真正的判据：`map.fertilityGrid.FertilityAt(c) >= plantDef.fertilityMin`。
+                        try { arable = map.fertilityGrid.FertilityAt(c) > 0f; }
+                        catch (Exception) { }
+                        if (!arable)
+                        {
+                            nonArable++;
+                            if (samples.Count < 8) samples.Add("不可耕(" + c.x + "," + c.z + ")");
+                        }
+                    }
+
+                    totalRoofed += roofed;
+                    totalCells += cells;
+
+                    zones.Add(new
+                    {
+                        zoneId = g.ID,
+                        cells,
+                        roofed,
+                        nonArable,
+                        healthy = roofed == 0 && nonArable == 0,
+                        samples,
+                    });
+                }
+
+                return new
+                {
+                    success = true,
+                    zoneCount = zones.Count,
+                    totalCells,
+                    totalRoofed,
+                    zones,
+                    note = "★★ **被屋顶盖住的种植区格，植物得不到光照，不会生长** —— "
+                         + "等于白占着，而 mod 以为还在种。用户实测发现："
+                         + "\"你在种植区上面盖房子……一旦把墙体封闭，种植区上面就覆盖了房顶，"
+                         + "植物没法得到光照，它是不会长大的。所以那种等于说没种。\"",
+                };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message, stack = e.StackTrace };
+            }
+        }
+
+        [Tool("foodprobe/fix_roofed_growing",
+            Description = "★ 把种植区里**被屋顶盖住/不可耕**的格移除（那些格植物不会生长）。会改地图。")]
+        public object FixRoofedGrowing()
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            try
+            {
+                int removed = 0, before = 0, after = 0;
+                var details = new List<string>();
+
+                foreach (var z in map.zoneManager.AllZones)
+                {
+                    var g = z as Zone_Growing;
+                    if (g == null) continue;
+
+                    // ⚠ 边遍历边改会出问题：先把要移除的收集起来
+                    var toRemove = new List<IntVec3>();
+                    before += g.cells.Count;
+
+                    foreach (IntVec3 c in g.cells)
+                    {
+                        bool bad = false;
+                        string why = "";
+                        try
+                        {
+                            if (map.roofGrid.Roofed(c)) { bad = true; why = "有屋顶"; }
+                        }
+                        catch (Exception) { }
+                        if (!bad)
+                        {
+                            try
+                            {
+                                // 同 `roof_stats`：判据用肥力（`GrowSoil` affordance 不存在）
+                                if (map.fertilityGrid.FertilityAt(c) <= 0f) { bad = true; why = "肥力0"; }
+                            }
+                            catch (Exception) { }
+                        }
+                        if (bad)
+                        {
+                            toRemove.Add(c);
+                            if (details.Count < 10) details.Add(why + "(" + c.x + "," + c.z + ")");
+                        }
+                    }
+
+                    for (int i = 0; i < toRemove.Count; i++)
+                    {
+                        try { g.RemoveCell(toRemove[i]); removed++; }
+                        catch (Exception e)
+                        {
+                            if (details.Count < 14) details.Add("移除失败(" + toRemove[i].x + "," + toRemove[i].z + ")：" + e.Message);
+                        }
+                    }
+
+                    after += g.cells.Count;
+                }
+
+                return new
+                {
+                    success = true,
+                    removed,
+                    cellsBefore = before,
+                    cellsAfter = after,
+                    details,
+                    note = "★ 移除种植区里**被屋顶盖住/不可耕**的格 —— 那些格植物不会生长，"
+                         + "留着只会让 mod 高估产能。",
+                };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message, stack = e.StackTrace };
+            }
+        }
+
         [Tool("foodprobe/health", Description = "自检：FoodControl mod 加载了吗、内部类型和静态入口在不在。只读。")]
         public object Health()
         {
