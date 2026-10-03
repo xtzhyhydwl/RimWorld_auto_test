@@ -1636,12 +1636,38 @@ namespace DSH.FoodProbe
             {
                 var tm = Find.TickManager;
                 if (tm == null) return new { success = false, message = "没有 TickManager" };
-                // ⚠ `TickManager.Paused` 是 **get-only**（写它 CS0200，实测踩过）。
+
+                // ⚠ `TickManager.Paused` 是 **get-only**（写它 CS0200）。
                 //   `get_Paused` 的 IL：`curTimeSpeed == Paused(0) || ForcePaused`。
-                //   所以暂停/恢复要改 **`CurTimeSpeed`**（public get+set），值是 `Verse.TimeSpeed`。
-                if (paused) tm.CurTimeSpeed = TimeSpeed.Paused;
-                else if (tm.CurTimeSpeed == TimeSpeed.Paused) tm.CurTimeSpeed = TimeSpeed.Normal;
-                return new { success = true, paused = tm.Paused, curTimeSpeed = tm.CurTimeSpeed.ToString() };
+                //
+                // ⚠⚠ 更坑的是：`set_CurTimeSpeed` 会**先过 `PlayerCanControl` 这一关**，
+                //   不通过就**静默丢弃**（IL：`brtrue.s IL_003C` → 否则走 Messages.Message 然后 ret）。
+                //   实测踩过：调试殖民地刚开出来时 `Game.PlayerHasControl` 还是 false，
+                //   于是 `CurTimeSpeed = Paused` 被无声拒绝，`set_paused` 返回 `paused=false`，
+                //   后面所有"前后两次读数"的增量全变成 +0。
+                //   → 测试夹具必须能**绕过 UI 状态**冻结世界，所以这里直接写**私有字段**
+                //     `TickManager.curTimeSpeed`（反射），改不动才退回属性。
+                var fi = typeof(TickManager).GetField(
+                    "curTimeSpeed",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (fi != null)
+                {
+                    fi.SetValue(tm, paused ? TimeSpeed.Paused : TimeSpeed.Normal);
+                }
+                else
+                {
+                    if (paused) tm.CurTimeSpeed = TimeSpeed.Paused;
+                    else if (tm.CurTimeSpeed == TimeSpeed.Paused) tm.CurTimeSpeed = TimeSpeed.Normal;
+                }
+
+                return new
+                {
+                    success = true,
+                    paused = tm.Paused,
+                    curTimeSpeed = tm.CurTimeSpeed.ToString(),
+                    forcedFieldWrite = fi != null,
+                    playerHasControl = Current.Game != null ? Current.Game.PlayerHasControl : false,
+                };
             }
             catch (Exception e)
             {
@@ -1655,6 +1681,267 @@ namespace DSH.FoodProbe
             [ToolParameter(Description = "true = 暂停，false = 恢复")] bool paused = true)
         {
             return SetPausedImpl(paused);
+        }
+
+        /// <summary>
+        /// **屋顶实测**（用户凭经验说「墙体和门组成封闭空间以后，自动铺屋顶」——请实测确认）。
+        ///
+        /// 做法：列出地图上所有 `Room`，报告
+        ///   ① 这个房间是不是封闭的（`Rooms` / `District` 的封闭判定）
+        ///   ② 它有多少格、其中多少格有屋顶、`RoofDef` 是什么
+        ///   ③ 有没有 `WorkGiver_BuildRoof` 对应的活儿（`RoofGrid` 里待铺的格）
+        ///
+        /// ⚠ 屋顶**不是 Thing**（没有 `Blueprint_Build`），它是 `RoofGrid` 上的
+        ///   `RoofDef` + `RoofGrid` 的"待建"标记。所以"数蓝图"是数不到屋顶的，
+        ///   必须读 `map.roofGrid.RoofAt(c)`。
+        /// </summary>
+        public static object RoofCheckImpl(int maxRooms)
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+            if (maxRooms <= 0) maxRooms = 8;
+
+            var rooms = new List<object>();
+            int totalRoofedCells = 0, totalUnroofedCells = 0;
+            var roofsByDef = new Dictionary<string, int>();
+
+            try
+            {
+                // 全图屋顶统计（"有屋顶的格"和"没屋顶的格"）
+                foreach (var c in CellRect.WholeMap(map).Cells)
+                {
+                    try
+                    {
+                        var rd = map.roofGrid.RoofAt(c);
+                        if (rd != null)
+                        {
+                            totalRoofedCells++;
+                            string roofName = rd.defName;
+                            if (!roofsByDef.ContainsKey(roofName)) roofsByDef[roofName] = 0;
+                            roofsByDef[roofName]++;
+                        }
+                        else totalUnroofedCells++;
+                    }
+                    catch { }
+                }
+
+                int n = 0;
+                foreach (var room in map.regionGrid.AllRooms)
+                {
+                    if (room == null) continue;
+                    if (n++ >= maxRooms) break;
+
+                    bool anyRoof = false, allRoof = true, noneRoof = true;
+                    int roofed = 0, cells = 0;
+                    var roomRoofDefs = new Dictionary<string, int>();
+                    var roomCells = new List<IntVec3>();
+
+                    try
+                    {
+                        foreach (var c in room.Cells)
+                        {
+                            cells++;
+                            roomCells.Add(c);
+                            var rd = map.roofGrid.RoofAt(c);
+                            if (rd != null)
+                            {
+                                roofed++;
+                                anyRoof = true;
+                                noneRoof = false;
+                                string dn = rd.defName;
+                                if (!roomRoofDefs.ContainsKey(dn)) roomRoofDefs[dn] = 0;
+                                roomRoofDefs[dn]++;
+                            }
+                            else allRoof = false;
+                        }
+                    }
+                    catch { }
+
+                    int doorCount = 0, wallCount = 0;
+                    try
+                    {
+                        var doorDef = DefDatabase<ThingDef>.GetNamedSilentFail("Door");
+                        var wallDef = DefDatabase<ThingDef>.GetNamedSilentFail("Wall");
+                        for (int ci = 0; ci < roomCells.Count; ci++)
+                        {
+                            var things = roomCells[ci].GetThingList(map);
+                            for (int i = 0; i < things.Count; i++)
+                            {
+                                var t = things[i];
+                                if (t?.def == null) continue;
+                                if (doorDef != null && t.def == doorDef) doorCount++;
+                                if (wallDef != null && t.def == wallDef) wallCount++;
+                            }
+                        }
+                    }
+                    catch { }
+
+                    rooms.Add(new
+                    {
+                        id = room.ID,
+                        cells,
+                        roofedCells = roofed,
+                        anyRoof,
+                        allRoof,
+                        noneRoof,
+                        roofDefs = roomRoofDefs,
+                        // 房间是否被判定为"封闭"（有屋顶的系统通常也这么判）
+                        isPrisonCell = room.IsPrisonCell,
+                        touchesMapEdge = room.TouchesMapEdge,
+                        // 房间的边界建筑统计（墙/门）
+                        wallCount,
+                        doorCount,
+                        firstCell = roomCells.Count > 0
+                            ? (object)new { x = roomCells[0].x, z = roomCells[0].z } : null,
+                    });
+                }
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message, rooms };
+            }
+
+            // 待铺屋顶的格子（RoofGrid 的 "unroofed but designated" 之类）
+            int roofBuildDesignations = 0;
+            try
+            {
+                var d = DefDatabase<DesignationDef>.GetNamedSilentFail("BuildRoof");
+                if (d != null && map.designationManager != null)
+                {
+                    foreach (var des in map.designationManager.SpawnedDesignationsOfDef(d)) roofBuildDesignations++;
+                }
+            }
+            catch { }
+
+            return new
+            {
+                success = true,
+                mapRoofedCells = totalRoofedCells,
+                mapUnroofedCells = totalUnroofedCells,
+                roofsByDef = roofsByDef,
+                roomCount = map.regionGrid.AllRooms != null ? new List<object>(map.regionGrid.AllRooms).Count : 0,
+                roomsShown = rooms.Count,
+                rooms,
+                roofBuildDesignationCount = roofBuildDesignations,
+                note = "★ 结论看 rooms[].allRoof/noneRoof：如果**封闭的墙+门房间**里 allRoof=true，"
+                     + "就证实了用户说的'封闭空间自动铺屋顶'。"
+                     + "屋顶不是 Thing（数蓝图数不到），它是 map.roofGrid 上的 RoofDef。",
+            };
+        }
+
+        [Tool("foodprobe/roof_check",
+            Description = "★S4：实测屋顶 —— 列房间、每间多少格有屋顶/RoofDef 是什么。只读。")]
+        public object RoofCheck(
+            [ToolParameter(Description = "最多列几个房间，默认 8")] int maxRooms = 8)
+        {
+            return RoofCheckImpl(maxRooms);
+        }
+
+        /// <summary>
+        /// **测试夹具**：直接在指定位置**生成一个封闭的墙+门方盒**（不是蓝图，是已建成的建筑）。
+        ///
+        /// 为什么需要它：要回答用户那个问题 ——「13×13 的情况下，墙体和门组成封闭空间以后，
+        /// **自动铺屋顶**」—— 就必须先有一个**真的建成**的封闭房间。
+        /// 而 48 面墙 + 4 扇门由小人真建，要跑好几天游戏日，验证脚本等不起。
+        ///
+        /// ⚠ 这是**夹具，不是 mod 行为**：它不是 mod 放的，只用来给"屋顶会不会自己长出来"
+        ///   这个物理问题造一个确定的初始条件。报告里必须写清楚这一点。
+        ///
+        /// ⚠ 屋顶不是 Thing（数蓝图数不到），要读 `map.roofGrid.RoofAt(c)`；
+        ///   而且屋顶生成要走 tick，所以本工具跑完必须**解除暂停并推进几 tick**再看。
+        /// </summary>
+        public static object BuildBoxInstantImpl(int x, int z, int size, bool doors, string stuffDefName)
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+            if (size < 3) size = 3;
+            if (x < 0 || z < 0 || x + size > map.Size.x || z + size > map.Size.z)
+                return new { success = false, message = "越界", mapSize = new { x = map.Size.x, z = map.Size.z } };
+
+            var wallDef = DefDatabase<ThingDef>.GetNamedSilentFail("Wall");
+            var doorDef = DefDatabase<ThingDef>.GetNamedSilentFail("Door");
+            if (wallDef == null || doorDef == null)
+                return new { success = false, message = "找不到 Wall/Door Def" };
+
+            ThingDef stuff = DefDatabase<ThingDef>.GetNamedSilentFail(stuffDefName);
+            if (stuff == null) stuff = DefDatabase<ThingDef>.GetNamedSilentFail("WoodLog");
+
+            int maxX = x + size - 1, maxZ = z + size - 1;
+            int mid = size / 2;
+
+            // 四边中心的门格（和 mod 的户型一致）
+            var doorCells = new HashSet<IntVec3>();
+            if (doors)
+            {
+                doorCells.Add(new IntVec3(x + mid, 0, maxZ));
+                doorCells.Add(new IntVec3(maxX, 0, z + mid));
+                doorCells.Add(new IntVec3(x + mid, 0, z));
+                doorCells.Add(new IntVec3(x, 0, z + mid));
+            }
+
+            int walls = 0, drs = 0;
+            var errors = new List<string>();
+
+            for (int cx = x; cx <= maxX; cx++)
+            {
+                for (int cz = z; cz <= maxZ; cz++)
+                {
+                    bool onEdge = (cx == x || cx == maxX || cz == z || cz == maxZ);
+                    if (!onEdge) continue;
+
+                    var c = new IntVec3(cx, 0, cz);
+                    bool isDoor = doorCells.Contains(c);
+                    ThingDef def = isDoor ? doorDef : wallDef;
+
+                    try
+                    {
+                        // 先清掉这一格上的东西（夹具要的是确定状态）
+                        var existing = c.GetThingList(map);
+                        for (int i = existing.Count - 1; i >= 0; i--)
+                        {
+                            var t = existing[i];
+                            if (t != null && t.def != null && !(t is Pawn)) t.Destroy(DestroyMode.Vanish);
+                        }
+
+                        Thing b = ThingMaker.MakeThing(def, isDoor ? null : stuff);
+                        if (b == null) { errors.Add($"({cx},{cz}) MakeThing null"); continue; }
+                        b.SetFactionDirect(Faction.OfPlayer);
+                        Rot4 rot = isDoor
+                            ? ((cz == z || cz == maxZ) ? Rot4.South : Rot4.East)
+                            : Rot4.North;
+                        GenSpawn.Spawn(b, c, map, rot);
+                        if (isDoor) drs++; else walls++;
+                    }
+                    catch (Exception e)
+                    {
+                        if (errors.Count < 6) errors.Add($"({cx},{cz}) {e.GetType().Name}: {e.Message}");
+                    }
+                }
+            }
+
+            return new
+            {
+                success = errors.Count == 0,
+                x, z, size, stuff = stuff.defName,
+                wallsSpawned = walls,
+                doorsSpawned = drs,
+                expectedWalls = (size * 4 - 4) - (doors ? 4 : 0),
+                errors,
+                note = "★ 这是**测试夹具**（直接 spawn 已建成的建筑），不是 mod 行为。"
+                     + "目的是给'封闭空间会不会自动长屋顶'造一个确定条件。",
+            };
+        }
+
+        [Tool("foodprobe/build_box_instant",
+            Description = "★S4 夹具：直接生成一个封闭墙+门方盒（已建成，非蓝图），用来实测屋顶。会改地图。")]
+        public object BuildBoxInstant(
+            [ToolParameter(Description = "左下角 x")] int x,
+            [ToolParameter(Description = "左下角 z")] int z,
+            [ToolParameter(Description = "边长，默认 13")] int size = 13,
+            [ToolParameter(Description = "四边中心各开一扇门，默认 true")] bool doors = true,
+            [ToolParameter(Description = "材质 defName，默认 WoodLog")] string stuffDefName = "WoodLog")
+        {
+            return BuildBoxInstantImpl(x, z, size, doors, stuffDefName);
         }
 
         // ── mod 内部的一次性初始化钩子 ─────────────────────────────────

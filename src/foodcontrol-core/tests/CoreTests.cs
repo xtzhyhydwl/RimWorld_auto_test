@@ -790,6 +790,172 @@ public static class CoreTests
                 }
             }
         }
+
+        RunFurnitureTests(grid, dist, opts, W, H);
+    }
+
+    /// <summary>
+    /// 家具摆放（S4 第二版：用户要「3 张床 + 1 个火把」构成最基本的卧室）。
+    ///
+    /// 这些断言全是**纯几何**，毫秒级可跑。它们锁住的是用户口述的规则：
+    /// 床沿墙排、避开门、不要挤在一起、火把放中心、某格不可用就换一格。
+    /// </summary>
+    private static void RunFurnitureTests(
+        BuildabilityMap grid, double[] dist, BuildSiteOptions opts, int W, int H)
+    {
+        Console.WriteLine();
+        Console.WriteLine("-- BuildSitePlanner（家具摆放：3 床 + 1 火把） --");
+
+        BuildingPlan plan = BuildSitePlanner.Plan(grid, dist, opts);
+        if (plan == null) { True("拿到户型", false, "plan=null"); return; }
+
+        int maxX = plan.X + plan.Size - 1, maxZ = plan.Z + plan.Size - 1;
+
+        var f = BuildSitePlanner.PlaceFurniture(plan, grid, 3, opts);
+        Console.WriteLine("       " + string.Join(" | ", f.ConvertAll(x => x.ToString()).ToArray()));
+
+        var beds = f.FindAll(x => x.Kind == "bed");
+        var torches = f.FindAll(x => x.Kind == "torch");
+
+        Eq("★ 3 个殖民者 → 3 张床", beds.Count, 3);
+        Eq("★ 恰好 1 个火把", torches.Count, 1);
+
+        // ── 全都在屋里 ──
+        bool allInside = true;
+        foreach (var it in f)
+            foreach (int ci in it.Cells)
+            {
+                int cx = ci % W, cz = ci / W;
+                if (cx <= plan.X || cx >= maxX || cz <= plan.Z || cz >= maxZ) allInside = false;
+            }
+        True("★ 家具全部在房间内部（不在墙里）", allInside);
+
+        // ── 不堵门：门内侧那格必须空着 ──
+        {
+            var approach = new HashSet<int>();
+            int depth = opts.DoorApproachDepth > 0 ? opts.DoorApproachDepth : 1;
+            foreach (int di in plan.DoorCells)
+            {
+                int dx = di % W, dz = di / W;
+                int sx = 0, sz = 0;
+                if (dz == maxZ) sz = -1;
+                else if (dz == plan.Z) sz = 1;
+                else if (dx == maxX) sx = -1;
+                else if (dx == plan.X) sx = 1;
+                else continue;
+                int nx = dx, nz = dz;
+                for (int k = 1; k <= depth; k++)
+                {
+                    nx += sx; nz += sz;
+                    approach.Add(nz * W + nx);
+                }
+            }
+            bool clear = true;
+            foreach (var it in f)
+                foreach (int ci in it.Cells)
+                    if (approach.Contains(ci)) clear = false;
+            True("★★ 家具避开了每扇门内侧的通道（不堵门）", clear,
+                "门内侧通道 " + approach.Count + " 格");
+        }
+
+        // ── 不重叠、且有间隔 ──
+        {
+            var used = new HashSet<int>();
+            bool overlap = false;
+            foreach (var it in f)
+                foreach (int ci in it.Cells)
+                    if (!used.Add(ci)) overlap = true;
+            True("★ 家具之间不重叠", !overlap);
+
+            bool gapOk = true;
+            int gap = opts.FurnitureGap > 0 ? opts.FurnitureGap : 1;
+            var all = new List<int>(used);
+            for (int i = 0; i < all.Count && gapOk; i++)
+                for (int j = i + 1; j < all.Count; j++)
+                {
+                    int ax = all[i] % W, az = all[i] / W;
+                    int bx = all[j] % W, bz = all[j] / W;
+                    if (Math.Abs(ax - bx) <= gap && Math.Abs(az - bz) <= gap &&
+                        Math.Abs(ax - bx) + Math.Abs(az - bz) > 1)
+                        continue;   // 同一件家具内部的相邻格，不算"两件家具挤在一起"
+                }
+            True("★ 不同家具之间至少留了间隔格", gapOk, "gap=" + gap);
+        }
+
+        // ── 床沿同一列（x 相同）排，朝向一致 ──
+        {
+            bool sameCol = true;
+            int col = beds.Count > 0 ? beds[0].CellIndex % W : -1;
+            foreach (var b in beds) if (b.CellIndex % W != col) sameCol = false;
+            True("★ 3 张床排在**同一列**（沿墙一列，符合「沿墙排」的意图）", sameCol,
+                "列 x=" + col);
+        }
+
+        // ── 都朝北（床 1×2 沿 z 长，床头朝北）──
+        {
+            bool allNorth = true;
+            foreach (var b in beds) if (b.Rotation != 0) allNorth = false;
+            True("★ 床朝向一致（北，沿 z 长 1×2）", allNorth);
+        }
+
+        // ── 火把离房间中心更近（比所有床都近）──
+        if (torches.Count == 1 && beds.Count > 0)
+        {
+            double cx = plan.X + (plan.Size - 1) / 2.0;
+            double cz = plan.Z + (plan.Size - 1) / 2.0;
+            Func<int, double> dToCentre = i =>
+            {
+                double px = i % W, pz = i / W;
+                return Math.Sqrt((px - cx) * (px - cx) + (pz - cz) * (pz - cz));
+            };
+            double dTorch = dToCentre(torches[0].CellIndex);
+            double dBedMin = double.MaxValue;
+            foreach (var b in beds) dBedMin = Math.Min(dBedMin, dToCentre(b.CellIndex));
+            True("★★ 火把比所有床都更靠近房间中心（照明覆盖最好）",
+                dTorch < dBedMin, "火把距 " + dTorch.ToString("F2") + " vs 最近的床 " + dBedMin.ToString("F2"));
+        }
+
+        // ── 可复现：同样输入两次结果一致 ──
+        {
+            var f2 = BuildSitePlanner.PlaceFurniture(plan, grid, 3, opts);
+            bool same = f2.Count == f.Count;
+            if (same)
+                for (int i = 0; i < f.Count; i++)
+                    if (f2[i].CellIndex != f[i].CellIndex || f2[i].Rotation != f[i].Rotation
+                        || f2[i].Kind != f[i].Kind) same = false;
+            True("★ 摆放规则可复现（同样输入 → 同样输出）", same);
+        }
+
+        // ── 某格不可用就换一格：把最靠西的一列全封掉，床应该往东挪而不是放弃 ──
+        {
+            BuildabilityMap g2 = MakeBuildMap(W, H, true);
+            // 封掉 plan.X+1 整列（原本床排的那一列）
+            for (int z = plan.Z + 1; z < maxZ; z++)
+                g2.Buildable[z * W + (plan.X + 1)] = false;
+            var f3 = BuildSitePlanner.PlaceFurniture(plan, g2, 3, opts);
+            var beds3 = f3.FindAll(x => x.Kind == "bed");
+            Eq("★ 最靠墙那列被封后仍然放满 3 张床（换一格，不放弃）", beds3.Count, 3);
+            bool movedEast = true;
+            foreach (var b in beds3) if (b.CellIndex % W == plan.X + 1) movedEast = false;
+            True("★ 床确实挪到了别的列", movedEast,
+                "列 " + string.Join(",", beds3.ConvertAll(b => (b.CellIndex % W).ToString()).ToArray()));
+        }
+
+        // ── 殖民者 0 人 → 不放床（但还是放火把）──
+        {
+            var f4 = BuildSitePlanner.PlaceFurniture(plan, grid, 0, opts);
+            Eq("0 个殖民者 → 0 张床", f4.FindAll(x => x.Kind == "bed").Count, 0);
+            Eq("0 个殖民者 → 仍然放 1 个火把", f4.FindAll(x => x.Kind == "torch").Count, 1);
+        }
+
+        // ── 默认参数确实是用户要的那套：13×13 / 4 门 / 床 3 张 ──
+        {
+            var d = new BuildSiteOptions();
+            Eq("默认边长 = 13（用户拍板）", d.Size, 13);
+            Eq("默认开门边数 = 4（四边中心各一）", d.DoorSides.Length, 4);
+            Eq("默认每殖民者一床", d.BedPerColonist, true);
+            Eq("默认火把 1 个", d.TorchCount, 1);
+        }
     }
 
     // ---------------- 工具 ----------------

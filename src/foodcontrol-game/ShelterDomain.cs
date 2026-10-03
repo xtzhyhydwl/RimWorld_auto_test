@@ -95,17 +95,22 @@ namespace FoodControl.Game
         public static bool Enabled = true;
 
         /// <summary>房子边长（含墙）。7 → 内部 5×5 = 25 格、墙 23 格、门 1 格</summary>
-        public static int HouseSize = 7;
-
         /// <summary>
-        /// **地板开关**。默认 **true**：木质/混凝土地板都有 `blueprintDef`
-        /// （实测 `TerrainDefOf.WoodPlankFloor.blueprintDef == Blueprint_WoodPlankFloor`），
-        /// 走的是和墙门完全一样的 `GenConstruct.PlaceBlueprintForBuild` 路径。
+        /// 房子边长（含墙）。**13** —— 用户明确要求：
+        /// 「最万能的建筑……13 乘 13，用墙去画一个 13 乘 13 的正方形」。
+        /// 13×13 → 外墙 48 格（44 墙 + 4 门）、内部 11×11 = 121 格。
         /// </summary>
-        public static bool BuildFloor = true;
+        public static int HouseSize = 13;
 
         /// <summary>
-        /// 用哪个地形当地板。默认木地板（最便宜、前期就有）。
+        /// **地板开关**。用户明确说「地板这个东西一般是**后边再考虑**……
+        /// 先有墙壁，墙壁之后房顶小人自动去盖，盖好之后可能我们才考虑去建造地板」
+        /// ⇒ **默认关**（但地板**确实有蓝图形态**，这是实测确证的，见类注释）。
+        /// </summary>
+        public static bool BuildFloor = false;
+
+        /// <summary>
+        /// 用哪个地形当地板（`BuildFloor` 打开时才用；默认木地板，最便宜、前期就有）。
         /// </summary>
         public static string FloorTerrainDefName = "WoodPlankFloor";
 
@@ -122,11 +127,23 @@ namespace FoodControl.Game
         /// <summary>最多盖几间（别无限盖）</summary>
         public static int MaxHouses = 1;
 
-        /// <summary>选材质的优先顺序（defName）。在库存里按这个顺序挑第一个"料够 + Def 允许"的。</summary>
+        /// <summary>
+        /// **选材质的偏好顺序**（defName）。
+        ///
+        /// ## ⚠ 用户明确要求「现阶段，有什么用什么，可以混用」
+        ///
+        /// 所以这个列表**不是**"只用第一个"的硬优先级，它的作用降级成两件事：
+        ///   ① 当**库存量相同**时决定谁先被用（可解释的稳定顺序）；
+        ///   ② 过滤掉"这个 Def 不允许砌墙/做门"的东西。
+        ///
+        /// 真正的规则看 `AssignMaterials`：**按库存从多到少依次取用，一种不够就用下一种**，
+        /// 于是"木头 300 + 钢 1170"会变成"先用木头、木头用完接着用钢"，
+        /// 一栋房子里**允许混用不同材质**，且**逐格记录用了什么**（便于遥测与验证）。
+        /// </summary>
         public static string[] MaterialPreference = new string[]
         {
             "WoodLog",    // 前期最常用、最便宜
-            "Steel",      // 没有木头就钢
+            "Steel",
             "BlocksSandstone",
             "BlocksGranite",
             "BlocksMarble",
@@ -136,6 +153,29 @@ namespace FoodControl.Game
 
         /// <summary>低于这个库存就不选它（免得把料全吃掉、别的活没法干）</summary>
         public static int MinMaterialReserve = 0;
+
+        /// <summary>
+        /// 是否允许一栋房**混用**多种材质（用户要求：现阶段有什么用什么）。
+        /// 关掉它就退化成"只用库存最多的那一种"。
+        /// </summary>
+        public static bool AllowMixedMaterials = true;
+
+        /// <summary>
+        /// **家具开关**（用户要「直接往房间里面扔一个火把，加三个床」→ 最基本卧室）。
+        /// </summary>
+        public static bool BuildFurniture = true;
+
+        /// <summary>火把的 defName（`ThingDefOf.TorchLamp` 是"火把灯"，不需要电）</summary>
+        public static string TorchDefName = "TorchLamp";
+
+        /// <summary>床的 defName</summary>
+        public static string BedDefName = "Bed";
+
+        /// <summary>
+        /// 门开在哪几条边（0=北 1=东 2=南 3=西）。默认**四条边都开** ——
+        /// 用户看过只有一扇门的实测后说「只有一个门，实际开门方向是封闭的，所以还是多留几道门好」。
+        /// </summary>
+        public static int[] DoorSides = new int[] { 0, 1, 2, 3 };
 
         public string Id
         {
@@ -243,21 +283,75 @@ namespace FoodControl.Game
         /// </summary>
         public static string LastReportJson = "{\"note\":\"还没有跑过\"}";
 
-        private static string BuildReportJson(PlacementReport pr, BuildingPlan plan, MaterialChoice mat)
+        private static string BuildReportJson(
+            PlacementReport pr, BuildingPlan plan, MaterialChoice mat,
+            ConstructionWorkInfo cw, Dictionary<string, int> usedCounts)
         {
             if (pr == null) return "{\"note\":\"没有记账\"}";
             var sb = new System.Text.StringBuilder();
             sb.Append("{");
             sb.Append("\"wallsPlaced\":").Append(pr.WallsPlaced).Append(",");
             sb.Append("\"doorsPlaced\":").Append(pr.DoorsPlaced).Append(",");
+            sb.Append("\"bedsPlaced\":").Append(pr.BedsPlaced).Append(",");
+            sb.Append("\"torchesPlaced\":").Append(pr.TorchesPlaced).Append(",");
             sb.Append("\"floorsPlaced\":").Append(pr.FloorsPlaced).Append(",");
             sb.Append("\"wallBlueprintReadBack\":").Append(pr.WallBlueprintReadBack).Append(",");
             sb.Append("\"doorBlueprintReadBack\":").Append(pr.DoorBlueprintReadBack).Append(",");
+            sb.Append("\"bedBlueprintReadBack\":").Append(pr.BedBlueprintReadBack).Append(",");
+            sb.Append("\"torchBlueprintReadBack\":").Append(pr.TorchBlueprintReadBack).Append(",");
             sb.Append("\"floorBlueprintReadBack\":").Append(pr.FloorBlueprintReadBack).Append(",");
             sb.Append("\"totalBlueprintReadBack\":").Append(pr.TotalBlueprintReadBack).Append(",");
             sb.Append("\"verified\":").Append(pr.Verified ? "true" : "false").Append(",");
             sb.Append("\"floorPathTried\":").Append(pr.FloorPathTried ? "true" : "false").Append(",");
             sb.Append("\"floorPathNote\":\"").Append(Esc(pr.FloorPathNote)).Append("\",");
+            sb.Append("\"buildFloor\":").Append(BuildFloor ? "true" : "false").Append(",");
+            sb.Append("\"buildFurniture\":").Append(BuildFurniture ? "true" : "false").Append(",");
+            sb.Append("\"materialNote\":\"").Append(Esc(pr.MaterialNote)).Append("\",");
+            // ★ 逐格材质用量（混用时会有多个键）
+            sb.Append("\"materialUseByCell\":{");
+            {
+                bool first = true;
+                if (pr.MaterialUse != null)
+                {
+                    foreach (KeyValuePair<string, int> kv in pr.MaterialUse)
+                    {
+                        if (!first) sb.Append(",");
+                        first = false;
+                        sb.Append("\"").Append(Esc(kv.Key)).Append("\":").Append(kv.Value);
+                    }
+                }
+                sb.Append("},");
+            }
+            // 分配阶段算出来的（可能比实际放下的多，因为有些格被拒）
+            sb.Append("\"materialAssigned\":{");
+            {
+                bool first = true;
+                if (usedCounts != null)
+                {
+                    foreach (KeyValuePair<string, int> kv in usedCounts)
+                    {
+                        if (!first) sb.Append(",");
+                        first = false;
+                        sb.Append("\"").Append(Esc(kv.Key)).Append("\":").Append(kv.Value);
+                    }
+                }
+                sb.Append("},");
+            }
+            // ★ 建造人力（放蓝图之前查的；回答"有没有人会去建"）
+            if (cw != null)
+            {
+                sb.Append("\"constructionWork\":{\"colonists\":").Append(cw.Colonists)
+                  .Append(",\"workers\":").Append(cw.ConstructionWorkers)
+                  .Append(",\"notInitialized\":").Append(cw.NotInitialized)
+                  .Append(",\"anyWorker\":").Append(cw.AnyWorker ? "true" : "false")
+                  .Append(",\"detail\":[");
+                for (int i = 0; i < cw.Detail.Count; i++)
+                {
+                    if (i > 0) sb.Append(",");
+                    sb.Append("\"").Append(Esc(cw.Detail[i])).Append("\"");
+                }
+                sb.Append("]},");
+            }
             sb.Append("\"rejectedCount\":").Append(pr.Rejected.Count).Append(",");
             sb.Append("\"rejected\":[");
             for (int i = 0; i < pr.Rejected.Count && i < 8; i++)
@@ -283,8 +377,7 @@ namespace FoodControl.Game
                   .Append(",\"allowedForDoor\":").Append(mat.AllowedForDoor ? "true" : "false")
                   .Append(",\"why\":\"").Append(Esc(mat.Why)).Append("\"},");
             }
-            sb.Append("\"floorTerrainDef\":\"").Append(Esc(FloorTerrainDefName)).Append("\",");
-            sb.Append("\"buildFloor\":").Append(BuildFloor ? "true" : "false");
+            sb.Append("\"floorTerrainDef\":\"").Append(Esc(FloorTerrainDefName)).Append("\"");
             sb.Append("}");
             return sb.ToString();
         }
@@ -368,7 +461,11 @@ namespace FoodControl.Game
                     return result;
                 }
 
-                // ── ③ 选址 + 户型（Core 的算法，已 98/98 测过）──
+                // ── ③ 选址 + 户型（Core 的算法，已 123/123 测过）──
+                //
+                // 默认值全在 `BuildSiteOptions` 里：Size=13（用户拍板）、
+                // DoorSides={0,1,2,3}（四边中心各一扇门 —— 用户明确要求"多留几道门"）。
+                // 这里只覆盖"和本地图/本域策略相关"的几项。
                 var opts = new BuildSiteOptions
                 {
                     Size = HouseSize,
@@ -377,9 +474,14 @@ namespace FoodControl.Game
                     DistancePenaltyPerCell = 4.0,
                     MaxBlockedRatio = 0.10,
                     SearchStep = 1,
-                    DoorSide = 2,                 // 门朝南（面向基地的那一侧最常见）
                     RequireOutsideAccess = true,
                 };
+                // 门的边：默认四边；HouseSize 太小时四门会把墙吃掉，交给 Core 的越界检查兜。
+                if (DoorSides != null && DoorSides.Length > 0) opts.DoorSides = DoorSides;
+
+                // 家具尺寸**必须**从游戏 Def 读（Core 不认 ThingDef）：
+                // 单人床 `Bed` 是 1×2、火把 `TorchLamp` 是 1×1。
+                FillFurnitureSizes(opts);
 
                 BuildingPlan plan = BuildSitePlanner.Plan(grid, dist, opts);
                 if (plan == null)
@@ -392,73 +494,123 @@ namespace FoodControl.Game
                     return result;
                 }
 
-                // ── ④ 按现有资源选材质（数库存，不猜）──
-                MaterialChoice material = ChooseMaterial(map, plan);
-                if (material == null || material.Def == null)
+                // ── ③b 家具摆放（Core 的纯几何：3 床 + 1 火把）──
+                int colonists = 0;
+                try { colonists = map.mapPawns.FreeColonistsSpawnedCount; } catch (Exception) { }
+                List<FurniturePlacement> furniture = BuildFurniture
+                    ? BuildSitePlanner.PlaceFurniture(plan, grid, colonists, opts)
+                    : new List<FurniturePlacement>();
+
+                // ── ④ ★ 前置检查：**有没有人做建造**（否则蓝图放下去也没人建 = 白放）──
+                //
+                // 依据（元数据确证）：建造不是一个 WorkGiver，而是
+                //   `WorkGiver_ConstructDeliverResourcesToBlueprints`（送料到蓝图）
+                //   `WorkGiver_ConstructDeliverResourcesToFrames`（送料到框架）
+                //   `WorkGiver_ConstructFinishFrames`（施工完成）
+                //   工作类型是 `WorkTypeDefOf.Construction`（送料还可能走 Hauling）。
+                // 放蓝图后游戏会**自动生成**这些工作，我们不用自己派活 ——
+                // 但前提是**至少有一个殖民者把 Construction 设为参与**。
+                //
+                // ⚠ 纪律：这里**只读不改**。偷偷改玩家的优先级属于「工作优先级自动化」（P2），
+                //   不属于 S4。所以发现"没人建造"时只报告 + 给出建议，绝不动设置。
+                ConstructionWorkInfo cw = CountConstructionWorkers(map);
+
+                // ── ⑤ 按现有资源分配材质（支持混用，逐格记录）──
+                //
+                // 料够不够：墙 + 门 各要 costStuffCount 个 stuff。
+                // ⚠ 实测：地板蓝图**不带 stuff**（byStuff 显示 "(无)"），
+                //   它的用料走 `TerrainDef.costStuffCount`（木地板是 3），所以**分开算**。
+                // ⚠ 家具（床/火把）也要 stuff：`ThingDef.costStuffCount`。床通常是 10~30 个。
+                int needWall = plan.WallCells.Count * Math.Max(1, ThingDefOf.Wall.costStuffCount);
+                int needDoor = plan.DoorCells.Count * Math.Max(1, ThingDefOf.Door.costStuffCount);
+                int needFloor = BuildFloor ? plan.FloorCells.Count * FloorCostStuffOf() : 0;
+                int needFurniture = NeedStuffForFurniture(furniture);
+                int need = needWall + needDoor + needFloor + needFurniture;
+
+                List<ThingDef> perCellMats;
+                Dictionary<string, int> usedCounts;
+                string matWhy;
+                List<MaterialChoice> pool = AssignMaterials(
+                    map, needWall + needDoor + needFurniture,
+                    out perCellMats, out usedCounts, out matWhy);
+
+                if (pool == null || pool.Count == 0)
                 {
                     result.Ok = true;
                     result.DidWork = false;
-                    result.Summary = "没有可用建材（库存里没有能砌墙/做门的东西），不放蓝图";
+                    result.Summary = "没有可用建材（库存里没有能砌墙的东西），不放蓝图：" + matWhy;
                     return result;
                 }
 
-                // 料够不够：墙 + 门 各要 costStuffCount 个 stuff；地板按 TerrainDef 的 costStuffCount
-                //
-                // ⚠ 实测：地板蓝图**不带 stuff**（byStuff 显示 "(无)"），
-                //   它的用料走 `TerrainDef.costStuffCount`（木地板是 3）。
-                //   所以这里要**分开算**，不能把地板也按"墙的 stuff"算。
-                int needWall = plan.WallCells.Count * ThingDefOf.Wall.costStuffCount;
-                int needDoor = plan.DoorCells.Count * ThingDefOf.Door.costStuffCount;
-                int floorCostPerCell = FloorCostStuffOf();
-                int needFloor = plan.FloorCells.Count * floorCostPerCell;
-                int need = needWall + needDoor + (BuildFloor ? needFloor : 0);
+                int availableTotal = 0;
+                for (int i = 0; i < perCellMats.Count; i++) if (perCellMats[i] != null) availableTotal++;
 
-                if (material.Available < needWall + needDoor)
+                if (availableTotal < needWall + needDoor)
                 {
                     result.Ok = true;
                     result.DidWork = false;
                     result.Summary = string.Format(
-                        "材料不足：墙门要 {0} 个 {1}（墙{2}+门{3}），手上只有 {4}"
-                        + "（地板另需 {5} 个，未计）",
-                        needWall + needDoor, material.Def.defName, needWall, needDoor,
-                        material.Available, needFloor);
+                        "材料不足：墙门要 {0} 个（墙{1}+门{2}），库存能凑 {3} 个"
+                        + "（家具另需 {4}，地板另需 {5}，未计）｜{6}",
+                        needWall + needDoor, needWall, needDoor, availableTotal,
+                        needFurniture, needFloor, matWhy);
                     return result;
                 }
-                if (BuildFloor && material.Available < need)
+
+                // 家具料不够 → 只放墙门，家具跳过（降级但报告，别静默）
+                string furnitureNote = "";
+                List<FurniturePlacement> toPlace = furniture;
+                if (BuildFurniture && needFurniture > 0 && availableTotal < needWall + needDoor + needFurniture)
                 {
-                    // 墙门够、地板不够 → **降级**：把墙门盖起来，地板先不放
-                    // （总比什么都不盖好；理由写进摘要，别静默）
-                    try { BuildFloor = false; } catch (Exception) { }
+                    toPlace = new List<FurniturePlacement>();
+                    furnitureNote = string.Format(
+                        "家具料不足（要 {0} 个，凑不出）→ 本轮只放墙门，家具跳过",
+                        needFurniture);
                 }
 
-                // ── ⑤ 放蓝图：先查再放，逐格回读 ──
-                PlacementReport pr = PlaceBlueprints(map, plan, material);
+                // ── ⑥ 放蓝图：先查再放，逐格回读 ──
+                MaterialChoice mainMat = pool[0];
+                mainMat.Why = matWhy;
+                PlacementReport pr = PlaceBlueprints(map, plan, mainMat, perCellMats, toPlace);
+                pr.MaterialNote = matWhy + (string.IsNullOrEmpty(furnitureNote) ? "" : "｜" + furnitureNote);
 
-                // ── ⑥ ★ 回读验证：地图上真的有对应数量的蓝图 ──
+                // ── ⑦ ★ 回读验证：地图上真的有对应数量的蓝图 ──
                 int afterBPs = CountBlueprintBuilds(map);
                 int afterWallsBP = CountBlueprintOfBuildDef(map, ThingDefOf.Wall);
                 int afterDoorsBP = CountBlueprintOfBuildDef(map, ThingDefOf.Door);
                 TerrainDef floorDef = ResolveFloorTerrainDef();
-                int afterFloorsBP = floorDef != null ? CountBlueprintOfBuildDef(map, floorDef) : 0;
+                int afterFloorsBP = (BuildFloor && floorDef != null)
+                    ? CountBlueprintOfBuildDef(map, floorDef) : 0;
+                ThingDef bedDef = DefDatabase<ThingDef>.GetNamedSilentFail(BedDefName);
+                ThingDef torchDef = DefDatabase<ThingDef>.GetNamedSilentFail(TorchDefName);
+                int afterBedsBP = bedDef != null ? CountBlueprintOfBuildDef(map, bedDef) : 0;
+                int afterTorchesBP = torchDef != null ? CountBlueprintOfBuildDef(map, torchDef) : 0;
 
                 pr.WallBlueprintReadBack = afterWallsBP;
                 pr.DoorBlueprintReadBack = afterDoorsBP;
                 pr.FloorBlueprintReadBack = afterFloorsBP;
+                pr.BedBlueprintReadBack = afterBedsBP;
+                pr.TorchBlueprintReadBack = afterTorchesBP;
                 pr.TotalBlueprintReadBack = afterBPs;
 
                 bool okWalls = afterWallsBP >= pr.WallsPlaced;
                 bool okDoors = afterDoorsBP >= pr.DoorsPlaced;
-                bool okFloors = !pr.FloorPathTried || BuildFloor == false || afterFloorsBP >= pr.FloorsPlaced;
-                pr.Verified = okWalls && okDoors && okFloors && pr.WallsPlaced > 0 && pr.DoorsPlaced > 0;
+                bool okFloors = !BuildFloor || afterFloorsBP >= pr.FloorsPlaced;
+                bool okBeds = !BuildFurniture || afterBedsBP >= pr.BedsPlaced;
+                bool okTorches = !BuildFurniture || afterTorchesBP >= pr.TorchesPlaced;
+                pr.Verified = okWalls && okDoors && okFloors && okBeds && okTorches
+                    && pr.WallsPlaced > 0 && pr.DoorsPlaced > 0;
 
                 if (pr.Verified) _placedOnce = true;
 
                 result.Ok = true;
-                result.DidWork = pr.WallsPlaced > 0 || pr.DoorsPlaced > 0 || pr.FloorsPlaced > 0;
-                result.Summary = Summarize(pr, plan, material, center);
+                result.DidWork = pr.WallsPlaced > 0 || pr.DoorsPlaced > 0
+                    || pr.FloorsPlaced > 0 || pr.BedsPlaced > 0 || pr.TorchesPlaced > 0;
+                result.Summary = Summarize(pr, plan, mainMat, center)
+                    + "｜" + cw.ToString();
 
                 // ★ 详细记账落一份 JSON（给测试分清"我们放了几个" vs "地图上有几个"）
-                LastReportJson = BuildReportJson(pr, plan, material);
+                LastReportJson = BuildReportJson(pr, plan, mainMat, cw, usedCounts);
 
                 try
                 {
@@ -478,87 +630,317 @@ namespace FoodControl.Game
         }
 
         // ------------------------------------------------------------------
+        // 建造人力检查（S4：蓝图放下去没人建 = 白放）
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 殖民地"有没有人做建造"的读数（**只读**，绝不动玩家的优先级设置）。
+        /// </summary>
+        public sealed class ConstructionWorkInfo
+        {
+            /// <summary>在场的自由殖民者数</summary>
+            public int Colonists;
+
+            /// <summary>其中 `WorkIsActive(Construction) == true` 的人数</summary>
+            public int ConstructionWorkers;
+
+            /// <summary>每个人的 (名字, 建造优先级) —— 进 JSON，便于测试/遥测核对</summary>
+            public List<string> Detail = new List<string>();
+
+            /// <summary>workSettings 还没初始化的殖民者数（读到的那种"0"不可信）</summary>
+            public int NotInitialized;
+
+            public bool AnyWorker
+            {
+                get { return ConstructionWorkers > 0; }
+            }
+
+            public override string ToString()
+            {
+                if (Colonists == 0) return "建造人力：地图上没有一个自由殖民者";
+                return string.Format("建造人力：{0}/{1} 人参与建造{2}",
+                    ConstructionWorkers, Colonists,
+                    NotInitialized > 0 ? "（" + NotInitialized + " 人的工作设置尚未初始化，读到的 0 不可信）" : "");
+            }
+        }
+
+        /// <summary>
+        /// 数"有没有人做建造"。
+        ///
+        /// ## 为什么要它
+        ///
+        /// 蓝图放下去之后，游戏靠 `WorkGiver_ConstructDeliverResourcesToBlueprints` /
+        /// `WorkGiver_ConstructFinishFrames` 自动生成工作 —— **我们不用派活**。
+        /// 但前提是至少有一个殖民者的 `WorkTypeDefOf.Construction` 是参与的。
+        /// 如果一个都没有，蓝图会**永久躺在那儿**（这正是"放了等于白放"）。
+        ///
+        /// ## 两个容易读错的地方（元数据确证后写的）
+        ///
+        /// 1. `Pawn_WorkSettings.WorkIsActive(w)` 的实现是
+        ///    `ConfirmInitializedDebug(); return GetPriority(w) > 0;` ——
+        ///    也就是说**它假设已经初始化**。新殖民者的 `priorities` 可能还是 null
+        ///    （`get_Initialized` 就是 `priorities != null`），这时 `GetPriority` 返回的 0
+        ///    会**误导**成"这人不建造"。
+        ///    → 所以先读 `Initialized`；没初始化时**先 `EnableAndInitializeIfNotAlreadyInitialized()`**
+        ///      （这只是把默认优先级填上，**不是**改玩家的设置 —— 新殖民者本来就该有默认值）。
+        ///      ⚠ 但这一步有副作用，所以只对**没初始化**的人做，且记进 `NotInitialized`。
+        /// 2. `GetPriority` 返回 0 = 不参与；1..4 = 优先级。
+        /// </summary>
+        public static ConstructionWorkInfo CountConstructionWorkers(Map map)
+        {
+            var info = new ConstructionWorkInfo();
+            if (map == null) return info;
+
+            WorkTypeDef construction = null;
+            try { construction = WorkTypeDefOf.Construction; } catch (Exception) { }
+            if (construction == null) return info;
+
+            try
+            {
+                foreach (Pawn p in map.mapPawns.FreeColonistsSpawned)
+                {
+                    if (p == null || p.Dead) continue;
+                    info.Colonists++;
+
+                    try
+                    {
+                        Pawn_WorkSettings ws = p.workSettings;
+                        if (ws == null)
+                        {
+                            info.Detail.Add(p.LabelShort + "=没有 workSettings（跳过）");
+                            continue;
+                        }
+
+                        // ⚠ 没初始化时 GetPriority 的 0 不可信：先补默认值（不改玩家已做的设置）
+                        if (!ws.Initialized)
+                        {
+                            info.NotInitialized++;
+                            try { ws.EnableAndInitializeIfNotAlreadyInitialized(); }
+                            catch (Exception) { }
+                        }
+
+                        int prio = ws.GetPriority(construction);
+                        bool active = ws.WorkIsActive(construction);
+                        if (active) info.ConstructionWorkers++;
+
+                        info.Detail.Add(string.Format("{0}=prio{1}{2}",
+                            p.LabelShort, prio, active ? "(参与)" : "(不参与)"));
+                    }
+                    catch (Exception e)
+                    {
+                        info.Detail.Add(p.LabelShort + "=读工作设置失败：" + e.GetType().Name);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                info.Detail.Add("整体失败：" + e.Message);
+            }
+
+            return info;
+        }
+
+        /// <summary>
+        /// 把家具的真实占地填进 Core 的选项（**Core 不认 ThingDef，必须这里填**）。
+        ///
+        /// 实测关键点：RimWorld 的单人床 `Bed` 的 `ThingDef.Size` 是 **1×2**，不是 1×1。
+        /// 写死 1×1 会让床的占格算错、摆不进墙角（Core 的 `PlaceFurniture` 会按错尺寸找位置）。
+        /// </summary>
+        public static void FillFurnitureSizes(BuildSiteOptions opts)
+        {
+            if (opts == null) return;
+            try
+            {
+                ThingDef bed = DefDatabase<ThingDef>.GetNamedSilentFail(BedDefName);
+                if (bed != null)
+                {
+                    opts.BedSizeX = Math.Max(1, bed.Size.x);
+                    opts.BedSizeZ = Math.Max(1, bed.Size.z);
+                }
+            }
+            catch (Exception) { }
+
+            try
+            {
+                ThingDef torch = DefDatabase<ThingDef>.GetNamedSilentFail(TorchDefName);
+                if (torch != null)
+                {
+                    opts.TorchSizeX = Math.Max(1, torch.Size.x);
+                    opts.TorchSizeZ = Math.Max(1, torch.Size.z);
+                }
+            }
+            catch (Exception) { }
+        }
+
+        /// <summary>家具总共要几个 stuff（墙门之外的那部分）。</summary>
+        private static int NeedStuffForFurniture(List<FurniturePlacement> furniture)
+        {
+            if (!BuildFurniture || furniture == null || furniture.Count == 0) return 0;
+
+            int total = 0;
+            ThingDef bed = null, torch = null;
+            try { bed = DefDatabase<ThingDef>.GetNamedSilentFail(BedDefName); } catch (Exception) { }
+            try { torch = DefDatabase<ThingDef>.GetNamedSilentFail(TorchDefName); } catch (Exception) { }
+
+            for (int i = 0; i < furniture.Count; i++)
+            {
+                FurniturePlacement fp = furniture[i];
+                if (fp == null) continue;
+                ThingDef def = fp.Kind == "torch" ? torch : bed;
+                if (def == null) continue;
+                total += Math.Max(1, def.costStuffCount);
+            }
+            return total;
+        }
+
+        // ------------------------------------------------------------------
         // 材质选择
         // ------------------------------------------------------------------
 
         /// <summary>
-        /// **按现有资源选材质**（设计文档要求"真的去数库存，没料就别放"）。
+        /// **按现有资源分配材质** —— 支持**混用**（用户：「现阶段，有什么用什么，可以混用」）。
         ///
-        /// 策略简单可解释：
-        ///   1. 数地图上所有 `IsStuff` 的物品（复用 `ColonySetup.CountBuildingMaterials`）
-        ///   2. 按 `MaterialPreference` 的顺序挑第一个**同时满足**：
-        ///        - 库存 ≥ 需要的量（这里先粗筛 > 0，精确判断在 RunCycle 里）
-        ///        - Def 允许用来砌墙（`ThingDefOf.Wall.stuffCategories` 里含该 stuff 的类别）
-        ///   3. 一个都没有 → 返回 null（**不放蓝图**：放了也没人能建）
+        /// ## 规则（简单可解释）
         ///
-        /// ⚠ 不硬编码"什么料能砌墙"—— 用游戏自己的 `stuffCategories` 判定。
-        ///   木头/钢/石都能砌墙，但比如"布"就不行（不在 Wall 的 stuffCategories 里）。
+        /// 1. 数库存（`ColonySetup.CountBuildingMaterials`，用游戏自己的 `IsStuff` 判定）
+        /// 2. 只保留**Def 允许砌墙**的（用 `ThingDefOf.Wall.stuffCategories` 判定，不硬编码 defName）
+        /// 3. 排序：**先按 `MaterialPreference` 里的位次**（位次相同或都不在列表里时按库存从多到少）
+        ///    → 所以"木头 300 + 钢 1170"会**先用木头**（木头在偏好里第一位），
+        ///      木头用完（300）再接着用钢（148）—— 这就是用户要的"混用"。
+        /// 4. 依次取用把 `totalNeed` 填满；**一种不够就用下一种**。
+        ///    `AllowMixedMaterials=false` 时退化成"只用第一种"（够就够，不够就不放）。
+        ///
+        /// 返回的是**逐格分配表**：`i` 号格用哪个 stuff。这样遥测/验证能回答
+        /// "第 17 面墙用了什么料"，而不是只有一个笼统的"材质=WoodLog"。
+        ///
+        /// 返回 null 表示**一个可用的料都没有**（那就不该放蓝图：放了也没人能建）。
+        /// </summary>
+        public static List<MaterialChoice> AssignMaterials(
+            Map map, int totalNeed, out List<ThingDef> perCell,
+            out Dictionary<string, int> usedCounts, out string why)
+        {
+            perCell = new List<ThingDef>();
+            usedCounts = new Dictionary<string, int>();
+            why = "";
+
+            if (map == null || totalNeed <= 0) { why = "不需要料或没有地图"; return null; }
+
+            Dictionary<string, int> stock = ColonySetup.CountBuildingMaterials(map);
+            if (stock == null || stock.Count == 0) { why = "库存里没有任何建材"; return null; }
+
+            List<StuffCategoryDef> wallCats = null;
+            try { wallCats = ThingDefOf.Wall.stuffCategories; } catch (Exception) { }
+
+            // ── 候选池：能砌墙的 ──
+            var pool = new List<MaterialChoice>();
+            foreach (KeyValuePair<string, int> kv in stock)
+            {
+                if (kv.Value <= MinMaterialReserve) continue;
+                ThingDef def = DefDatabase<ThingDef>.GetNamedSilentFail(kv.Key);
+                if (def == null) continue;
+                bool okWall = StuffAllowed(wallCats, def);
+                if (!okWall) continue;
+
+                bool okDoor = false;
+                try { okDoor = StuffAllowed(ThingDefOf.Door.stuffCategories, def); } catch (Exception) { }
+
+                pool.Add(new MaterialChoice
+                {
+                    Def = def,
+                    Available = kv.Value,
+                    AllowedForWall = true,
+                    AllowedForDoor = okDoor,
+                });
+            }
+
+            if (pool.Count == 0) { why = "库存里没有能砌墙的建材（stuffCategories 不匹配）"; return null; }
+
+            // ── 排序：偏好位次优先，其次库存多的先 ──
+            pool.Sort(delegate(MaterialChoice a, MaterialChoice b)
+            {
+                int ra = PreferenceRank(a.Def != null ? a.Def.defName : null);
+                int rb = PreferenceRank(b.Def != null ? b.Def.defName : null);
+                if (ra != rb) return ra.CompareTo(rb);
+                return b.Available.CompareTo(a.Available);
+            });
+
+            // ── 依次取用，填满 totalNeed ──
+            int filled = 0;
+            int kinds = 0;
+            for (int i = 0; i < pool.Count && filled < totalNeed; i++)
+            {
+                MaterialChoice mc = pool[i];
+                int take = mc.Available;
+                if (!AllowMixedMaterials) take = totalNeed;      // 只用第一种
+                if (take > totalNeed - filled) take = totalNeed - filled;
+                if (take <= 0) continue;
+
+                for (int k = 0; k < take; k++) perCell.Add(mc.Def);
+                int prev;
+                usedCounts[mc.Def.defName] = usedCounts.TryGetValue(mc.Def.defName, out prev) ? prev + take : take;
+                filled += take;
+                kinds++;
+                if (!AllowMixedMaterials) break;
+            }
+
+            if (filled <= 0) { why = "可用建材总量为 0"; return null; }
+
+            mc_why(pool, usedCounts, totalNeed, filled, kinds, ref why);
+
+            return pool;
+        }
+
+        private static void mc_why(
+            List<MaterialChoice> pool, Dictionary<string, int> usedCounts,
+            int totalNeed, int filled, int kinds, ref string why)
+        {
+            var parts = new List<string>();
+            foreach (KeyValuePair<string, int> kv in usedCounts)
+                parts.Add(kv.Key + "×" + kv.Value);
+            why = string.Format("按库存混用（偏好位次优先）：{0}；需要 {1} 个，能凑出 {2} 个，用了 {3} 种",
+                string.Join("+", parts.ToArray()), totalNeed, filled, kinds);
+        }
+
+        /// <summary>在偏好列表里的位次（不在列表里给一个很大的数 → 排后面）。</summary>
+        private static int PreferenceRank(string defName)
+        {
+            if (string.IsNullOrEmpty(defName) || MaterialPreference == null) return 1000;
+            for (int i = 0; i < MaterialPreference.Length; i++)
+                if (MaterialPreference[i] == defName) return i;
+            return 1000;
+        }
+
+        /// <summary>
+        /// 兼容用的"挑一个主材质"（遥测里显示"主要用了什么"）。
+        /// 新逻辑请用 <see cref="AssignMaterials"/>（支持混用 + 逐格记录）。
         /// </summary>
         public static MaterialChoice ChooseMaterial(Map map, BuildingPlan plan)
         {
             if (map == null) return null;
 
-            Dictionary<string, int> stock = ColonySetup.CountBuildingMaterials(map);
-            if (stock == null || stock.Count == 0) return null;
+            List<ThingDef> perCell;
+            Dictionary<string, int> used;
+            string why;
+            int need = plan != null
+                ? plan.WallCells.Count * Math.Max(1, ThingDefOf.Wall.costStuffCount)
+                  + plan.DoorCells.Count * Math.Max(1, ThingDefOf.Door.costStuffCount)
+                : 1;
 
-            List<StuffCategoryDef> wallCats = null;
-            List<StuffCategoryDef> doorCats = null;
-            try { wallCats = ThingDefOf.Wall.stuffCategories; } catch (Exception) { }
-            try { doorCats = ThingDefOf.Door.stuffCategories; } catch (Exception) { }
+            List<MaterialChoice> pool = AssignMaterials(map, need, out perCell, out used, out why);
+            if (pool == null || pool.Count == 0) return null;
 
-            MaterialChoice fallback = null;
-
-            // ① 先按偏好顺序
-            if (MaterialPreference != null)
+            // 用得最多的那种当"主材质"
+            MaterialChoice best = null;
+            int bestN = -1;
+            for (int i = 0; i < pool.Count; i++)
             {
-                for (int i = 0; i < MaterialPreference.Length; i++)
-                {
-                    string name = MaterialPreference[i];
-                    int have;
-                    if (string.IsNullOrEmpty(name) || !stock.TryGetValue(name, out have)) continue;
-                    if (have <= MinMaterialReserve) continue;
-
-                    ThingDef def = DefDatabase<ThingDef>.GetNamedSilentFail(name);
-                    if (def == null) continue;
-
-                    var mc = new MaterialChoice
-                    {
-                        Def = def,
-                        Available = have,
-                        AllowedForWall = StuffAllowed(wallCats, def),
-                        AllowedForDoor = StuffAllowed(doorCats, def),
-                    };
-                    if (!mc.AllowedForWall) { mc.Why = "Def 不允许用来砌墙"; continue; }
-
-                    mc.Why = "按偏好顺序命中第 " + (i + 1) + " 个";
-                    if (mc.AllowedForDoor) return mc;
-                    if (fallback == null) fallback = mc;      // 能砌墙但不能做门 → 先留着
-                }
+                int n;
+                if (!used.TryGetValue(pool[i].Def.defName, out n)) continue;
+                if (n > bestN) { bestN = n; best = pool[i]; }
             }
-
-            // ② 偏好列表都没有 → 在库存里挑一个"能砌墙的"（可解释：就地取材）
-            if (fallback == null)
-            {
-                foreach (KeyValuePair<string, int> kv in stock)
-                {
-                    if (kv.Value <= MinMaterialReserve) continue;
-                    ThingDef def = DefDatabase<ThingDef>.GetNamedSilentFail(kv.Key);
-                    if (def == null) continue;
-                    if (!StuffAllowed(wallCats, def)) continue;
-
-                    fallback = new MaterialChoice
-                    {
-                        Def = def,
-                        Available = kv.Value,
-                        AllowedForWall = true,
-                        AllowedForDoor = StuffAllowed(doorCats, def),
-                        Why = "偏好列表里没有，就地取材选了库存最多的可砌墙材料",
-                    };
-                    if (fallback.AllowedForDoor) return fallback;
-                }
-            }
-
-            return fallback;
+            if (best == null) best = pool[0];
+            best.Why = why;
+            return best;
         }
 
         /// <summary>这个 stuff def 是否属于这些类别之一（不硬编码 defName）。</summary>
@@ -603,13 +985,41 @@ namespace FoodControl.Game
             public bool FloorPathTried;
             public string FloorPathNote = "";
 
+            // ---- S4 第二版：家具 + 逐格材质 ----
+
+            /// <summary>放出去的床蓝图数（目标 = 殖民者数）</summary>
+            public int BedsPlaced;
+            /// <summary>放出去的火把蓝图数（目标 1）</summary>
+            public int TorchesPlaced;
+
+            /// <summary>**逐格材质用量**（stuff defName → 用了几格）。混用时会有多个键。</summary>
+            public Dictionary<string, int> MaterialUse = new Dictionary<string, int>();
+
+            /// <summary>材质分配的一句解释（进摘要/遥测）</summary>
+            public string MaterialNote = "";
+
+            /// <summary>回读到的床/火把蓝图数</summary>
+            public int BedBlueprintReadBack;
+            public int TorchBlueprintReadBack;
+
             public override string ToString()
             {
-                return string.Format("墙蓝图{0} 门蓝图{1} 地板蓝图{2} 回读(墙{3}/门{4}/地板{5}/总{6}) 验证={7}{8}",
-                    WallsPlaced, DoorsPlaced, FloorsPlaced,
-                    WallBlueprintReadBack, DoorBlueprintReadBack, FloorBlueprintReadBack,
+                return string.Format(
+                    "墙{0} 门{1} 床{2} 火把{3} 地板{4} 材质[{5}] 回读(墙{6}/门{7}/床{8}/火把{9}/总{10}) 验证={11}{12}",
+                    WallsPlaced, DoorsPlaced, BedsPlaced, TorchesPlaced, FloorsPlaced,
+                    JoinMaterialUse(),
+                    WallBlueprintReadBack, DoorBlueprintReadBack,
+                    BedBlueprintReadBack, TorchBlueprintReadBack,
                     TotalBlueprintReadBack, Verified,
                     Rejected.Count > 0 ? " 被拒" + Rejected.Count : "");
+            }
+
+            public string JoinMaterialUse()
+            {
+                if (MaterialUse == null || MaterialUse.Count == 0) return "(无)";
+                var parts = new List<string>();
+                foreach (KeyValuePair<string, int> kv in MaterialUse) parts.Add(kv.Key + "×" + kv.Value);
+                return string.Join("+", parts.ToArray());
             }
         }
 
@@ -618,37 +1028,67 @@ namespace FoodControl.Game
         ///
         /// 墙 / 门 / 地板**三条都走 `GenConstruct.PlaceBlueprintForBuild`** ——
         /// 这是实测确认的（见类注释 §「地板这条路径」）：地板虽然 `def` 是 `TerrainDef`，
-        /// 但它有 `blueprintDef == Blueprint_WoodPlankFloor`，放出来就是**蓝图**，
-        /// 要耗料、要小人来铺，和墙完全一致。
+        /// 但它有 `blueprintDef == Blueprint_WoodPlankFloor`，放出来就是**蓝图**。
         ///
-        /// ⚠ 门必须有正确朝向：门的 `Size` 是 1×1，但它嵌在墙上，
-        ///   转向错了会挡住门洞两侧。南北向的墙 ⇒ `Rot4.South`；东西向的墙 ⇒ `Rot4.East`。
+        /// ## 材质**逐格**指定（用户要求"有什么用什么，可以混用"）
+        ///
+        /// 同一次调用里**允许**墙用木头、门用钢。`materialsForCells[i]` 就是第 i 格
+        /// （按调用顺序：先墙、再门、再地板）要用的 stuff；长度不够时退回 `fallbackMaterial`。
+        /// 这样遥测能回答"第 17 面墙用了什么料"，验证也能核对材质分布。
+        ///
+        /// ⚠ 门朝向：13×13 有 4 扇门，**每扇都得按它所在的边给朝向** ——
+        ///   南北墙上的门是南北向（`Rot4.South`），东西墙上的门是东西向（`Rot4.East`）。
+        ///   全都用一个朝向会让门嵌不进墙里（门的贴图/占用方向不对）。
         /// </summary>
-        public static PlacementReport PlaceBlueprints(Map map, BuildingPlan plan, MaterialChoice material)
+        public static PlacementReport PlaceBlueprints(
+            Map map, BuildingPlan plan, MaterialChoice fallbackMaterial,
+            List<ThingDef> materialsForCells, List<FurniturePlacement> furniture)
         {
             var pr = new PlacementReport();
-            if (map == null || plan == null || material == null || material.Def == null) return pr;
+            if (map == null || plan == null) return pr;
 
             int w = map.Size.x;
+            int mi = 0;
 
-            // ── ① 墙（北向：墙是 1×1，朝向无影响，但保持和 Designator_Build 一致）──
+            Func<ThingDef> nextStuff = delegate
+            {
+                if (materialsForCells != null && mi < materialsForCells.Count)
+                    return materialsForCells[mi++];
+                return fallbackMaterial != null ? fallbackMaterial.Def : null;
+            };
+
+            // ── ① 墙（墙是 1×1，朝向无影响）──
             for (int i = 0; i < plan.WallCells.Count; i++)
             {
+                ThingDef stuff = nextStuff();
                 IntVec3 c = IndexToCell(plan.WallCells[i], w, map);
-                if (!TryPlace(map, ThingDefOf.Wall, c, Rot4.North, material.Def, pr)) continue;
+                if (!TryPlace(map, ThingDefOf.Wall, c, Rot4.North, stuff, pr)) continue;
                 pr.WallsPlaced++;
+                pr.MaterialUse[stuff != null ? stuff.defName : "(无)"] =
+                    (pr.MaterialUse.ContainsKey(stuff != null ? stuff.defName : "(无)")
+                        ? pr.MaterialUse[stuff != null ? stuff.defName : "(无)"] : 0) + 1;
             }
 
-            // ── ② 门 ──
-            Rot4 doorRot = DoorRotation(plan.DoorSide);
+            // ── ② 门：**每扇按自己所在的边给朝向** ──
+            int maxX = plan.X + plan.Size - 1;
+            int maxZ = plan.Z + plan.Size - 1;
             for (int i = 0; i < plan.DoorCells.Count; i++)
             {
-                IntVec3 c = IndexToCell(plan.DoorCells[i], w, map);
-                if (!TryPlace(map, ThingDefOf.Door, c, doorRot, material.Def, pr)) continue;
+                ThingDef stuff = nextStuff();
+                int di = plan.DoorCells[i];
+                int dx = di % w, dz = di / w;
+
+                // 南北墙（z == z 或 maxZ）→ 门南北向；东西墙 → 门东西向
+                Rot4 rot = (dz == plan.Z || dz == maxZ) ? Rot4.South : Rot4.East;
+
+                IntVec3 c = IndexToCell(di, w, map);
+                if (!TryPlace(map, ThingDefOf.Door, c, rot, stuff, pr)) continue;
                 pr.DoorsPlaced++;
+                string key = stuff != null ? stuff.defName : "(无)";
+                pr.MaterialUse[key] = (pr.MaterialUse.ContainsKey(key) ? pr.MaterialUse[key] : 0) + 1;
             }
 
-            // ── ③ 地板 ★（BuildFloor 默认 true；实测地板有蓝图形态）──
+            // ── ③ 地板（默认关：用户说"地板后边再考虑"）──
             if (BuildFloor)
             {
                 pr.FloorPathTried = true;
@@ -659,9 +1099,8 @@ namespace FoodControl.Game
                 }
                 else
                 {
-                    // ⚠ 地板**不带 stuff**：TerrainDef 的构造材料由它自己的 costStuffCount 决定，
-                    //   传 stuff 反而会让 CanPlaceBlueprintAt / 蓝图语义对不上。
-                    //   （实测 byStuff 里地板蓝图显示 "(无)"。）
+                    // ⚠ 地板**不带 stuff**：TerrainDef 的构造材料由它自己的 costStuffCount 决定
+                    //   （实测 byStuff 里地板蓝图显示 "(无)"）。
                     for (int i = 0; i < plan.FloorCells.Count; i++)
                     {
                         IntVec3 c = IndexToCell(plan.FloorCells[i], w, map);
@@ -675,10 +1114,53 @@ namespace FoodControl.Game
             }
             else
             {
-                pr.FloorPathNote = "BuildFloor=false：只算了户型（" + plan.FloorCells.Count + " 格），没放地板蓝图";
+                pr.FloorPathNote = "BuildFloor=false（用户：地板后边再考虑）：户型里有 "
+                    + plan.FloorCells.Count + " 格内部，没放地板蓝图";
+            }
+
+            // ── ④ ★ 家具：3 张床 + 1 个火把（用户要的"最基本卧室"）──
+            if (BuildFurniture && furniture != null && furniture.Count > 0)
+            {
+                ThingDef bedDef = DefDatabase<ThingDef>.GetNamedSilentFail(BedDefName);
+                ThingDef torchDef = DefDatabase<ThingDef>.GetNamedSilentFail(TorchDefName);
+
+                for (int i = 0; i < furniture.Count; i++)
+                {
+                    FurniturePlacement fp = furniture[i];
+                    if (fp == null) continue;
+
+                    ThingDef def = fp.Kind == "torch" ? torchDef : bedDef;
+                    if (def == null)
+                    {
+                        if (pr.Rejected.Count < 8)
+                            pr.Rejected.Add(fp.Kind + ": 找不到 Def（" + (fp.Kind == "torch" ? TorchDefName : BedDefName) + "）");
+                        continue;
+                    }
+
+                    Rot4 rot = Rot4FromInt(fp.Rotation);
+                    IntVec3 c = IndexToCell(fp.CellIndex, w, map);
+
+                    // 家具通常也要 stuff（木床/钢床），沿用同一个逐格分配
+                    ThingDef stuff = nextStuff();
+                    if (!TryPlace(map, def, c, rot, stuff, pr)) continue;
+
+                    if (fp.Kind == "torch") pr.TorchesPlaced++;
+                    else pr.BedsPlaced++;
+                }
             }
 
             return pr;
+        }
+
+        private static Rot4 Rot4FromInt(int r)
+        {
+            switch (r)
+            {
+                case 0: return Rot4.North;
+                case 1: return Rot4.East;
+                case 3: return Rot4.West;
+                default: return Rot4.South;
+            }
         }
 
         /// <summary>解析地板地形 Def（配置写错名字不该刷红字，找不到就返回 null 并降级）。</summary>
@@ -701,6 +1183,19 @@ namespace FoodControl.Game
 
         /// <summary>
         /// 放一个蓝图。**先查再放**；被拒就把原因记进报告（最多 8 条），绝不"试一试看抛不抛异常"。
+        ///
+        /// ## ★ 为什么要先 `WipeExistingThings`（这一条是实测逼出来的）
+        ///
+        /// 13×13 要 169 格的空地，而 debug/正常地图上**到处是树和灌木**。
+        /// 第一版直接 `CanPlaceBlueprintAt` → 大量格被拒 → 44 面墙只放下十几面。
+        ///
+        /// 而**原版玩家点"建墙"压在灌木上时，游戏是允许的** —— 因为
+        /// `Designator_Build.DesignateSingleCell` 的 IL 里在 `PlaceBlueprintForBuild` **之前**先调了
+        /// `GenSpawn.WipeExistingThings(c, rot, entDef.blueprintDef, map, DestroyMode.Vanish)`：
+        /// 它把"会被这栋建筑替换掉的东西"（植物、碎石堆…）清掉，然后再放蓝图。
+        ///
+        /// 我们照抄这个顺序，行为就和玩家手点一致 —— **不是**我们在乱删东西，
+        /// 而是"在这里盖房子"本来就意味着"先清场"。
         /// </summary>
         private static bool TryPlace(
             Map map, BuildableDef def, IntVec3 c, Rot4 rot, ThingDef stuff, PlacementReport pr)
@@ -708,7 +1203,19 @@ namespace FoodControl.Game
             if (def == null) return false;
             try
             {
-                // ★ 先查合不合法（godMode=true：只做"几何/地表/占用"判定，不要求格子被解锁）
+                // ★ 先按原版顺序清场（多格建筑要按占用矩形逐格清）
+                try
+                {
+                    WipeFootprint(map, def, c, rot);
+                }
+                catch (Exception e)
+                {
+                    if (pr.Rejected.Count < 8)
+                        pr.Rejected.Add(string.Format("({0},{1}) {2}: WipeExistingThings 异常 {3}",
+                            c.x, c.z, def.defName, e.GetType().Name));
+                }
+
+                // ★ 再查合不合法（godMode=true：只做"几何/地表/占用"判定，不要求格子被解锁）
                 AcceptanceReport report = GenConstruct.CanPlaceBlueprintAt(
                     def, c, rot, map, true, null, null, stuff,
                     false, false, false);
@@ -744,6 +1251,33 @@ namespace FoodControl.Game
                         c.x, c.z, def.defName, e.GetType().Name + " " + e.Message));
                 }
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// 按建筑的实际占用矩形逐格清场（和原版 <c>Designator_Build</c> 调的是同一个 API）。
+        ///
+        /// ⚠ 必须按 `GenAdj.OccupiedRect(c, rot, def.Size)` 来，不能只清锚点那一格 ——
+        ///   床是 1×2、门/墙是 1×1，只清锚点会漏掉另一半，结果是"清了一半还是放不下"。
+        /// </summary>
+        private static void WipeFootprint(Map map, BuildableDef def, IntVec3 c, Rot4 rot)
+        {
+            ThingDef blueprintDef = null;
+            try { blueprintDef = def.blueprintDef; } catch (Exception) { }
+            if (blueprintDef == null) return;      // 没有蓝图形态的东西不按这个顺序走
+
+            CellRect rect;
+            try { rect = GenAdj.OccupiedRect(c, rot, def.Size); }
+            catch (Exception) { rect = CellRect.SingleCell(c); }
+
+            foreach (IntVec3 cell in rect)
+            {
+                if (!cell.InBounds(map)) continue;
+                try
+                {
+                    GenSpawn.WipeExistingThings(cell, rot, blueprintDef, map, DestroyMode.Vanish);
+                }
+                catch (Exception) { }
             }
         }
 
@@ -894,17 +1428,19 @@ namespace FoodControl.Game
             PlacementReport pr, BuildingPlan plan, MaterialChoice material, ResolvedBaseCenter center)
         {
             return string.Format(
-                "盖 {0}×{0} 于 ({1},{2})，材质 {3}，墙 {4}/{5} 门 {6}/{7} 地板 {8}/{9}，"
-                + "★回读 墙蓝图{10} 门蓝图{11} 地板蓝图{12} 总蓝图{13}，验证={14}；"
-                + "基地中心={15}@{16},{17}{18}",
+                "盖 {0}×{0} 于 ({1},{2})，墙 {3}/{4} 门 {5}/{6} 床 {7} 火把 {8} 地板 {9}/{10}，"
+                + "★回读 墙{11} 门{12} 床{13} 火把{14} 总{15}，验证={16}，材质[{17}]；"
+                + "基地中心={18}@{19},{20}{21}",
                 plan.Size, plan.X, plan.Z,
-                material.Def != null ? material.Def.defName : "?",
                 pr.WallsPlaced, plan.WallCells.Count,
                 pr.DoorsPlaced, plan.DoorCells.Count,
+                pr.BedsPlaced, pr.TorchesPlaced,
                 pr.FloorsPlaced, plan.FloorCells.Count,
-                pr.WallBlueprintReadBack, pr.DoorBlueprintReadBack, pr.FloorBlueprintReadBack,
+                pr.WallBlueprintReadBack, pr.DoorBlueprintReadBack,
+                pr.BedBlueprintReadBack, pr.TorchBlueprintReadBack,
                 pr.TotalBlueprintReadBack,
                 pr.Verified,
+                pr.JoinMaterialUse(),
                 center != null ? center.Kind.ToString() : "?",
                 plan.X + plan.Size / 2, plan.Z + plan.Size / 2,
                 string.IsNullOrEmpty(pr.FloorPathNote) ? "" : " | " + pr.FloorPathNote);
@@ -1007,28 +1543,52 @@ namespace FoodControl.Game
                 double[] dist = SiteSelection.ComputeDistanceField(
                     CloneAsPassability(grid), new List<int> { seed }, 400);
 
-                var opts = new BuildSiteOptions { Size = HouseSize, DoorSide = 2 };
+                var opts = new BuildSiteOptions { Size = HouseSize };
+                if (DoorSides != null && DoorSides.Length > 0) opts.DoorSides = DoorSides;
+                FillFurnitureSizes(opts);
+
                 BuildingPlan plan = BuildSitePlanner.Plan(grid, dist, opts);
                 if (plan == null) return "找不到可盖地块（中心 " + center.Kind + "@" + center.X + "," + center.Z + "）";
 
-                MaterialChoice mc = ChooseMaterial(map, plan);
+                int colonists = 0;
+                try { colonists = map.mapPawns.FreeColonistsSpawnedCount; } catch (Exception) { }
+
+                List<FurniturePlacement> furniture = BuildFurniture
+                    ? BuildSitePlanner.PlaceFurniture(plan, grid, colonists, opts)
+                    : new List<FurniturePlacement>();
+
+                ConstructionWorkInfo cw = CountConstructionWorkers(map);
+
+                List<ThingDef> perCell;
+                Dictionary<string, int> used;
+                string matWhy;
+                int needWall = plan.WallCells.Count * Math.Max(1, ThingDefOf.Wall.costStuffCount);
+                int needDoor = plan.DoorCells.Count * Math.Max(1, ThingDefOf.Door.costStuffCount);
+                int needFurn = NeedStuffForFurniture(furniture);
+                AssignMaterials(map, needWall + needDoor + needFurn, out perCell, out used, out matWhy);
+
                 int buildable = 0;
                 for (int i = 0; i < grid.Buildable.Length; i++) if (grid.Buildable[i]) buildable++;
 
                 TerrainDef floor = ResolveFloorTerrainDef();
                 int floorCost = FloorCostStuffOf();
 
+                var beds = furniture.FindAll(delegate(FurniturePlacement f) { return f.Kind == "bed"; });
+                var torches = furniture.FindAll(delegate(FurniturePlacement f) { return f.Kind == "torch"; });
+
                 return string.Format(
-                    "户型({0},{1}) {2}×{2} 墙{3} 门{4} 地板{5}({6}) 基地距{7:F0} 分{8:F1} | "
-                    + "可盖格{9}/{10} | 材质 {11} | 需要 stuff {12}(墙门){13}(地板{14}格×{15})",
+                    "户型({0},{1}) {2}×{2} 墙{3} 门{4} 内部{5} 基地距{6:F0} 分{7:F1} | "
+                    + "可盖格{8}/{9} | 家具: 床{10} 火把{11}（床尺寸 {12}×{13}）| "
+                    + "需要 stuff 墙门{14} 家具{15}{16} | 材质分配 {17} | floor={18} | {19}",
                     plan.X, plan.Z, plan.Size, plan.WallCells.Count, plan.DoorCells.Count,
-                    plan.FloorCells.Count, floor != null ? floor.defName : "无地板",
-                    plan.AvgDistanceToBase, plan.Score,
-                    buildable, grid.Buildable.Length, mc != null ? mc.ToString() : "(无)",
-                    plan.WallCells.Count * ThingDefOf.Wall.costStuffCount
-                        + plan.DoorCells.Count * ThingDefOf.Door.costStuffCount,
-                    BuildFloor ? plan.FloorCells.Count * floorCost : 0,
-                    plan.FloorCells.Count, floorCost);
+                    plan.FloorCells.Count, plan.AvgDistanceToBase, plan.Score,
+                    buildable, grid.Buildable.Length,
+                    beds.Count, torches.Count, opts.BedSizeX, opts.BedSizeZ,
+                    needWall + needDoor, needFurn,
+                    BuildFloor ? string.Format(" 地板{0}({1}格×{2})", floor != null ? floor.defName : "?", plan.FloorCells.Count, floorCost) : " 地板关",
+                    matWhy,
+                    BuildFloor ? "开" : "关",
+                    cw.ToString());
             }
             catch (Exception e)
             {

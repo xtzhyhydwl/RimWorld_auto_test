@@ -130,6 +130,68 @@ namespace FoodControl.Core
         /// 否则小人进不去（全封闭的盒子等于没门）。
         /// </summary>
         public bool RequireOutsideAccess = true;
+
+        // ---- 家具（S4 第二版：用户要「3 张床 + 1 个火把」当一个最基本的卧室）----
+        //
+        // ⚠ 尺寸**必须由游戏层填**（Core 不认 ThingDef）：
+        //   RimWorld 里 `ThingDef.Size` 是 `IntVec2`，单人床 `Bed` 是 **1×2**（不是 1×1），
+        //   火把 `TorchLamp` 是 1×1。写死成 1×1 会让床的占格算错、摆不进墙角。
+        //   游戏层用 `def.Size` 读出来填这里。
+
+        /// <summary>单人床的占地（未旋转时的 x/z 格数）</summary>
+        public int BedSizeX = 1;
+        public int BedSizeZ = 2;
+
+        /// <summary>火把/灯的占地</summary>
+        public int TorchSizeX = 1;
+        public int TorchSizeZ = 1;
+
+        /// <summary>每个殖民者一张床</summary>
+        public bool BedPerColonist = true;
+
+        /// <summary>火把数量（房间中心附近）</summary>
+        public int TorchCount = 1;
+
+        /// <summary>
+        /// 家具之间至少要隔几格**空**格。
+        /// 1 = 家具占地外再留 1 格空（用户原话：「不要挤在一起」）。
+        /// </summary>
+        public int FurnitureGap = 1;
+
+        /// <summary>
+        /// 每扇门**内侧**要留出多深的通道不摆家具（免得把门堵了）。
+        /// 1 = 门内侧那一格保持空。
+        /// </summary>
+        public int DoorApproachDepth = 1;
+    }
+
+    /// <summary>
+    /// 一件家具的摆放方案（**纯几何**：格索引 + 朝向 + 占用格）。
+    ///
+    /// 朝向用和 `Verse.Rot4` 一致的编号：0=北(+z) 1=东(+x) 2=南(-z) 3=西(-x)，
+    /// 由游戏层翻译成 `Rot4`。
+    /// </summary>
+    public sealed class FurniturePlacement
+    {
+        /// <summary>锚点格（多格建筑约定：`GenAdj.OccupiedRect` 用的那个"左下角"）</summary>
+        public int CellIndex;
+
+        /// <summary>0=北 1=东 2=南 3=西</summary>
+        public int Rotation;
+
+        /// <summary>"bed" / "torch"（游戏层据此挑 ThingDef）</summary>
+        public string Kind = "";
+
+        /// <summary>旋转**之后**实际占用的格（含锚点）</summary>
+        public List<int> Cells = new List<int>();
+
+        /// <summary>选这一格的理由（进遥测，便于回答"为什么摆这儿"）</summary>
+        public string Why = "";
+
+        public override string ToString()
+        {
+            return Kind + "@" + CellIndex + " rot" + Rotation + " (" + Cells.Count + "格)";
+        }
     }
 
     /// <summary>
@@ -357,6 +419,227 @@ namespace FoodControl.Core
             if (cx == maxX) return 1;    // 东
             if (cz == z) return 2;       // 南
             return 3;                    // 西
+        }
+
+        // ------------------------------------------------------------------
+        // 家具摆放（纯几何，可离线断言）
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// **房间里的家具怎么摆**（床沿墙排、避开门内侧通道、火把放中心附近）。
+        ///
+        /// ## 为什么要做成 Core 的纯函数
+        ///
+        /// 用户的验收标准里"3 张床 + 1 个火把"是**硬指标**，而摆放规则
+        /// （沿墙、间隔、避开门）全是几何 —— 埋在游戏层就没法离线断言，
+        /// 只能靠开游戏看，一次 20 秒起。放这里就能毫秒级测。
+        ///
+        /// ## 规则（保守、可解释）
+        ///
+        /// 1. **候选顺序确定**：沿房间内部格，先 x 后 z（从西墙往东、从南墙往北扫），
+        ///    所以结果**可复现**（同样的输入永远同样的输出）。
+        /// 2. **床**：`BedPerColonist` 时按殖民者数放（`colonistCount` 张）。
+        ///    朝向固定 **北(0)** —— 单人床未旋转是 1×2（沿 z 长），
+        ///    所以床沿南北向排、床头朝北，正好"贴着一面墙排成一列"。
+        /// 3. **避开门**：每扇门**内侧** `DoorApproachDepth` 格保持空（别把门堵了）。
+        /// 4. **相互间隔**：家具占地之外再留 `FurnitureGap` 格空（默认 1）。
+        /// 5. **火把**：放在**离房间中心最近**的合格格（照明覆盖最好），
+        ///    同样避开门口、不和床重叠。
+        /// 6. **某格不可用就跳过换下一格**，不整体放弃（用户明确要求）。
+        ///
+        /// 返回的列表里 `Kind` 是 "bed"/"torch"，游戏层据此挑 ThingDef。
+        /// </summary>
+        public static List<FurniturePlacement> PlaceFurniture(
+            BuildingPlan plan, BuildabilityMap grid, int colonistCount, BuildSiteOptions opts)
+        {
+            var result = new List<FurniturePlacement>();
+            if (plan == null || grid == null) return result;
+            if (opts == null) opts = new BuildSiteOptions();
+            if (plan.Size < 3) return result;
+
+            int maxX = plan.X + plan.Size - 1;
+            int maxZ = plan.Z + plan.Size - 1;
+
+            // ── ① 内部格集合（家具只能放屋里）──
+            var interior = new HashSet<int>();
+            for (int cx = plan.X + 1; cx < maxX; cx++)
+                for (int cz = plan.Z + 1; cz < maxZ; cz++)
+                    interior.Add(grid.Index(cx, cz));
+
+            // ── ② 门内侧通道：每扇门往里 DoorApproachDepth 格保持空 ──
+            var approach = new HashSet<int>();
+            int depth = opts.DoorApproachDepth > 0 ? opts.DoorApproachDepth : 0;
+            for (int i = 0; i < plan.DoorCells.Count; i++)
+            {
+                int di = plan.DoorCells[i];
+                int dx = di % grid.Width;
+                int dz = di / grid.Width;
+
+                int inX = dx, inZ = dz, stepX = 0, stepZ = 0;
+                if (dz == maxZ) { stepZ = -1; }        // 北门 → 往南走
+                else if (dz == plan.Z) { stepZ = 1; }  // 南门 → 往北走
+                else if (dx == maxX) { stepX = -1; }   // 东门 → 往西走
+                else if (dx == plan.X) { stepX = 1; }  // 西门 → 往东走
+                else continue;
+
+                for (int k = 1; k <= depth; k++)
+                {
+                    inX += stepX; inZ += stepZ;
+                    int ii = grid.Index(inX, inZ);
+                    if (interior.Contains(ii)) approach.Add(ii);
+                }
+            }
+
+            // ── ③ 占用表：已放家具的格 + 它们的"间隔圈" ──
+            var occupied = new HashSet<int>();
+            var blockedByGap = new HashSet<int>();
+
+            int gap = opts.FurnitureGap > 0 ? opts.FurnitureGap : 0;
+
+            // 按 plan 里的内部格顺序枚举（先 x 后 z）→ 结果可复现
+            var candidates = new List<int>();
+            for (int cx = plan.X + 1; cx < maxX; cx++)
+                for (int cz = plan.Z + 1; cz < maxZ; cz++)
+                    candidates.Add(grid.Index(cx, cz));
+
+            Func<int, int, int, int, List<int>> footprint = (ax, az, sx, sz) =>
+            {
+                var list = new List<int>();
+                for (int i = 0; i < sx; i++)
+                    for (int j = 0; j < sz; j++)
+                    {
+                        int fx = ax + i, fz = az + j;
+                        // ⚠ 越界必须显式给 -1：`BuildabilityMap.Index` 是纯算术，
+                        //   越界会"绕"到别的行上去，`interior.Contains` 可能误判成合法。
+                        list.Add(grid.InBounds(fx, fz) ? grid.Index(fx, fz) : -1);
+                    }
+                return list;
+            };
+
+            Func<List<int>, bool> fits = delegate(List<int> cells)
+            {
+                for (int i = 0; i < cells.Count; i++)
+                {
+                    int ci = cells[i];
+                    if (ci < 0) return false;                     // 越界
+                    if (!interior.Contains(ci)) return false;     // 出屋了
+                    if (approach.Contains(ci)) return false;      // 堵门
+                    if (occupied.Contains(ci)) return false;      // 和别的家具重叠
+                    if (blockedByGap.Contains(ci)) return false;  // 间隔不够
+                    if (ci < grid.Buildable.Length && !grid.Buildable[ci]) return false;  // 那格盖不了
+                    if (grid.MoveCost != null && ci < grid.MoveCost.Length && grid.MoveCost[ci] <= 0)
+                        return false;                             // 走不进去的地方不摆家具
+                }
+                return true;
+            };
+
+            Action<List<int>, int> commit = delegate(List<int> cells, int rotation)
+            {
+                for (int i = 0; i < cells.Count; i++) occupied.Add(cells[i]);
+                // 间隔圈：家具占地周围 gap 格内的所有内部格
+                if (gap > 0)
+                {
+                    for (int i = 0; i < cells.Count; i++)
+                    {
+                        int ci = cells[i];
+                        int cx = ci % grid.Width, cz = ci / grid.Width;
+                        for (int ox = -gap; ox <= gap; ox++)
+                        {
+                            for (int oz = -gap; oz <= gap; oz++)
+                            {
+                                int nx = cx + ox, nz = cz + oz;
+                                if (!grid.InBounds(nx, nz)) continue;
+                                int ni = grid.Index(nx, nz);
+                                if (occupied.Contains(ni)) continue;
+                                blockedByGap.Add(ni);
+                            }
+                        }
+                    }
+                }
+            };
+
+            // ── ④ 床：按殖民者数 ──
+            int wantBeds = opts.BedPerColonist ? colonistCount : 0;
+            if (wantBeds < 0) wantBeds = 0;
+
+            int bedSX = opts.BedSizeX > 0 ? opts.BedSizeX : 1;
+            int bedSZ = opts.BedSizeZ > 0 ? opts.BedSizeZ : 1;
+
+            for (int k = 0; k < wantBeds; k++)
+            {
+                bool placed = false;
+                for (int c = 0; c < candidates.Count && !placed; c++)
+                {
+                    int anchor = candidates[c];
+                    int ax = anchor % grid.Width;
+                    int az = anchor / grid.Width;
+
+                    // 固定北向：床沿 z 长（1×2），床头朝北 —— 贴墙排成一列
+                    var cells = footprint(ax, az, bedSX, bedSZ);
+                    if (!fits(cells)) continue;
+
+                    var fp = new FurniturePlacement
+                    {
+                        CellIndex = anchor,
+                        Rotation = 0,
+                        Kind = "bed",
+                        Why = "沿墙第一个能放下 " + bedSX + "×" + bedSZ + " 床且不堵门/不挤的格",
+                    };
+                    fp.Cells = cells;
+                    result.Add(fp);
+                    commit(cells, 0);
+                    placed = true;
+                }
+                if (!placed) break;     // 放不下了就停，不硬塞
+            }
+
+            // ── ⑤ 火把：离房间中心最近 ──
+            int torchSX = opts.TorchSizeX > 0 ? opts.TorchSizeX : 1;
+            int torchSZ = opts.TorchSizeZ > 0 ? opts.TorchSizeZ : 1;
+            double centreX = plan.X + (plan.Size - 1) / 2.0;
+            double centreZ = plan.Z + (plan.Size - 1) / 2.0;
+
+            for (int k = 0; k < opts.TorchCount; k++)
+            {
+                int bestAnchor = -1;
+                List<int> bestCells = null;
+                double bestD = double.MaxValue;
+
+                for (int c = 0; c < candidates.Count; c++)
+                {
+                    int anchor = candidates[c];
+                    int ax = anchor % grid.Width;
+                    int az = anchor / grid.Width;
+                    var cells = footprint(ax, az, torchSX, torchSZ);
+                    if (!fits(cells)) continue;
+
+                    // 用锚点的中心到房间中心的距离打分
+                    double px = ax + (torchSX - 1) / 2.0;
+                    double pz = az + (torchSZ - 1) / 2.0;
+                    double d = (px - centreX) * (px - centreX) + (pz - centreZ) * (pz - centreZ);
+                    if (d < bestD)
+                    {
+                        bestD = d;
+                        bestAnchor = anchor;
+                        bestCells = cells;
+                    }
+                }
+
+                if (bestAnchor < 0) break;
+
+                var tfp = new FurniturePlacement
+                {
+                    CellIndex = bestAnchor,
+                    Rotation = 0,
+                    Kind = "torch",
+                    Why = "离房间中心最近的合格格（照明覆盖最好），且不压床/不堵门",
+                };
+                tfp.Cells = bestCells;
+                result.Add(tfp);
+                commit(bestCells, 0);
+            }
+
+            return result;
         }
     }
 }

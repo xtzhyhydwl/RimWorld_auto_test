@@ -27,13 +27,18 @@ const CALL = 120_000;
 const RUN_DIR = path.join(WS, 'runs', 's4-shelter');
 
 /**
- * Core 的 `BuildSitePlanner` 对 Size=7 的户型给的是：
- *   墙 = 7×4 - 4 - 1(门) = 23；门 = 1；地板 = 5×5 = 25
- * 这是**独立于游戏**的几何事实（Core 98/98 测过），拿它当断言基准。
+ * Core 的 `BuildSitePlanner` 对 **13×13**（用户拍板）的户型给的是：
+ *   外墙 = 13×4 - 4 = 48 格；四边中心各 1 扇门 = **4**；剩墙 = **44**
+ *   内部 = 11×11 = **121** 格（地板默认**不做** —— 用户：「地板后边再考虑」）
+ *   家具 = 3 张床（每殖民者一张）+ 1 个火把
+ * 这是**独立于游戏**的几何事实（Core 123/123 测过），拿它当断言基准。
  */
-const EXPECT_WALLS = 23;
-const EXPECT_DOORS = 1;
-const EXPECT_FLOORS = 25;
+const EXPECT_WALLS = 44;
+const EXPECT_DOORS = 4;
+const EXPECT_BEDS = 3;
+const EXPECT_TORCHES = 1;
+const EXPECT_FLOORS = 0;        // 地板默认关（BuildFloor=false）
+const HOUSE_SIZE = 13;
 const FLOOR_DEF = 'WoodPlankFloor';
 
 let client = null;
@@ -196,15 +201,28 @@ async function main() {
     try { rj = JSON.parse(rep?.result || 'null'); } catch { rj = null; }
     log(`  mod 记账 JSON：${rep?.result}`);
     record('★ shelter_report 可读且是合法 JSON', rj != null, (rep?.result || rep?.message || '').slice(0, 240));
-    record('★★ mod 记账：墙 23 / 门 1 / 地板 25（与 Core 户型一致）',
+    record('★★ mod 记账：墙 44 / 门 4 / 床 3 / 火把 1（13×13 户型 + 家具）',
       (rj?.wallsPlaced ?? -1) === EXPECT_WALLS
         && (rj?.doorsPlaced ?? -1) === EXPECT_DOORS
+        && (rj?.bedsPlaced ?? -1) === EXPECT_BEDS
+        && (rj?.torchesPlaced ?? -1) === EXPECT_TORCHES
         && (rj?.floorsPlaced ?? -1) === EXPECT_FLOORS,
-      `墙${rj?.wallsPlaced} 门${rj?.doorsPlaced} 地板${rj?.floorsPlaced}（户型 墙${rj?.plan?.wallCells} 门${rj?.plan?.doorCells} 地板${rj?.plan?.floorCells}）`);
+      `墙${rj?.wallsPlaced} 门${rj?.doorsPlaced} 床${rj?.bedsPlaced} 火把${rj?.torchesPlaced} 地板${rj?.floorsPlaced}`
+        + `（户型 墙${rj?.plan?.wallCells} 门${rj?.plan?.doorCells} 内部${rj?.plan?.floorCells}，size=${rj?.plan?.size}）`);
     record('★ mod 自己的回读验证通过（verified=true）', rj?.verified === true, `verified=${rj?.verified}`);
-    record('★ 选材质：真的数了库存、且在偏好顺序里命中（木头优先）',
-      rj?.material?.def === 'WoodLog' && (rj?.material?.available ?? 0) > 0,
-      `${rj?.material?.def} 库存${rj?.material?.available} allowedForWall=${rj?.material?.allowedForWall} why=${rj?.material?.why}`);
+    record('★ 地板默认关（用户：地板后边再考虑）',
+      rj?.buildFloor === false, `buildFloor=${rj?.buildFloor}`);
+    record('★★ 材质：按库存**混用**并逐格记录（不是只挑一个）',
+      rj?.materialUseByCell != null && Object.keys(rj.materialUseByCell).length >= 1,
+      `materialAssigned=${JSON.stringify(rj?.materialAssigned)} 实际用=${JSON.stringify(rj?.materialUseByCell)} 说明=${rj?.materialNote}`);
+    // ★ 建造人力（蓝图放下去没人建 = 白放）
+    record('★★ 放蓝图前检查了"有没有人做建造"（WorkIsActive(Construction)）',
+      rj?.constructionWork != null,
+      `殖民者${rj?.constructionWork?.colonists} 建造工${rj?.constructionWork?.workers}`
+        + ` 未初始化${rj?.constructionWork?.notInitialized} 明细=[${(rj?.constructionWork?.detail || []).join(' ')}]`);
+    record('★★ 殖民地确实有人做建造（否则蓝图放了也白放）',
+      (rj?.constructionWork?.workers ?? 0) > 0,
+      `${rj?.constructionWork?.workers}/${rj?.constructionWork?.colonists} 人参与建造`);
 
     // ── 6. ★★ 桥接独立回读（不信 mod 自述）──
     log('\n=== 6. ★★ 桥接独立回读（不信 mod 自述）===');
@@ -222,34 +240,43 @@ async function main() {
 
     const nWallBp = after?.byBuildDef?.Wall ?? 0;
     const nDoorBp = after?.byBuildDef?.Door ?? 0;
+    const nBedBp = after?.byBuildDef?.Bed ?? 0;
+    const nTorchBp = after?.byBuildDef?.TorchLamp ?? 0;
     const nFloorBp = after?.byBuildDef?.[FLOOR_DEF] ?? 0;
     const nTotalBp = after?.blueprintBuild_total ?? 0;
     const byDefSum = Object.values(after?.byBuildDef || {}).reduce((a, b) => a + b, 0);
 
-    // ★ 增量基线用**冻结后的那次读数**（`before` 之后到 `frozen` 之间可能刚好有自动域动作）
+    // ★ 增量（应对"基线已经有上一轮/上一次构建留下的蓝图"）
     const bWall = frozen?.byBuildDef?.Wall ?? 0;
     const bDoor = frozen?.byBuildDef?.Door ?? 0;
+    const bBed = frozen?.byBuildDef?.Bed ?? 0;
+    const bTorch = frozen?.byBuildDef?.TorchLamp ?? 0;
     const bFloor = frozen?.byBuildDef?.[FLOOR_DEF] ?? 0;
     const bTotal = frozen?.blueprintBuild_total ?? 0;
     const delta = {
-      wall: nWallBp - bWall, door: nDoorBp - bDoor, floor: nFloorBp - bFloor, total: nTotalBp - bTotal,
+      wall: nWallBp - bWall, door: nDoorBp - bDoor,
+      bed: nBedBp - bBed, torch: nTorchBp - bTorch,
+      floor: nFloorBp - bFloor, total: nTotalBp - bTotal,
     };
     REPORT = { rj, rjAfter: rj, after, before, run, delta };
     log(`  ★ 增量（before → after）：墙 ${bWall}→${nWallBp} (+${delta.wall})，`
-      + `门 ${bDoor}→${nDoorBp} (+${delta.door})，地板 ${bFloor}→${nFloorBp} (+${delta.floor})，`
+      + `门 ${bDoor}→${nDoorBp} (+${delta.door})，床 ${bBed}→${nBedBp} (+${delta.bed})，`
+      + `火把 ${bTorch}→${nTorchBp} (+${delta.torch})，地板 ${bFloor}→${nFloorBp} (+${delta.floor})，`
       + `合计 ${bTotal}→${nTotalBp} (+${delta.total})`);
 
-    record('★★★ 桥接独立回读：本轮**新增**墙蓝图 = 23（Core 户型几何）',
+    record('★★★ 桥接独立回读：本轮**新增**墙蓝图 = 44（13×13 户型几何）',
       delta.wall === EXPECT_WALLS, `+${delta.wall}（期望 +${EXPECT_WALLS}）`);
-    record('★★★ 桥接独立回读：本轮**新增**门蓝图 = 1',
+    record('★★★ 桥接独立回读：本轮**新增**门蓝图 = 4（四边中心各一）',
       delta.door === EXPECT_DOORS, `+${delta.door}（期望 +${EXPECT_DOORS}）`);
-    record(`★★★ 桥接独立回读：本轮**新增**地板蓝图 = 25（${FLOOR_DEF}）`,
-      delta.floor === EXPECT_FLOORS, `+${delta.floor}（期望 +${EXPECT_FLOORS}）`);
-    record('★★★ 桥接独立回读：本轮新增蓝图合计 = 49（23 墙 + 1 门 + 25 地板）',
-      delta.total === EXPECT_WALLS + EXPECT_DOORS + EXPECT_FLOORS,
-      `+${delta.total}（期望 +${EXPECT_WALLS + EXPECT_DOORS + EXPECT_FLOORS}）`);
-    record('★★ 地图上确实存在这些蓝图（按 def 分组求和 ≥ 基准）',
-      byDefSum >= EXPECT_WALLS + EXPECT_DOORS + EXPECT_FLOORS,
+    record('★★★ 桥接独立回读：本轮**新增**床蓝图 = 3',
+      delta.bed === EXPECT_BEDS, `+${delta.bed}（期望 +${EXPECT_BEDS}）`);
+    record('★★★ 桥接独立回读：本轮**新增**火把蓝图 = 1',
+      delta.torch === EXPECT_TORCHES, `+${delta.torch}（期望 +${EXPECT_TORCHES}）`);
+    record('★★★ 桥接独立回读：**没有**新增地板蓝图（地板默认关）',
+      delta.floor === 0, `+${delta.floor}（期望 0）`);
+    record('★★ 地图上的墙/门/床/火把蓝图**确实存在**（按 def 分组求和）',
+      (after?.byBuildDef?.Wall ?? 0) >= EXPECT_WALLS
+        && (after?.byBuildDef?.Door ?? 0) >= EXPECT_DOORS,
       `byBuildDef=${JSON.stringify(after?.byBuildDef)} 合计=${byDefSum}（total=${nTotalBp}，差 ${byDefSum - nTotalBp}）`);
 
     // 被 mod 拒掉的格数也要看（全被拒的话数字对不上）
@@ -259,29 +286,34 @@ async function main() {
     // 材质一致性：**必须读 `EntityToBuildStuff()`**（蓝图把材质放在 `Blueprint_Build.stuffToUse`，
     // 读 `Thing.Stuff` 永远是 null —— 这是本轮实测抓出来的第二个坑）
     log(`  蓝图材质分布：${JSON.stringify(after?.byStuff)}`);
-    const hasWood = (after?.byStuff?.WoodLog ?? 0) >= EXPECT_WALLS + EXPECT_DOORS;
-    record('★★ 墙/门蓝图确实带上了选出来的材质（WoodLog）—— 读 EntityToBuildStuff()',
-      hasWood,
-      `byStuff=${JSON.stringify(after?.byStuff)}（期望 WoodLog ≥ ${EXPECT_WALLS + EXPECT_DOORS}）`);
-    record('★ 地板蓝图不带 stuff（"(无)"）—— 它的用料是 TerrainDef.costStuffCount，语义不同',
-      (after?.byStuff?.['(无)'] ?? 0) >= EXPECT_FLOORS,
-      `"(无)"=${after?.byStuff?.['(无)']}（期望 ≥ ${EXPECT_FLOORS}）`);
+    // ★ 混用材质：墙+门（52 格）应该有 stuff；地板（0 格）没有
+    const wallDoorStuff = Object.entries(after?.byStuff || {})
+      .filter(([k]) => k !== '(无)')
+      .reduce((a, [, v]) => a + v, 0);
+    record('★★ 墙/门蓝图确实带上了材质，且**允许混用**（本轮用了几种料）',
+      wallDoorStuff >= EXPECT_WALLS + EXPECT_DOORS,
+      `byStuff=${JSON.stringify(after?.byStuff)}（期望非"(无)"合计 ≥ ${EXPECT_WALLS + EXPECT_DOORS}）`);
+    record('★ 本轮**没有**地板蓝图（所以 byStuff 里没有地板那一类）',
+      nFloorBp === 0, `地板蓝图 ${nFloorBp} 个`);
 
     const repAfter = await call('foodprobe/shelter_report');
     let rjAfter = null;
     try { rjAfter = JSON.parse(repAfter?.result || 'null'); } catch { }
     log(`  mod 记账：${repAfter?.result}`);
     REPORT.rjAfter = rjAfter;
-    // ★★ 最关键的一条：mod 自己说放了 23 墙，桥接**独立**也读到 **+23** 面墙蓝图
-    record('★★★ mod 记账的"墙 23"与桥接**独立回读的增量 +23** 一致',
+    // ★★ 最关键的一条：mod 自己说放了 44 墙，桥接**独立**也读到 **+44**
+    record('★★★ mod 记账的"墙 44"与桥接**独立回读的增量 +44** 一致',
       (rjAfter?.wallsPlaced ?? -1) === EXPECT_WALLS && delta.wall === EXPECT_WALLS,
       `mod=${rjAfter?.wallsPlaced} 桥接增量=+${delta.wall}`);
-    record('★★★ mod 记账的"门 1"与桥接独立回读的增量 +1 一致',
+    record('★★★ mod 记账的"门 4"与桥接独立回读的增量 +4 一致',
       (rjAfter?.doorsPlaced ?? -1) === EXPECT_DOORS && delta.door === EXPECT_DOORS,
       `mod=${rjAfter?.doorsPlaced} 桥接增量=+${delta.door}`);
-    record('★★★ mod 记账的"地板 25"与桥接独立回读的增量 +25 一致',
-      (rjAfter?.floorsPlaced ?? -1) === EXPECT_FLOORS && delta.floor === EXPECT_FLOORS,
-      `mod=${rjAfter?.floorsPlaced} 桥接增量=+${delta.floor}`);
+    record('★★★ mod 记账的"床 3"与桥接独立回读的增量 +3 一致',
+      (rjAfter?.bedsPlaced ?? -1) === EXPECT_BEDS && delta.bed === EXPECT_BEDS,
+      `mod=${rjAfter?.bedsPlaced} 桥接增量=+${delta.bed}`);
+    record('★★★ mod 记账的"火把 1"与桥接独立回读的增量 +1 一致',
+      (rjAfter?.torchesPlaced ?? -1) === EXPECT_TORCHES && delta.torch === EXPECT_TORCHES,
+      `mod=${rjAfter?.torchesPlaced} 桥接增量=+${delta.torch}`);
 
     // ── 7. 幂等 ──
     log('\n=== 7. 幂等：再跑一次不该盖第二间 ===');
@@ -295,58 +327,77 @@ async function main() {
       (after2?.blueprintBuild_total ?? 0) === nTotalBp,
       `${nTotalBp} → ${after2?.blueprintBuild_total}`);
 
-    // ── 8. ★ 地板的干净实验（一格、一次、前后记账）──
+    // ── 8. ★ 屋顶实测：封闭的墙+门房间会不会自动长屋顶 ──
     //
-    // 这是被用户打回来重做的那一节：先前我"读 IL"断言地板是"瞬间免费改地形"，
-    // 实测（Blueprint_WoodPlankFloor）推翻了它。根因是 tools/asmdump/IlDump.cs 的
-    // ShortInlineBrTarget off-by-one，已修。这里用**一格**的干净实验把结论钉死。
-    log('\n=== 8. ★ 地板的干净实验（一格，前后各记一次地形与蓝图账）===');
-    // 8a. 先 dry-run：只查不动
-    const dry = await call('foodprobe/floor_path',
-      { terrainDefName: FLOOR_DEF, count: 1, mode: 'designator_dry', index: 0 });
-    record('floor_path(dry) 可调用', dry?.success === true, dry?.message || '');
-    log(`  dry: 目标格=${JSON.stringify(dry?.targetCells)} 地形前=${JSON.stringify(dry?.terrainBefore)}`
-      + ` 蓝图前=${JSON.stringify(dry?.blueprintCountBefore)}`);
-    record('★ dry-run 真的没动手（蓝图计数不变）',
-      dry?.blueprintDeltaTotal === 0 && (dry?.terrainChanged === false),
-      `蓝图Δ=${dry?.blueprintDeltaTotal} 地形变=${dry?.terrainChanged}`);
+    // 用户是**凭经验**说「墙体和门组成封闭空间以后，自动铺屋顶」的，要求实测确认。
+    //
+    // 为什么用夹具（`build_box_instant`）而不是等小人真建：
+    //   44 面墙 + 4 扇门由小人真建要跑好几天游戏日，验证脚本等不起。
+    //   所以直接**生成**一个已建成的封闭方盒当初始条件，再推进几 tick 看屋顶。
+    //   ⚠ 夹具不是 mod 行为，报告里必须写清楚。
+    log('\n=== 8. ★ 屋顶实测（封闭墙+门 → 会不会自动长屋顶）===');
 
-    // 8b. 真动手：Designator_Build(TerrainDef) 一格
-    const fp = await call('foodprobe/floor_path',
-      { terrainDefName: FLOOR_DEF, count: 1, mode: 'designator', index: 1 });
-    log(`  designator 一格：`);
-    log(`    目标格        = ${JSON.stringify(fp?.targetCells)}`);
-    log(`    地形 before   = ${JSON.stringify(fp?.terrainBefore)}`);
-    log(`    地形 after    = ${JSON.stringify(fp?.terrainAfter)}`);
-    log(`    terrainChanged= ${fp?.terrainChanged}`);
-    log(`    蓝图 before   = ${JSON.stringify(fp?.blueprintCountBefore)}`);
-    log(`    蓝图 after    = ${JSON.stringify(fp?.blueprintCountAfter)}`);
-    log(`    蓝图Δ(按def)  = ${JSON.stringify(fp?.blueprintDeltaByDef)}`);
-    log(`    该地形新增蓝图 = ${fp?.newBlueprintsForTargetTerrain}`);
-    log(`    terrain.blueprintDef = ${fp?.terrain_blueprintDef} / frameDef=${fp?.terrain_frameDef}`);
-    log(`    verdict: ${fp?.verdict}`);
+    // 8a. 先看**已有的**封闭房间（debug 开局自带 200+ 面墙，多半有现成的封闭房间）
+    const roofBefore = await call('foodprobe/roof_check', { maxRooms: 12 });
+    record('roof_check 可调用（只读）', roofBefore?.success === true, roofBefore?.message || '');
+    log(`  全图：有屋顶 ${roofBefore?.mapRoofedCells} 格 / 无屋顶 ${roofBefore?.mapUnroofedCells} 格，`
+      + `RoofDef=${JSON.stringify(roofBefore?.roofsByDef)}，房间数 ${roofBefore?.roomCount}`);
+    {
+      const rooms = roofBefore?.rooms || [];
+      const enclosedFullyRoofed = rooms.filter((r) => r.allRoof && r.wallCount > 0);
+      const enclosedNotRoofed = rooms.filter((r) => r.noneRoof && r.wallCount > 0);
+      log(`  封闭(有墙)且**全屋顶**的房间：${enclosedFullyRoofed.length}`);
+      for (const r of enclosedFullyRoofed.slice(0, 4)) {
+        log(`    room#${r.id} ${r.cells}格 roofed=${r.roofedCells} 墙${r.wallCount} 门${r.doorCount} roof=${JSON.stringify(r.roofDefs)}`);
+      }
+      log(`  封闭(有墙)且**完全没屋顶**的房间：${enclosedNotRoofed.length}`);
+      for (const r of enclosedNotRoofed.slice(0, 4)) {
+        log(`    room#${r.id} ${r.cells}格 墙${r.wallCount} 门${r.doorCount} edge=${r.touchesMapEdge}`);
+      }
+      record('★ 地图上确实存在"有墙的封闭房间"（不然这个实验没法做）',
+        rooms.some((r) => r.wallCount > 0),
+        `房间 ${rooms.length} 个，其中有墙的 ${rooms.filter((r) => r.wallCount > 0).length} 个`);
+      REPORT.roofExisting = { fullyRoofed: enclosedFullyRoofed.length, noRoof: enclosedNotRoofed.length };
+    }
 
-    record('floor_path(designator) 可调用', fp?.success === true, fp?.message || '');
-    record('★★ TerrainDef **有** blueprintDef（地板不是"没有蓝图形态"）',
-      fp?.terrain_blueprintDef != null && fp?.terrain_hasBlueprintForm === true,
-      `blueprintDef=${fp?.terrain_blueprintDef ?? 'null'} frameDef=${fp?.terrain_frameDef ?? 'null'}`);
-    record('★★ 干净实验：一格 designator 后，**地形没变**、蓝图 +1（buildsDef==WoodPlankFloor）',
-      fp?.terrainChanged === false
-        && (fp?.newBlueprintsForTargetTerrain ?? 0) >= 1
-        && (fp?.blueprintDeltaByDef?.[FLOOR_DEF] ?? 0) >= 1,
-      `地形 ${JSON.stringify(fp?.terrainBefore)} → ${JSON.stringify(fp?.terrainAfter)}，`
-        + `蓝图Δ=${JSON.stringify(fp?.blueprintDeltaByDef)}`);
+    // 8b. 夹具：生成一个 13×13 封闭方盒，推进 tick，看屋顶
+    const BOX_X = 150, BOX_Z = 150;
+    log(`  夹具：在 (${BOX_X},${BOX_Z}) 直接生成 13×13 封闭方盒（44 墙 + 4 门，**已建成**）...`);
+    const box = await call('foodprobe/build_box_instant',
+      { x: BOX_X, z: BOX_Z, size: HOUSE_SIZE, doors: true, stuffDefName: 'WoodLog' });
+    record('★ 夹具：13×13 封闭方盒已生成（44 墙 + 4 门，已建成非蓝图）',
+      box?.success === true && (box?.wallsSpawned ?? 0) === EXPECT_WALLS && (box?.doorsSpawned ?? 0) === EXPECT_DOORS,
+      `墙${box?.wallsSpawned}/${box?.expectedWalls} 门${box?.doorsSpawned} errors=${JSON.stringify(box?.errors)}`);
 
-    // 8c. 另一条路：GenConstruct.PlaceBlueprintForBuild(TerrainDef)
-    const gc = await call('foodprobe/floor_path',
-      { terrainDefName: FLOOR_DEF, count: 1, mode: 'genconstruct', index: 2 });
-    log(`  genconstruct 一格：蓝图Δ=${JSON.stringify(gc?.blueprintDeltaByDef)}`
-      + ` 地形变=${gc?.terrainChanged} accepted=${gc?.accepted} rejected=${gc?.rejected}`);
-    log(`    verdict: ${gc?.verdict}`);
-    record('★ GenConstruct.PlaceBlueprintForBuild(TerrainDef) 也能放地板蓝图（更正规的路）',
-      gc?.success === true && gc?.terrainChanged === false
-        && (gc?.newBlueprintsForTargetTerrain ?? 0) >= 1,
-      `蓝图Δ=${JSON.stringify(gc?.blueprintDeltaByDef)} errors=${JSON.stringify(gc?.errors)}`);
+    // 屋顶生成要走 tick → 解除暂停，推进若干 tick，再暂停重新读
+    await call('foodprobe/set_paused', { paused: false });
+    const stepRes = await call('rimworld/step_game_ticks',
+      { ticks: 600, pauseFirst: false, timeoutMs: 110000 }, 120000).catch((e) => ({ error: e.message }));
+    log(`  推进 600 tick：advancedTicks=${stepRes?.advancedTicks ?? stepRes?.error ?? '?'}`);
+    await call('foodprobe/set_paused', { paused: true });
+
+    const roofAfter = await call('foodprobe/roof_check', { maxRooms: 60 });
+    // 找我们那个方盒对应的房间（首格落在方盒范围内）
+    const inBox = (r) => r.firstCell && r.firstCell.x >= BOX_X && r.firstCell.x < BOX_X + HOUSE_SIZE
+      && r.firstCell.z >= BOX_Z && r.firstCell.z < BOX_Z + HOUSE_SIZE;
+    const ourRooms = (roofAfter?.rooms || []).filter(inBox);
+    log(`  方盒内的房间：${ourRooms.length} 个`);
+    for (const r of ourRooms) {
+      log(`    room#${r.id} ${r.cells} 格，有屋顶 ${r.roofedCells} 格，allRoof=${r.allRoof} `
+        + `noneRoof=${r.noneRoof} roof=${JSON.stringify(r.roofDefs)} 墙${r.wallCount} 门${r.doorCount}`);
+    }
+    REPORT.roofBox = ourRooms.map((r) => ({ id: r.id, cells: r.cells, roofed: r.roofedCells, allRoof: r.allRoof, roofDefs: r.roofDefs }));
+
+    const boxRoofed = ourRooms.some((r) => r.roofedCells > 0);
+    const boxFullyRoofed = ourRooms.some((r) => r.cells > 0 && r.roofedCells >= r.cells);
+    record('★★ 实测结论：13×13 封闭墙+门房间**会自动长出屋顶**（room.roofedCells > 0）',
+      boxRoofed,
+      boxRoofed
+        ? `有屋顶 ${ourRooms.map((r) => r.roofedCells + '/' + r.cells).join(',')}，RoofDef=${JSON.stringify(ourRooms.map((r) => r.roofDefs))}`
+        : '★ 没有屋顶：说明"墙围起来就自动铺屋顶"这个经验说法在 1.6 **不成立**，'
+          + '屋顶还需要额外的 "Build roof area" 指令（如实记录，不硬凑）');
+    record('★ 补注：是否**整间**都铺满（allRoof）',
+      boxFullyRoofed, boxFullyRoofed ? '整间铺满' : '只有部分格有屋顶（可能屋顶生成需要更多 tick）');
 
     // 8d. 排除"是别的 mod Harmony patch 改写了行为"
     const pat = await call('foodprobe/patches');

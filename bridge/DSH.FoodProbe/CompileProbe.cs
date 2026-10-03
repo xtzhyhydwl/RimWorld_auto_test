@@ -318,6 +318,100 @@ public static class CompileProbe
             tm.CurTimeSpeed = TimeSpeed.Normal;      // 恢复
             if (nowPaused) { }
         }
+
+        // ---- ★ 建造人力检查（蓝图放下去没人建 = 白放）----
+        //
+        // 元数据确证：`Pawn.workSettings` 是 public 字段；`Pawn_WorkSettings` 的
+        // `GetPriority` / `SetPriority` / `WorkIsActive` / `Initialized` /
+        // `EnableAndInitializeIfNotAlreadyInitialized` 全是 public。
+        // `WorkIsActive` 的 IL = `ConfirmInitializedDebug(); return GetPriority(w) > 0;`
+        // ⇒ 它**假设已初始化**，新殖民者 priorities 为 null 时读到的 0 不可信（先查 Initialized）。
+        WorkTypeDef construction = WorkTypeDefOf.Construction;
+        if (construction != null)
+        {
+            foreach (Pawn p in map.mapPawns.FreeColonistsSpawned)
+            {
+                Pawn_WorkSettings ws = p.workSettings;
+                if (ws == null) continue;
+                bool inited = ws.Initialized;
+                if (!inited) ws.EnableAndInitializeIfNotAlreadyInitialized();
+                int prio = ws.GetPriority(construction);
+                bool active = ws.WorkIsActive(construction);
+                if (prio < 0 || active) { }
+            }
+        }
+
+        // ---- ★ 家具 Def（用户要「3 床 + 1 火把」）----
+        //
+        // ⚠ 单人床 `Bed` 的 Size 是 **1×2**（不是 1×1）—— 这个尺寸必须读 Def，不能写死，
+        //   否则 Core 的家具摆放会按错尺寸找位置。
+        ThingDef bedDef = DefDatabase<ThingDef>.GetNamedSilentFail("Bed");
+        ThingDef torchDef = DefDatabase<ThingDef>.GetNamedSilentFail("TorchLamp");
+        ThingDef standingLampDef = DefDatabase<ThingDef>.GetNamedSilentFail("StandingLamp");
+        ThingDef campfireDef = DefDatabase<ThingDef>.GetNamedSilentFail("Campfire");
+        if (ThingDefOf.Bed != null && ThingDefOf.TorchLamp != null && ThingDefOf.StandingLamp != null)
+        {
+            if (bedDef != null && torchDef != null && standingLampDef != null && campfireDef != null)
+            {
+                IntVec2 bedSize = bedDef.Size;
+                IntVec2 torchSize = torchDef.Size;
+                int bedCost = bedDef.costStuffCount;
+                int torchCost = torchDef.costStuffCount;
+                // 火把/床也是 Building：同样用 GenConstruct 放蓝图
+                AcceptanceReport bedCan = GenConstruct.CanPlaceBlueprintAt(
+                    bedDef, new IntVec3(10, 0, 14), Rot4.North, map,
+                    true, null, null, stuff, false, false, false);
+                if (bedCan.Accepted && bedSize.x > 0 && torchSize.z > 0 && bedCost >= 0 && torchCost >= 0) { }
+            }
+        }
+
+        // ---- ★ 屋顶：从 Room + RoofGrid 读（屋顶不是 Thing，数蓝图数不到）----
+        foreach (Room room in map.regionGrid.AllRooms)
+        {
+            if (room == null) continue;
+            bool isPrison = room.IsPrisonCell;
+            bool edge = room.TouchesMapEdge;
+            int n = 0;
+            foreach (IntVec3 rc in room.Cells)
+            {
+                RoofDef rd = map.roofGrid.RoofAt(rc);
+                if (rd != null) n++;
+            }
+            if (isPrison || edge || n < 0) { }
+            break;
+        }
+        // 全图屋顶统计用的成员
+        RoofDef anyRoof = map.roofGrid.RoofAt(new IntVec3(10, 0, 10));
+        bool roofed = map.roofGrid.Roofed(new IntVec3(10, 0, 10));
+        if (anyRoof != null && roofed) { }
+        DesignationDef buildRoofDef = DefDatabase<DesignationDef>.GetNamedSilentFail("BuildRoof");
+        if (buildRoofDef != null && map.designationManager != null)
+        {
+            foreach (Designation desg in map.designationManager.SpawnedDesignationsOfDef(buildRoofDef)) { break; }
+        }
+
+        // ---- 屋顶夹具：直接 spawn 已建成的墙/门（给"封闭空间会不会自动长屋顶"造条件）----
+        {
+            Thing wallThing = ThingMaker.MakeThing(ThingDefOf.Wall, stuff);
+            if (wallThing != null)
+            {
+                wallThing.SetFactionDirect(Faction.OfPlayer);
+                // 注意：这里只构造，不 spawn（探针文件不许有副作用）
+                IntVec3 spawnCell = new IntVec3(15, 0, 15);
+                if (!spawnCell.InBounds(map)) { }
+            }
+            Thing doorThing = ThingMaker.MakeThing(ThingDefOf.Door, null);
+            if (doorThing != null) { }
+            GenSpawn.Spawn(wallThing, new IntVec3(15, 0, 15), map, Rot4.North);
+            GenSpawn.Spawn(doorThing, new IntVec3(15, 0, 16), map, Rot4.South);
+            // 夹具要能清格
+            foreach (Thing t in new IntVec3(15, 0, 15).GetThingList(map))
+            {
+                if (t != null && t.def != null && !(t is Pawn)) t.Destroy(DestroyMode.Vanish);
+                break;
+            }
+            wallThing.SetFactionDirect(Faction.OfPlayer);
+        }
     }
 
     private static bool argsNoop(params object[] xs) { return xs == null; }
