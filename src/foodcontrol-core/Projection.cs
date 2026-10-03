@@ -69,6 +69,11 @@ namespace FoodControl.Core
             double[] reserve = new double[horizon + 1];
 
             // --- 已在种的作物：按成熟天数把产出摊到那一天 ---
+            //
+            // ⚠ 单位是**每格每周期**（NutritionPerCellPerCycle），不是"每格总共"。
+            //   而且同一种下的作物**会长完再长**：收获后 growth 归零、重新生长，
+            //   所以预测窗口内一块地可以贡献**多次**收获。水稻 3 天成熟、
+            //   15 天窗口 → 第 3/6/9/12/15 天各有一次产出，共 5 次。
             if (state.Planted != null)
             {
                 for (int i = 0; i < state.Planted.Count; i++)
@@ -76,15 +81,32 @@ namespace FoodControl.Core
                     PlantGroup g = state.Planted[i];
                     if (g == null || g.CellCount <= 0) continue;
 
-                    double days = DaysUntilMature(g, cal);
-                    if (double.IsInfinity(days) || days > horizon) continue;   // 窗口外，不计
+                    double firstHarvest = DaysUntilHarvest(g, cal);
+                    if (double.IsPositiveInfinity(firstHarvest) || firstHarvest > horizon) continue;  // 窗口外
 
-                    int day = (int)Math.Ceiling(days);
+                    int day = (int)Math.Ceiling(firstHarvest);
                     if (day < 1) day = 1;
-                    if (day > horizon) continue;
 
-                    double nutrition = g.CellCount * cal.NutritionPerCellAtMaturity;
-                    supply[day] += nutrition;
+                    // 一个完整生长周期多少天（复种间隔 = 从 0 长到可收获的时间）
+                    double cycleDays = (g.GrowthRate > 0 && g.GrowDays > 0)
+                        ? cal.HarvestMinGrowth * g.GrowDays / g.GrowthRate
+                        : double.MaxValue;
+
+                    double perCell = cal.NutritionPerCellPerCycle;
+                    double nutrition = g.CellCount * perCell;
+
+                    // 第 1 次收获，之后每 cycleDays 天复种一次
+                    int harvests = 0;
+                    for (double d = day; d <= horizon; d += cycleDays)
+                    {
+                        int hd = (int)Math.Ceiling(d);
+                        if (hd < 1) hd = 1;
+                        if (hd > horizon) break;
+                        supply[hd] += nutrition;
+                        harvests++;
+                        if (harvests > 200) break;          // 防病态参数导致死循环
+                        if (cycleDays <= 0 || double.IsInfinity(cycleDays)) break;
+                    }
                 }
             }
 

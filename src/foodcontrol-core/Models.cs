@@ -15,10 +15,36 @@ namespace FoodControl.Core
     /// </summary>
     public sealed class Calibration
     {
+        /// <summary>收获产物的 defName（诊断用），如 `RawRice`</summary>
+        public string HarvestedThingDefName = "RawRice";
+
         /// <summary>
-        /// 成熟作物每格能提供的 nutrition。由「每株产量 × 营养值」实测填入。
+        /// 每株（即每格）一次收获的基础产量，对应 `PlantProperties.harvestYield`。
+        /// 水稻实测 = **6**（2026-10-03 实测）。
         /// </summary>
-        public double NutritionPerCellAtMaturity = 18.0;
+        public double HarvestYieldPerCell = 6.0;
+
+        /// <summary>
+        /// 每单位收获产物的 nutrition，对应收获产物的 `StatDefOf.Nutrition`。
+        /// 水稻 → RawRice 实测 = **0.05**。
+        /// </summary>
+        public double NutritionPerHarvestedItem = 0.05;
+
+        /// <summary>
+        /// 每格作物**一个生长周期**能提供的 nutrition。
+        ///
+        /// ⚠ 这是**总量**，不是速率！把它当速率用会犯量级错误：
+        ///   水稻实测算出来是 6 × 0.05 = **0.3**。
+        ///   我最初在这里填了占位符 18.0 —— **差了 60 倍**，直接导致「缺口 → 种几格」全错。
+        ///
+        /// 缺口换算成格数必须用**跨时间累积**的产出，见
+        /// <see cref="Policy"/> 的 `CellsForGap`：一格里可以在预测窗口内收获多次
+        /// （水稻 3 天成熟 → 15 天窗口内可收 5 次 → 每格能贡献 1.5 nutrition）。
+        /// </summary>
+        public double NutritionPerCellPerCycle
+        {
+            get { return HarvestYieldPerCell * NutritionPerHarvestedItem; }
+        }
 
         /// <summary>
         /// 可收获的 growth 阈值。

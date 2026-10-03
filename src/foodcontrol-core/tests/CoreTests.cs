@@ -73,14 +73,20 @@ public static class CoreTests
         Console.WriteLine();
         Console.WriteLine("-- Projection（预测器） --");
 
-        // 水稻：growDays = 2（游戏 XML 实测值），收获阈值 harvestMinGrowth = 0.65
+        // 水稻实测：growDays = 3、harvestMinGrowth = 0.65、
+        //           harvestYield = 6（每株）× RawRice 营养 0.05 = 每格每周期 0.3 nutrition
         // 公式对应游戏：GrowthPerTick = GrowthRate / (60000 × growDays)
         var cal = new Calibration
         {
-            NutritionPerCellAtMaturity = 20.0,
+            HarvestYieldPerCell = 6.0,
+            NutritionPerHarvestedItem = 0.05,
             HarvestMinGrowth = 0.65,
             HorizonDays = 15,
         };
+
+        // ★ 钉住"每格产出是总量不是速率"这件事 —— 这里差 60 倍过一次
+        Near("每格每周期 = 6 × 0.05 = 0.3 nutrition（不是 18！）",
+            cal.NutritionPerCellPerCycle, 0.3, 1e-9);
 
         // GrowthRate = 1、growDays = 2、从 0 到 0.65 → 0.65 × 2 = 1.3 天
         var g = new PlantGroup("Plant_Rice", 100, 0.0, 1.0, 2.0);
@@ -110,21 +116,35 @@ public static class CoreTests
         True("GrowthRate=0（夜里）→ 不给出有限天数", double.IsPositiveInfinity(dDark) || dDark > 1e6,
             "实际返回 " + dDark);
 
-        // 存量曲线：100 存量、2/天消耗、第 2 天收 2000
+        // ── 存量曲线 ──
+        // GrowthRate=1、growDays=3 → 1.95 天到可收获 → 第 2 天首收
+        // 100 格 × 0.3 = 每次 30 nutrition；复种周期 1.95 天
+        //   → 第 2/3/5/7/9/11/13/15 天各有一次（ceiling 后落点）
         var st = new FoodState
         {
             Stock = 100,
             BurnRatePerDay = 2.0,
             Calibration = cal,
-            Planted = new List<PlantGroup> { new PlantGroup("Plant_Rice", 100, 0.0, 0.5, 2.0) },
+            Planted = new List<PlantGroup> { new PlantGroup("Plant_Rice", 100, 0.0, 1.0, 3.0) },
         };
         ForecastResult p = Projection.Forecast(st);
         Eq("曲线长度 = 窗口+1", p.ProjectedReserve.Length, 16);
         Near("第 0 天 = 当前存量", p.ProjectedReserve[0], 100, 1e-9);
         Near("第 1 天 = 100-2", p.ProjectedReserve[1], 98, 1e-9);
-        Near("第 2 天 = 98-2（当天还没收）", p.ProjectedReserve[2], 96, 1e-9);
-        Near("第 3 天 = 96-2+2000", p.ProjectedReserve[3], 2094, 1e-6);
-        Near("第 3 天新增产出 = 100格×20", p.DailySupply[3], 2000, 1e-9);
+        Near("第 2 天首收 = 100-4+30", p.ProjectedReserve[2], 126, 1e-6);
+        Near("第 2 天新增产出 = 100格×0.3", p.DailySupply[2], 30, 1e-9);
+
+        // ★ 复种：窗口内应该收获多次，而不是只收一次
+        int harvestDays = 0;
+        for (int d = 1; d <= 15; d++) if (p.DailySupply[d] > 0) harvestDays++;
+        True("★ 窗口内复种多次产出（不是只收一次）", harvestDays >= 5,
+            "有产出的天数 = " + harvestDays + "（0.65×3 天成熟 → 15 天约 7~8 次）");
+
+        // 总产出应该远超"只收一次"
+        double totalSupply = 0;
+        for (int d = 1; d <= 15; d++) totalSupply += p.DailySupply[d];
+        True("★ 总产出 > 单次产出（复种累积）", totalSupply > 30 * 5,
+            "总产出 " + totalSupply + " vs 单次 30");
 
         // 窗口外的作物不计入
         // growDays=30 且 GrowthRate=0.5 → 0.65×30/0.5 = 39 天，远超 15 天窗口
@@ -154,7 +174,8 @@ public static class CoreTests
         };
         var cal = new Calibration
         {
-            NutritionPerCellAtMaturity = 20.0, HarvestMinGrowth = 0.65, HorizonDays = 15,
+            HarvestYieldPerCell = 6.0, NutritionPerHarvestedItem = 0.05,
+            HarvestMinGrowth = 0.65, HorizonDays = 15,
         };
         var baseState = new FoodState { BurnRatePerDay = 2.0, Calibration = cal, ArableCellsAvailable = 1000 };
 
@@ -200,6 +221,42 @@ public static class CoreTests
         starving.Stock = 0;
         var d4 = Policy.Decide(starving, cfg);
         Eq("零存量 → PlantCrop", d4.Action.Kind, FoodActionKind.PlantCrop);
+
+        // ★★ 钉住"总产出口径"这个语义 —— 这里曾经犯过一个真错误：
+        //    要求"预测窗口内**每一天**存量都 ≥ 低阈值"。但第 1 天还没有任何收获，
+        //    存量只减不增，这个约束**永远无法满足** → 二分搜索永远找不到解
+        //    → 返回巨大值 → 被 MaxCellsPerDecision 截断成 0
+        //    → 表现为"零存量却决定 DoNothing"这种荒谬结果。
+        {
+            ForecastResult pf = Projection.Forecast(starving);
+            int h = cal.HorizonDays;
+            double windowSupply = pf.ProjectedReserve[h] - starving.Stock + starving.BurnRatePerDay * h;
+            double need = starving.BurnRatePerDay * h + starving.BurnRatePerDay * cfg.ReserveDaysTarget - starving.Stock;
+            True("★ 零存量时确实给出了正的格数（不是被截断成 0）", d4.Action.Cells > 0,
+                "cells=" + d4.Action.Cells);
+            True("★ 种下的格数×每格产出 ≥ 需要补的总量",
+                d4.Action.Cells * cal.NutritionPerCellPerCycle * 7 >= need - windowSupply - 4,
+                "cells=" + d4.Action.Cells + " need=" + need.ToString("F1")
+                + " 已在种产出=" + windowSupply.ToString("F1"));
+
+            // ★★ 真正该验的：**把新种下的地算进去之后，预测曲线应该变健康**
+            //    （上一条断言曾经写错——传的是没算新地的 forecast，那当然还是完蛋的曲线）
+            var extra = new double[h + 1];
+            int cycle = (int)Math.Ceiling(cal.HarvestMinGrowth * 3.0);   // 1.95 → 2
+            for (int d = cycle; d <= h; d += cycle)
+            {
+                extra[d] += d4.Action.Cells * cal.NutritionPerCellPerCycle;
+            }
+            ForecastResult after = Projection.Forecast(starving, extra);
+            True("★★ 把新种的算进去后，期末存量转正",
+                after.ProjectedReserve[h] > 0,
+                "期末=" + after.ProjectedReserve[h].ToString("F1"));
+            // 注意：仍然不要求"每一天都在水位线上" —— 第 1 天没有收获，那做不到。
+            // 只要求窗口内总产出把期末抬到正数以上，且曲线整体在改善。
+            True("★★ 种地后最低点明显抬高（曲线整体改善）",
+                after.MinReserve > pf.MinReserve,
+                "最低点 " + pf.MinReserve.ToString("F1") + " → " + after.MinReserve.ToString("F1"));
+        }
         Eq("  种的作物 = 配置里的水稻", d4.Action.PlantDefName, "Plant_Rice");
         True("  格数为正", d4.Action.Cells > 0, "实际 " + d4.Action.Cells);
         True("  格数不超过单次上限", d4.Action.Cells <= cfg.MaxCellsPerDecision);

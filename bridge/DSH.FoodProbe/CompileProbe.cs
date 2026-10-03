@@ -30,8 +30,24 @@ public static class CompileProbe
     /// <summary>
     /// 引用探针里用到的每个 API。**不执行**，只要求编译通过。
     /// </summary>
-    internal static void TouchEveryApi(Map map, Zone_Growing zone, ThingDef plantDef, Thing thing, Plant plant)
+    internal static void TouchEveryApi(Map map, Zone_Growing zone, ThingDef plantDef, Thing thing, Plant plant, Pawn pawnForProbe)
     {
+        // ---- 禁取（Forbidden）----
+        // 用 CompForbiddable（不是 IsForbidden 字段，那是旧版本写法）。
+        // ⚠ 实测不存在的写法，别再用：thing.IsForbiddenByAnyone()、pawn.playerSettings.forbidItems
+        CompForbiddable forbiddable = thing.TryGetComp<CompForbiddable>();
+        if (forbiddable != null)
+        {
+            bool isForbidden = forbiddable.Forbidden;
+            forbiddable.Forbidden = false;              // 一键允许
+            if (isForbidden) { }
+        }
+        // 殖民者状态（用于"是不是饿死/崩溃"的诊断）
+        float colonistMood = pawnForProbe.needs?.mood?.CurLevel ?? 0f;
+        float colonistFood = pawnForProbe.needs?.food?.CurLevel ?? 0f;
+        bool colonistDowned = pawnForProbe.Downed;
+        if (colonistMood < 0 || colonistFood < 0 || colonistDowned) { }
+
         // ---- 建区（地基验证的核心三行）----
         var z = new Zone_Growing(map.zoneManager);
         var cells = new List<IntVec3> { new IntVec3(0, 0, 0) };

@@ -668,5 +668,201 @@ namespace DSH.FoodProbe
         {
             return YieldPerCellImpl(plantDefName, sampleCells);
         }
+
+        // ── 禁取（Forbidden）统计与一键允许 ────────────────────────────
+        //
+        // 背景：**debug 开局刷出来的物资默认是 forbidden（禁止）的，小人不碰。**
+        // 如果测试场景没做"允许全部"，小人就只能干看着一堆资源饿死 ——
+        // 那是**测试场景的缺陷，不是 mod 的 bug**，必须先区分清楚。
+        // 而"开局允许所有物资"本身也是玩家习惯上的一次性操作，值得做成工具。
+
+        /// <summary>统计地图上被禁取的东西（分可搬运/建筑/植物三类）。只读。</summary>
+        public static object ForbiddenStatsImpl(int maxSamples)
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            int total = 0, haulable = 0, buildings = 0, plants = 0, other = 0;
+            double forbiddenNutrition = 0;
+            var samples = new List<object>();
+            var byDef = new Dictionary<string, int>();
+
+            foreach (var th in map.listerThings.AllThings)
+            {
+                try
+                {
+                    if (th == null) continue;
+                    // 用 CompForbiddable（不是 IsForbidden 字段，那是旧版本写法）
+                    var comp = th.TryGetComp<CompForbiddable>();
+                    if (comp == null || !comp.Forbidden) continue;
+
+                    total++;
+                    if (th is Plant) plants++;
+                    else if (th.def != null && th.def.category == ThingCategory.Building) buildings++;
+                    else if (th.def != null && th.def.EverHaulable) haulable++;
+                    else other++;
+
+                    // 顺手算一下"被禁取的食物有多少 nutrition"——这直接关系到会不会饿死
+                    try
+                    {
+                        if (th.def != null && th.def.category == ThingCategory.Item
+                            && th.def.IsNutritionGivingIngestible)
+                        {
+                            forbiddenNutrition += th.GetStatValue(StatDefOf.Nutrition, true) * th.stackCount;
+                        }
+                    }
+                    catch { }
+
+                    string dn = th.def != null ? th.def.defName : "?";
+                    if (!byDef.ContainsKey(dn)) byDef[dn] = 0;
+                    byDef[dn] += th.stackCount;
+
+                    if (samples.Count < Math.Max(maxSamples, 8))
+                    {
+                        samples.Add(new
+                        {
+                            def = dn,
+                            stackCount = th.stackCount,
+                            isPlant = th is Plant,
+                            everHaulable = th.def != null && th.def.EverHaulable,
+                            category = th.def != null ? th.def.category.ToString() : null,
+                        });
+                    }
+                }
+                catch { }
+            }
+
+            var colonistInfo = new List<object>();
+            try
+            {
+                foreach (var p in map.mapPawns.FreeColonistsSpawned)
+                {
+                    colonistInfo.Add(new
+                    {
+                        name = p.LabelShort,
+                        mood = Math.Round(p.needs?.mood?.CurLevel ?? 0f, 3),
+                        food = Math.Round(p.needs?.food?.CurLevel ?? 0f, 3),
+                        // ⚠ 不要写 p.IsForbiddenByAnyone() / playerSettings.forbidItems —— 实测两者都不存在
+                        downed = p.Downed,
+                        dead = p.Dead,
+                    });
+                }
+            }
+            catch { }
+
+            return new
+            {
+                success = true,
+                totalForbidden = total,
+                haulable,
+                buildings,
+                plants,
+                other,
+                forbiddenFoodNutrition = Math.Round(forbiddenNutrition, 1),
+                topDefs = byDef.OrderByDescending(kv => kv.Value).Take(12)
+                    .Select(kv => new { def = kv.Key, stackCount = kv.Value }).ToArray(),
+                sample = samples,
+                colonists = colonistInfo,
+                note = "forbiddenFoodNutrition > 0 表示**有食物但小人拿不到** —— "
+                     + "这种情况下饿死是测试场景问题，不是 mod 问题。",
+            };
+        }
+
+        [Tool("foodprobe/forbidden_stats",
+            Description = "统计地图上被禁取（forbidden）的东西，含被禁取的食物营养总量。只读。")]
+        public object ForbiddenStats(
+            [ToolParameter(Description = "采样条数，默认 8")] int maxSamples = 8)
+        {
+            return ForbiddenStatsImpl(maxSamples);
+        }
+
+        /// <summary>
+        /// **一键允许全部**：把地图上所有 forbidden 的东西改成允许。
+        ///
+        /// 这就是玩家开局习惯做的那次性操作（全选 → 允许）。
+        /// 做成工具后测试场景可以一条调用搞定，不用手动点。
+        /// </summary>
+        public static object UnforbidAllImpl(bool onlyItems)
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            int checkedCount = 0, changed = 0, foodUnforbid = 0;
+            double nutritionUnlocked = 0;
+            var errors = new List<string>();
+
+            foreach (var th in map.listerThings.AllThings.ToList())
+            {
+                try
+                {
+                    if (th == null) continue;
+                    var comp = th.TryGetComp<CompForbiddable>();
+                    if (comp == null || !comp.Forbidden) continue;
+
+                    checkedCount++;
+
+                    if (onlyItems)
+                    {
+                        // 只处理"能被搬运的物品"（Item 类），跳过建筑/植物/蓝图等
+                        if (th.def == null || th.def.category != ThingCategory.Item) continue;
+                    }
+
+                    comp.Forbidden = false;
+                    changed++;
+
+                    try
+                    {
+                        if (th.def != null && th.def.IsNutritionGivingIngestible)
+                        {
+                            foodUnforbid++;
+                            nutritionUnlocked += th.GetStatValue(StatDefOf.Nutrition, true) * th.stackCount;
+                        }
+                    }
+                    catch { }
+                }
+                catch (Exception e)
+                {
+                    if (errors.Count < 5) errors.Add(e.GetType().Name + ": " + e.Message);
+                }
+            }
+
+            // 回读确认：再统计一次还剩多少被禁取
+            int remaining = 0;
+            foreach (var th in map.listerThings.AllThings)
+            {
+                try
+                {
+                    var c = th.TryGetComp<CompForbiddable>();
+                    if (c != null && c.Forbidden)
+                    {
+                        if (!onlyItems || (th.def != null && th.def.category == ThingCategory.Item)) remaining++;
+                    }
+                }
+                catch { }
+            }
+
+            return new
+            {
+                success = true,
+                onlyItems,
+                scanned = checkedCount,
+                unforbidden = changed,
+                remainingForbidden = remaining,
+                foodStacksUnlocked = foodUnforbid,
+                nutritionUnlocked = Math.Round(nutritionUnlocked, 1),
+                errors,
+                verdict = remaining == 0 ? "全部允许（回读确认无剩余）"
+                        : changed == 0 ? "没有需要改的"
+                        : string.Format("改了 {0} 个，回读仍剩 {1} 个", changed, remaining),
+            };
+        }
+
+        [Tool("foodprobe/unforbid_all",
+            Description = "一键允许地图上所有被禁取的东西（玩家开局习惯操作）。onlyItems=true 只处理可搬运物品。")]
+        public object UnforbidAll(
+            [ToolParameter(Description = "true = 只允许可搬运的物品，跳过建筑/植物，默认 true")] bool onlyItems = true)
+        {
+            return UnforbidAllImpl(onlyItems);
+        }
     }
 }
