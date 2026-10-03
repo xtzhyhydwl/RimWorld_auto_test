@@ -1,0 +1,552 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using System.Text;
+using RimBridgeServer.Sdk;
+using Verse;
+using RimWorld;
+
+namespace DSH.FoodProbe
+{
+    /// <summary>
+    /// FoodControl 的地基验证探针。
+    ///
+    /// 为什么需要它：`ZoneMaker.MakeZoneWithCells` 的**签名**已经确证，
+    /// 但**内部行为**（是否自动 RegisterZone / 是否逐格 AddCell / 有没有校验）
+    /// **无法从元数据判断** —— 只能真的在游戏里跑一遍。
+    /// 这是整个自动种田的地基，风险最高，所以先验。
+    ///
+    /// 设计：用**反射**调 mod 的类型，不硬引用 mod 程序集。
+    /// 好处：mod 没加载时能给出清楚的诊断，而不是整个 DLL 加载失败。
+    /// </summary>
+    public sealed class FoodProbeTools
+    {
+        private const string MOD_ASM = "FoodControl";
+        private const BindingFlags ANY_STATIC =
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+        private const BindingFlags ANY_ALL =
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance;
+
+        // ── 反射小工具 ───────────────────────────────────────────────
+
+        private static Assembly FindMod()
+        {
+            foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try { if (a.GetName().Name == MOD_ASM) return a; }
+                catch { }
+            }
+            return null;
+        }
+
+        private static Type FindType(Assembly asm, string name)
+        {
+            if (asm == null) return null;
+            try
+            {
+                var t = asm.GetType("FoodControl.Game." + name, false);
+                if (t != null) return t;
+                t = asm.GetType(name, false);
+                if (t != null) return t;
+                foreach (var x in asm.GetTypes())
+                    if (x.Name == name || x.FullName == name) return x;
+            }
+            catch { }
+            return null;
+        }
+
+        private static object CallStatic(Type t, string method, params object[] args)
+        {
+            if (t == null) return null;
+            foreach (var m in t.GetMethods(ANY_STATIC))
+            {
+                if (m.Name != method) continue;
+                var ps = m.GetParameters();
+                if (ps.Length != args.Length) continue;
+                try { return m.Invoke(null, args); }
+                catch (TargetInvocationException tie)
+                {
+                    throw tie.InnerException ?? tie;
+                }
+            }
+            return null;
+        }
+
+        private static object GetStaticField(Type t, string field)
+        {
+            if (t == null) return null;
+            var f = t.GetField(field, ANY_STATIC);
+            return f == null ? null : f.GetValue(null);
+        }
+
+        /// <summary>把任意对象粗略转成人类可读结构（用于诊断输出）</summary>
+        private static object Describe(object o, int depth)
+        {
+            if (o == null) return null;
+            if (depth <= 0) return o.ToString();
+
+            var t = o.GetType();
+            if (t.IsPrimitive || t == typeof(string) || t.IsEnum) return o;
+            if (o is System.Collections.IEnumerable en && !(o is string))
+            {
+                var list = new List<object>();
+                int n = 0;
+                foreach (var item in en)
+                {
+                    if (n++ >= 20) { list.Add("..."); break; }
+                    list.Add(Describe(item, depth - 1));
+                }
+                return list;
+            }
+
+            var d = new Dictionary<string, object>();
+            foreach (var p in t.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (p.GetIndexParameters().Length > 0) continue;
+                try { d[p.Name] = Describe(p.GetValue(o, null), depth - 1); }
+                catch { }
+            }
+            return d;
+        }
+
+        // ── 工具 ─────────────────────────────────────────────────────
+
+        [Tool("foodprobe/health", Description = "自检：FoodControl mod 加载了吗、内部类型和静态入口在不在。只读。")]
+        public object Health()
+        {
+            var asm = FindMod();
+            if (asm == null)
+            {
+                var loaded = string.Join(", ",
+                    AppDomain.CurrentDomain.GetAssemblies()
+                        .Select(a => { try { return a.GetName().Name; } catch { return "?"; } })
+                        .Where(n => n.ToLowerInvariant().Contains("food"))
+                        .ToArray());
+
+                return new
+                {
+                    success = false,
+                    modLoaded = false,
+                    message = "程序集 FoodControl 未加载。mod 是否启用？DSH 是否重启过游戏？",
+                    foodLikeAssemblies = loaded,
+                };
+            }
+
+            var boot = FindType(asm, "ModBoot");
+            var comp = FindType(asm, "FoodControlGameComponent");
+            var reader = FindType(asm, "StateReader");
+            var planner = FindType(asm, "PlotPlanner");
+            var executor = FindType(asm, "Executor");
+            var telemetry = FindType(asm, "Telemetry");
+
+            return new
+            {
+                success = true,
+                modLoaded = true,
+                assembly = asm.FullName,
+                types = new
+                {
+                    ModBoot = boot != null,
+                    FoodControlGameComponent = comp != null,
+                    StateReader = reader != null,
+                    PlotPlanner = planner != null,
+                    Executor = executor != null,
+                    Telemetry = telemetry != null,
+                },
+                staticEntryPoints = boot == null ? new string[0] :
+                    boot.GetMethods(ANY_STATIC).Select(m => m.Name).Distinct().ToArray(),
+                hasCurrentGame = Current.Game != null,
+            };
+        }
+
+        [Tool("foodprobe/run_cycle", Description = "让 mod 立刻跑一轮闭环（不等游戏日），用于测试。")]
+        public object RunCycle()
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+
+            var boot = FindType(asm, "ModBoot");
+            if (boot == null) return new { success = false, message = "找不到 FoodControl.Game.ModBoot" };
+
+            try
+            {
+                var r = CallStatic(boot, "RunCycleNow");
+                if (r == null)
+                {
+                    return new
+                    {
+                        success = false,
+                        message = "ModBoot 上没有 RunCycleNow() 静态方法。现有静态方法："
+                            + string.Join(", ", boot.GetMethods(ANY_STATIC).Select(m => m.Name).Distinct().ToArray()),
+                    };
+                }
+                return new { success = true, result = Describe(r, 3) };
+            }
+            catch (Exception e)
+            {
+                return new
+                {
+                    success = false,
+                    message = "跑一轮时抛异常",
+                    exception = e.GetType().FullName,
+                    detail = e.Message,
+                    stack = e.StackTrace,
+                };
+            }
+        }
+
+        [Tool("foodprobe/read_state", Description = "读 mod 感知层算出来的 FoodState（食物总量/消耗/在种作物/可用空地）。只读。")]
+        public object ReadState()
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+
+            var reader = FindType(asm, "StateReader");
+            if (reader == null) return new { success = false, message = "找不到 StateReader" };
+
+            try
+            {
+                var r = CallStatic(reader, "Read");
+                if (r == null) r = CallStatic(reader, "ReadCurrentMap");
+                if (r == null)
+                {
+                    return new
+                    {
+                        success = false,
+                        message = "StateReader 上没有 Read()/ReadCurrentMap() 静态方法。现有方法："
+                            + string.Join(", ", reader.GetMethods(ANY_STATIC).Select(m => m.Name).Distinct().ToArray()),
+                    };
+                }
+                return new { success = true, state = Describe(r, 3) };
+            }
+            catch (Exception e)
+            {
+                return new
+                {
+                    success = false,
+                    message = "读状态时抛异常",
+                    exception = e.GetType().FullName,
+                    detail = e.Message,
+                    stack = e.StackTrace,
+                };
+            }
+        }
+
+        /// <summary>
+        /// ★ 地基验证的核心：直接测「建种植区 + 设作物」这条路径在真实游戏里行不行。
+        ///
+        /// 为什么不通过 mod：这一步要验的是**游戏 API 本身**（MakeZoneWithCells / SetPlantDefToGrow），
+        /// 如果 mod 层封装掩盖了失败，验证就没意义。
+        /// 所以这里**直接调游戏 API**，然后**回读**确认，不假定成功。
+        /// </summary>
+        [Tool("foodprobe/zone_test",
+            Description = "地基验证：在指定格建 Zone_Growing、设作物、回读确认。可 dryRun 只做可行性检查。")]
+        public object ZoneTest(
+            [ToolParameter(Description = "起点 x（左下角）")] int x,
+            [ToolParameter(Description = "起点 z")] int z,
+            [ToolParameter(Description = "边长（正方形），默认 6")] int side = 6,
+            [ToolParameter(Description = "作物 defName，默认 Plant_Rice")] string plantDefName = "Plant_Rice",
+            [ToolParameter(Description = "true = 只检查不真的建")] bool dryRun = false)
+        {
+            return ZoneTestImpl(x, z, side, plantDefName, dryRun);
+        }
+
+        /// <summary>
+        /// `zone_test` 的实现。
+        ///
+        /// ⚠ 做成 **public static** 不是为了给 SDK 用，而是为了能被
+        /// `bridge/DSH.FoodProbe/CompileProbe.cs` **在部署前编译验证** ——
+        /// 部署要重启游戏（约 12 秒 + 重开殖民地），编译不过就浪费一整轮。
+        /// </summary>
+        public static object ZoneTestImpl(int x, int z, int side, string plantDefName, bool dryRun)
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+            if (side < 1) side = 6;
+            if (x < 0 || z < 0 || x + side > map.Size.x || z + side > map.Size.z)
+                return new { success = false, message = "矩形越界", mapSize = new { x = map.Size.x, z = map.Size.z } };
+
+            var plantDef = DefDatabase<ThingDef>.GetNamedSilentFail(plantDefName);
+            if (plantDef == null) return new { success = false, message = "找不到作物 Def: " + plantDefName };
+
+            // 逐格诊断：哪些格能种、为什么不能
+            var cells = new List<IntVec3>();
+            var cellDiag = new List<object>();
+            int arable = 0;
+
+            for (int dx = 0; dx < side; dx++)
+            {
+                for (int dz = 0; dz < side; dz++)
+                {
+                    var c = new IntVec3(x + dx, 0, z + dz);
+                    cells.Add(c);
+
+                    string terrain = null;
+                    float fert = 0f;
+                    bool canEver = false;
+                    string report = null;
+                    try
+                    {
+                        terrain = c.GetTerrain(map)?.defName;
+                        fert = map.fertilityGrid.FertilityAt(c);
+                        Thing blocking;
+                        canEver = plantDef.CanEverPlantAt(c, map, out blocking, false);
+                        if (!canEver) report = blocking != null ? ("blocked by " + blocking.def?.defName) : "cannot plant";
+                    }
+                    catch (Exception e) { report = "probe error: " + e.Message; }
+
+                    if (canEver) arable++;
+                    if (cellDiag.Count < 12)
+                        cellDiag.Add(new { x = c.x, z = c.z, terrain, fert, canEver, report });
+                }
+            }
+
+            var before = map.zoneManager.AllZones.OfType<Zone_Growing>().Count();
+
+            if (dryRun)
+            {
+                return new
+                {
+                    success = true, dryRun = true,
+                    cellsRequested = cells.Count, cellsArable = arable,
+                    existingGrowingZones = before,
+                    sample = cellDiag,
+                };
+            }
+
+            object createResult = null;
+            Exception createEx = null;
+            object registerResult = null;
+            Zone_Growing newZone = null;
+
+            try
+            {
+                // ★ 第 1 步：建区对象 + 逐格 AddCell
+                //   IL 实测：MakeZoneWithCells 全文就是一个 `foreach (c in cells) z.AddCell(c)`，
+                //   **完全不碰 zoneManager** —— 所以光调它是不够的。
+                newZone = new Zone_Growing(map.zoneManager);
+                ZoneMaker.MakeZoneWithCells(newZone, cells);
+
+                var midZones = map.zoneManager.AllZones.OfType<Zone_Growing>().Count();
+                createResult = new { zonesAfterMakeOnly = midZones };
+
+                // ★ 第 2 步：注册进 zoneManager（实测必需，否则 AllZones 里找不到、小人也不会去种）
+                map.zoneManager.RegisterZone(newZone);
+                registerResult = new
+                {
+                    ok = true,
+                    zonesAfterRegister = map.zoneManager.AllZones.OfType<Zone_Growing>().Count(),
+                    registered = map.zoneManager.AllZones.Contains(newZone),
+                };
+            }
+            catch (Exception e)
+            {
+                createEx = e;
+            }
+
+            // ★ 回读：不假定 MakeZoneWithCells 成功了
+            var after = map.zoneManager.AllZones.OfType<Zone_Growing>().ToList();
+            var found = after.FirstOrDefault(zn => zn == newZone)
+                     ?? after.FirstOrDefault(zn => zn.cells != null && zn.cells.Contains(cells[0]));
+
+            object setCropResult = null;
+            string cropLabel = null;
+            if (found != null)
+            {
+                try
+                {
+                    found.SetPlantDefToGrow(plantDef);
+                    cropLabel = found.PlantDefToGrow?.defName;
+                }
+                catch (Exception e)
+                {
+                    setCropResult = new { ok = false, error = e.GetType().Name + ": " + e.Message };
+                }
+            }
+
+            var zoneInfo = found == null ? null : (object)new
+            {
+                zoneId = found.ID,
+                cellCount = found.cells == null ? 0 : found.cells.Count,
+                plantDefToGrow = found.PlantDefToGrow?.defName,
+                label = found.label,
+                registeredInZoneManager = map.zoneManager.AllZones.Contains(found),
+                firstCellIsInZone = found.cells != null && found.cells.Contains(cells[0]),
+            };
+
+            return new
+            {
+                // 判定：建出来了 且 注册成功 且 格数对 且 作物设上了
+                success = createEx == null
+                          && found != null
+                          && found.cells != null
+                          && found.cells.Count > 0
+                          && map.zoneManager.AllZones.Contains(found)
+                          && cropLabel == plantDef.defName,
+                verdict = createEx != null ? "建区/注册 抛异常"
+                        : found == null ? "RegisterZone 之后 zoneManager 里仍然找不到"
+                        : (found.cells == null || found.cells.Count == 0) ? "建出来了但没有格（未 AddCell）"
+                        : cropLabel != plantDef.defName ? "区建好了但作物没设上"
+                        : "★ 地基可用：AddCell + RegisterZone + SetPlantDefToGrow 都成功",
+                growingZoneCountBefore = before,
+                growingZoneCountAfter = after.Count,
+                createException = createEx == null ? null : new
+                {
+                    type = createEx.GetType().FullName,
+                    message = createEx.Message,
+                    stack = createEx.StackTrace,
+                },
+                setCropResult,
+                zone = zoneInfo,
+                cellsRequested = cells.Count,
+                cellsArable = arable,
+                sample = cellDiag,
+                createResult = createResult,
+                registerResult = registerResult,
+            };
+        }
+
+        [Tool("foodprobe/read_zone", Description = "回读指定种植区的状态：格数、作物、植物生长进度。只读。")]
+        public object ReadZone(
+            [ToolParameter(Description = "zone ID；省略则列出所有种植区")] int zoneId = -1)
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            var zones = map.zoneManager.AllZones.OfType<Zone_Growing>().ToList();
+
+            if (zoneId < 0)
+            {
+                return new
+                {
+                    success = true,
+                    count = zones.Count,
+                    zones = zones.Select(zn => (object)new
+                    {
+                        zoneId = zn.ID,
+                        cells = zn.cells == null ? 0 : zn.cells.Count,
+                        plantDefToGrow = zn.PlantDefToGrow?.defName,
+                    }).ToArray(),
+                };
+            }
+
+            var z = zones.FirstOrDefault(zn => zn.ID == zoneId);
+            if (z == null) return new { success = false, message = "找不到种植区 " + zoneId };
+
+            // 读该区里的植物：生长进度、当前生长速率、growDays、平均肥力
+            var plants = new List<object>();
+            float fertSum = 0f; int fertN = 0;
+            if (z.cells != null)
+            {
+                foreach (var c in z.cells)
+                {
+                    try { fertSum += map.fertilityGrid.FertilityAt(c); fertN++; } catch { }
+                    var things = c.GetThingList(map);
+                    foreach (var th in things)
+                    {
+                        var p = th as Plant;
+                        if (p == null) continue;
+                        if (plants.Count < 40)
+                        {
+                            plants.Add(new
+                            {
+                                def = p.def.defName,
+                                growth = p.Growth,
+                                growthRate = p.GrowthRate,
+                                growDays = p.def.plant?.growDays,
+                                harvestMinGrowth = p.def.plant?.harvestMinGrowth,
+                                harvestableNow = p.HarvestableNow,
+                                lifeStage = p.LifeStage.ToString(),
+                            });
+                        }
+                    }
+                }
+            }
+
+            return new
+            {
+                success = true,
+                zoneId = z.ID,
+                cells = z.cells == null ? 0 : z.cells.Count,
+                plantDefToGrow = z.PlantDefToGrow?.defName,
+                avgFertility = fertN > 0 ? fertSum / fertN : 0f,
+                plantCount = plants.Count,
+                samples = plants,
+            };
+        }
+
+        [Tool("foodprobe/food_summary", Description = "按游戏 API 直接汇总地图上的食物（验证感知层可行性）。只读。")]
+        public object FoodSummary()
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            double totalNutrition = 0;
+            int foodStacks = 0;
+            var byDef = new Dictionary<string, double>();
+            var errors = new List<string>();
+
+            foreach (var th in map.listerThings.AllThings)
+            {
+                try
+                {
+                    if (th == null || th.def == null) continue;
+                    if (!th.def.IsNutritionGivingIngestible) continue;
+
+                    float nut = th.GetStatValue(StatDefOf.Nutrition, true);
+                    if (nut <= 0f) continue;
+
+                    double n = nut * th.stackCount;
+                    totalNutrition += n;
+                    foodStacks++;
+                    if (!byDef.ContainsKey(th.def.defName)) byDef[th.def.defName] = 0;
+                    byDef[th.def.defName] += n;
+                }
+                catch (Exception e)
+                {
+                    if (errors.Count < 5) errors.Add(th?.def?.defName + ": " + e.Message);
+                }
+            }
+
+            var colonists = map.mapPawns.FreeColonistsSpawned;
+            int pop = 0;
+            try { pop = colonists.Count(); } catch { }
+
+            return new
+            {
+                success = true,
+                totalNutrition = Math.Round(totalNutrition, 1),
+                foodStacks,
+                colonistCount = pop,
+                reserveDaysAt1_6PerDay = pop > 0 ? Math.Round(totalNutrition / (pop * 1.6), 2) : (double?)null,
+                topFoods = byDef.OrderByDescending(kv => kv.Value).Take(10)
+                    .Select(kv => new { def = kv.Key, nutrition = Math.Round(kv.Value, 1) }).ToArray(),
+                errors,
+            };
+        }
+
+        [Tool("foodprobe/telemetry_tail", Description = "读 mod 写的 telemetry.jsonl 末尾若干行。只读。")]
+        public object TelemetryTail(
+            [ToolParameter(Description = "读多少行，默认 5")] int lines = 5)
+        {
+            try
+            {
+                string dir = GenFilePaths.SaveDataFolderPath;
+                string path = System.IO.Path.Combine(dir, "foodcontrol-telemetry.jsonl");
+                if (!System.IO.File.Exists(path))
+                    return new { success = false, message = "还没有遥测文件", path, dir };
+
+                var all = System.IO.File.ReadAllLines(path);
+                int take = Math.Min(Math.Max(lines, 1), all.Length);
+                var tail = all.Skip(all.Length - take).ToArray();
+                return new { success = true, path, totalLines = all.Length, tail };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message };
+            }
+        }
+    }
+}

@@ -7,14 +7,29 @@
 
 **用户决定做「生产自动化」mod，第一条线路：食物闭环。**
 
-**Core 逻辑层已完成并全部离线测试通过（58/58）。**
+**Core 逻辑层完成（59/59 离线测试），地基已在真实游戏里验证通过（14/14）。**
+当前：Game 层（游戏内适配层）由子代理实现中。
+
 设计文档：[docs/生产自动化-设计.md](docs/生产自动化-设计.md)
+地基报告：[runs/foundation/report.md](runs/foundation/report.md)
 
 一句话形态：**感知（现有多少食物）→ 预测（未来 15 天每天多少）→ 决策（要不要动手）
 → 执行（自动画种植区去种）→ 观测回流**。只有「决策」一层是可替换的，
 所以「上层用脚本还是 LLM」是局部改动。
 
-**下一步**：游戏内适配层（`Game/`）—— 等 API 符号确证结果。
+### ★ 地基验证的关键结论（实测）
+
+**`ZoneMaker.MakeZoneWithCells` 不会把区注册进 zoneManager —— 必须补 `RegisterZone`。**
+不补的话建出来的是「僵尸区」：`AllZones` 里没有、小人永远不去种。
+
+```csharp
+var z = new Zone_Growing(map.zoneManager);
+ZoneMaker.MakeZoneWithCells(z, cells);   // 只做逐格 AddCell
+map.zoneManager.RegisterZone(z);          // ★ 缺这一步就废
+z.SetPlantDefToGrow(plantDef);
+```
+
+实测：加 RegisterZone 后推进 92555 tick，小人在 36 格区里种满了（植物 18 → 36）✅
 
 ### 用户已定的参数
 
@@ -22,7 +37,7 @@
 | --- | --- |
 | 目标带 | 常备 **10** 天，低于 **7** 补，高于 **20** 停 |
 | 狩猎 | **不进 MVP** |
-| 作物 | **固定水稻** |
+| 作物 | **固定水稻**（实测 `growDays = 3`） |
 | 基地中心 | Home 质心 → 最近的贮藏区 → 地图中心（兜底链） |
 | 距离惩罚 | 可接受 **40** 格，超出每格罚 **1** 分 |
 | 已有种植区 | **优先复用空地**，不新开 |
@@ -31,15 +46,29 @@
 
 ## 已完成
 
+### FoodControl · 地基验证（2026-10-03）
+- [x] 探针伴生 DLL：`bridge/DSH.FoodProbe/`（7 个 `foodprobe/*` 工具，含 `zone_test`）
+- [x] **14/14 通过**：建区 + 注册 + 设作物 + 小人真的去种 + 生长进度可读
+- [x] 修掉两个**假阳性断言**（`success===true` 不算数，要断言状态）
+- [x] 实测替换掉假设值：`growDays=3`、`harvestMinGrowth=0.65`、夜里 `GrowthRate=0` 是正常态
+- [x] 部署通道：游戏 `Mods\FoodControl` → 工作区 junction，改工作区即生效
+- [x] `CompileProbe.cs` 机制：部署前先编一遍，证明所有游戏 API 签名有效
+
 ### FoodControl · Core 逻辑层（2026-10-03）
 - [x] `src/foodcontrol-core/`：预测器 / 决策 / 选址，**纯逻辑，不引用游戏程序集**
-- [x] **58/58 离线测试通过**：`node scripts/build-core.mjs`（毫秒级，不开游戏）
+- [x] **59/59 离线测试通过**：`node scripts/build-core.mjs`（毫秒级，不开游戏）
 - [x] 预测器**显式建模光周期**（实测晚上生长率为 0，不能按 24h 线性外推）
 - [x] 选址用**带地形代价的 BFS 距离场**而非欧氏距离（河对岸直线 10 格、实际绕 118 格，已测）
 - [x] `build-core.mjs` 含**静态检查**：Core 一旦引用 `Verse`/`RimWorld` 类型就报错，
       从机制上保证「逻辑可离线测试」不被破坏
 - [x] 一个测试发现（已固化成用例）："存粮 7.5 天 + 6 天后才收获" 触发补种是**正确的**，
       依赖未到手的收成本身就是风险
+
+### API 符号确证（2026-10-03）
+- [x] `docs/游戏API符号确证.md` + `tools/asmdump/`（AsmDump/IlDump/ApiProbe）
+- [x] 推翻五处「凭记忆写会编译不过」的 API，详见设计文档 §7.11
+- [x] 修正 `docs/mod开发基础.md` 里「`findstr` 够用」的方法论错误
+      （它是子串匹配，`PlantGrowthRateCalculator` 就是这么被骗的）
 
 ### 生产自动化 · 设计与侦察（2026-10-03）
 - [x] 需求讨论 + 设计文档：[docs/生产自动化-设计.md](docs/生产自动化-设计.md)
