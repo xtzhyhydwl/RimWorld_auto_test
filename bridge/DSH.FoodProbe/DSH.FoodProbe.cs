@@ -1198,6 +1198,358 @@ namespace DSH.FoodProbe
             return result;
         }
 
+        [Tool("foodprobe/colony_snapshot",
+            Description = "★ 全图状态快照（区域/建筑/蓝图/工作优先级/过滤器），供\"人类示范录制\"做逐帧差分。只读。")]
+        public object ColonySnapshot(
+            [ToolParameter(Description = "true = 附带逐格明细（体积大，但差分更精确）")] bool includeCells = true)
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            try
+            {
+                int tick = 0;
+                try { tick = Find.TickManager != null ? Find.TickManager.TicksGame : 0; } catch (Exception) { }
+
+                // ① 区域（种植区/储藏区/其他）
+                var zones = new List<object>();
+                try
+                {
+                    foreach (var z in map.zoneManager.AllZones)
+                    {
+                        if (z == null) continue;
+                        var g = z as Zone_Growing;
+                        var sp = z as Zone_Stockpile;
+
+                        object filterInfo = null;
+                        if (sp != null)
+                        {
+                            // 储藏区：记录它允许/禁止了什么（这是用户"设置了什么内容"的核心）
+                            var allowed = new List<string>();
+                            var disallowed = new List<string>();
+                            try
+                            {
+                                // 抽查若干代表性 Def，判断收不收
+                                string[] probes = new string[]
+                                {
+                                    "WoodLog", "Steel", "Silver", "MealSimple", "RawRice",
+                                    "MedicineHerbal", "Corpse_Human", "ToxicWastepack",
+                                    "ApparelRatkin", "ComponentIndustrial",
+                                };
+                                for (int i = 0; i < probes.Length; i++)
+                                {
+                                    ThingDef d = DefDatabase<ThingDef>.GetNamedSilentFail(probes[i]);
+                                    if (d == null) continue;
+                                    bool ok = false;
+                                    try { ok = sp.settings != null && sp.settings.filter != null && sp.settings.filter.Allows(d); }
+                                    catch (Exception) { }
+                                    if (ok) allowed.Add(probes[i]); else disallowed.Add(probes[i]);
+                                }
+                            }
+                            catch (Exception) { }
+                            filterInfo = new { allowed, disallowed };
+                        }
+
+                        var cells = new List<object>();
+                        if (includeCells)
+                        {
+                            try
+                            {
+                                int n = 0;
+                                foreach (IntVec3 c in z.cells)
+                                {
+                                    cells.Add(new int[] { c.x, c.z });
+                                    if (++n > 900) break;
+                                }
+                            }
+                            catch (Exception) { }
+                        }
+
+                        zones.Add(new
+                        {
+                            id = z.ID,
+                            type = z.GetType().Name,
+                            label = z.label,
+                            cellCount = z.cells != null ? z.cells.Count : 0,
+                            plantDef = g != null ? (g.GetPlantDefToGrow() != null ? g.GetPlantDefToGrow().defName : null) : null,
+                            filter = filterInfo,
+                            cells,
+                        });
+                    }
+                }
+                catch (Exception) { }
+
+                // ② 建筑 / 蓝图 / 框架（按 Def 分组，带位置，便于差分）
+                var things = new Dictionary<string, List<int[]>>();
+                try
+                {
+                    foreach (Thing t in map.listerThings.AllThings)
+                    {
+                        if (t?.def == null) continue;
+                        bool interesting = t is Blueprint || t is Frame
+                            || t.def.category == ThingCategory.Building
+                            || t.def.category == ThingCategory.Item;
+                        if (!interesting) continue;
+
+                        string key;
+                        if (t is Blueprint) key = "BP:" + t.def.defName;
+                        else if (t is Frame) key = "FR:" + t.def.defName;
+                        else key = t.def.defName;
+
+                        List<int[]> list;
+                        if (!things.TryGetValue(key, out list)) { list = new List<int[]>(); things[key] = list; }
+                        if (list.Count < 1200)
+                        {
+                            string stuffName = null;
+                            try { stuffName = t.Stuff != null ? t.Stuff.defName : null; } catch (Exception) { }
+                            list.Add(new int[] { t.Position.x, t.Position.z });
+                        }
+                    }
+                }
+                catch (Exception) { }
+
+                // ③ 工作优先级（用户"设置了什么"的另一大类）
+                var workPriorities = new List<object>();
+                try
+                {
+                    foreach (Pawn p in map.mapPawns.FreeColonists)
+                    {
+                        if (p?.workSettings == null) continue;
+                        var prio = new Dictionary<string, int>();
+                        foreach (WorkTypeDef w in DefDatabase<WorkTypeDef>.AllDefsListForReading)
+                        {
+                            try
+                            {
+                                if (!p.workSettings.WorkIsActive(w)) continue;
+                                prio[w.defName] = p.workSettings.GetPriority(w);
+                            }
+                            catch (Exception) { }
+                        }
+                        workPriorities.Add(new { name = p.Name?.ToStringShort, priorities = prio });
+                    }
+                }
+                catch (Exception) { }
+
+                // ④ 地图级设计（采矿标记 / 拆除标记 / 允许区）
+                var designations = new Dictionary<string, List<int[]>>();
+                try
+                {
+                    var dm = map.designationManager;
+                    if (dm != null)
+                    {
+                        foreach (Designation d in dm.AllDesignations)
+                        {
+                            if (d?.def == null) continue;
+                            string key = d.def.defName;
+                            List<int[]> list;
+                            if (!designations.TryGetValue(key, out list)) { list = new List<int[]>(); designations[key] = list; }
+                            if (list.Count < 1500) list.Add(new int[] { d.target.Cell.x, d.target.Cell.z });
+                        }
+                    }
+                }
+                catch (Exception) { }
+
+                // ⑤ 殖民者位置（判断"他在看哪/在哪操作"）
+                var pawns = new List<object>();
+                try
+                {
+                    foreach (Pawn p in map.mapPawns.FreeColonists)
+                        pawns.Add(new { name = p.Name?.ToStringShort, x = p.Position.x, z = p.Position.z });
+                }
+                catch (Exception) { }
+
+                return new
+                {
+                    success = true,
+                    tick,
+                    mapId = map.uniqueID,
+                    zoneCount = zones.Count,
+                    zones,
+                    thingGroups = things,
+                    designationGroups = designations,
+                    workPriorities,
+                    pawns,
+                    note = "★ 用于\"人类示范录制\"：周期拉这张快照，和上一张做差分，"
+                         + "**差异就是你在这段时间做的操作**（划区/设过滤器/改优先级/下蓝图）。"
+                         + "为什么用差分：游戏不提供\"用户操作历史\"，"
+                         + "你划的种植区、勾的 filter 都已经发生完了，只能靠前后对比推出来。",
+                };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message, stack = e.StackTrace };
+            }
+        }
+
+        [Tool("foodprobe/disable_autorun",
+            Description = "★ 关掉 mod 的**所有自动调度**（录制人类示范时必须关，否则分不清是谁干的）。")]
+        public object DisableAutorun(
+            [ToolParameter(Description = "false = 恢复自动调度")] bool disable = true)
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+
+            var results = new List<object>();
+            try
+            {
+                // 逐个设 `Enabled` 静态字段。
+                // ⚠ 这些字段**本来就有**（每个域都自带 `public static bool Enabled`），
+                //   所以我不用给 mod 加新方法 —— 通用地设一遍就行。
+                string[] targets = new string[]
+                {
+                    "FoodControlGameComponent", "FoodDomain", "StockpileDomain",
+                    "TemplateBuildDomain", "ShelterDomain",
+                };
+                for (int i = 0; i < targets.Length; i++)
+                {
+                    Type t = FindType(asm, targets[i]);
+                    if (t == null) { results.Add(new { target = targets[i], result = "找不到类型" }); continue; }
+
+                    var f = t.GetField("Enabled", ANY_STATIC);
+                    if (f != null && f.FieldType == typeof(bool))
+                    {
+                        f.SetValue(null, !disable);
+                        results.Add(new { target = targets[i] + ".Enabled", result = (!disable).ToString() });
+                    }
+                    else
+                    {
+                        results.Add(new { target = targets[i] + ".Enabled", result = "没有这个静态字段" });
+                    }
+                }
+
+                return new
+                {
+                    success = true,
+                    disable,
+                    results,
+                    note = "★ 录制人类示范前必须关掉它 —— 否则日志里会混入 mod 自己的行为，"
+                         + "分不清\"用户做的\"和\"mod 做的\"。"
+                         + "恢复用 disable=false。",
+                };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message, results };
+            }
+        }
+
+        [Tool("foodprobe/storage_groups",
+            Description = "★ 读**存储组**对象（游戏自带的结构：组名/成员/存储设置）。面向对象，非事件推断。只读。")]
+        public object StorageGroups()
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            try
+            {
+                var mgr = map.storageGroups;
+                if (mgr == null) return new { success = false, message = "map.storageGroups 为 null" };
+
+                var groups = new List<object>();
+                var src = mgr.StorageGroupsForReading;
+                if (src != null)
+                {
+                    foreach (StorageGroup g in src)
+                    {
+                        if (g == null) continue;
+
+                        // 成员（存储单位）—— 用户在意的"应用了这个组的存储单位、在哪"
+                        var members = new List<object>();
+                        try
+                        {
+                            if (g.members != null)
+                            {
+                                foreach (IStorageGroupMember m in g.members)
+                                {
+                                    if (m == null) continue;
+                                    string kind = m.GetType().Name;
+                                    var cells = new List<int[]>();
+                                    // 存储区：拿 cells；架子：拿 Position
+                                    try
+                                    {
+                                        var zone = m as Zone;
+                                        if (zone != null && zone.cells != null)
+                                        {
+                                            int n = 0;
+                                            foreach (IntVec3 c in zone.cells) { cells.Add(new int[] { c.x, c.z }); if (++n > 400) break; }
+                                        }
+                                        else
+                                        {
+                                            var th = m as Thing;
+                                            if (th != null) cells.Add(new int[] { th.Position.x, th.Position.z });
+                                        }
+                                    }
+                                    catch (Exception) { }
+                                    members.Add(new { kind, cells });
+                                }
+                            }
+                        }
+                        catch (Exception) { }
+
+                        // 组自己的存储设置（"承载的特定存储内容"）
+                        var allowed = new List<string>();
+                        var disallowed = new List<string>();
+                        try
+                        {
+                            StorageSettings ss = g.GetStoreSettings();
+                            if (ss != null && ss.filter != null)
+                            {
+                                string[] probes = new string[]
+                                {
+                                    "WoodLog", "Steel", "Silver", "Gold", "ComponentIndustrial",
+                                    "MealSimple", "MealFine", "Pemmican", "RawRice", "RawPotatoes",
+                                    "MedicineHerbal", "MedicineIndustrial",
+                                    "Corpse_Human", "ToxicWastepack",
+                                    "ApparelRatkin", "WeaponRifle",
+                                };
+                                for (int i = 0; i < probes.Length; i++)
+                                {
+                                    ThingDef d = DefDatabase<ThingDef>.GetNamedSilentFail(probes[i]);
+                                    if (d == null) continue;
+                                    bool ok = false;
+                                    try { ok = ss.filter.Allows(d); } catch (Exception) { }
+                                    if (ok) allowed.Add(probes[i]); else disallowed.Add(probes[i]);
+                                }
+                            }
+                        }
+                        catch (Exception) { }
+
+                        int cellCount = 0;
+                        try { cellCount = g.CellsList != null ? g.CellsList.Count : 0; } catch (Exception) { }
+
+                        groups.Add(new
+                        {
+                            loadID = g.loadID,
+                            label = g.RenamableLabel,
+                            renamableLabel = g.RenamableLabel,
+                            memberCount = g.MemberCount,
+                            cellCount,
+                            members,
+                            settings = new { allowed, disallowed },
+                        });
+                    }
+                }
+
+                return new
+                {
+                    success = true,
+                    groupCount = groups.Count,
+                    groups,
+                    note = "★ 这是游戏**自带的结构化对象**（`Verse.StorageGroupManager`），"
+                         + "不是我从事件里推断的。用户 2026-10-03 的原话："
+                         + "\"存储组一专门用来存储烹饪过的食物，那么它在游戏中肯定会存在一种"
+                         + "数据集合记录这个组，同时记录应用了这个组的存储单位、存储单位在哪\" —— "
+                         + "**就是这里**。\n"
+                         + "组名 `label` = 用户说的\"存储组一\"；`members` = 应用了这个组的存储单位；"
+                         + "`settings` = 这个组承载的存储内容。",
+                };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message, stack = e.StackTrace };
+            }
+        }
+
         [Tool("foodprobe/health", Description = "自检：FoodControl mod 加载了吗、内部类型和静态入口在不在。只读。")]
         public object Health()
         {
