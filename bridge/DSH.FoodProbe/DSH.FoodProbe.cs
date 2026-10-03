@@ -1651,6 +1651,9 @@ namespace DSH.FoodProbe
             var legend = new Dictionary<char, object>();
             var warnings = new List<string>();
             int empty = 0, wallN = 0, doorN = 0, furnitureN = 0, lightN = 0, roofedN = 0;
+            int skippedN = 0, ambiguousN = 0;
+            var skippedSamples = new List<string>();
+            var ambiguousSamples = new List<string>();
             var defsSeen = new Dictionary<string, int>();
 
             try
@@ -1683,6 +1686,28 @@ namespace DSH.FoodProbe
 
                                 char sym; int rank; string role;
                                 ClassifyBuilding(t, out sym, out rank, out role);
+
+                                // ⚠ 只有**真家具/真建筑**才配当槽位。
+                                //   刻意排除：
+                                //     - 非家具类的蓝图/框架（比如别人在盖的墙）
+                                //     - 被归成 'A'（未知家具）但其实是环境杂物的东西
+                                //   这些杂项单独计数（skipped），并写进警告 ——
+                                //   否则用户屋里的一块石头就会被当成"家具槽位"写进样板。
+                                bool isBpOrFrame = (t is Blueprint) || (t is Frame);
+                                if (sym == 'A' && isBpOrFrame)
+                                {
+                                    skippedN++;
+                                    if (skippedSamples.Count < 8)
+                                        skippedSamples.Add(t.def.defName + "@" + cx + "," + cz);
+                                    continue;
+                                }
+                                if (sym == 'A')
+                                {
+                                    // 未知家具**已建成**的也先记下来，但标成待确认
+                                    ambiguousN++;
+                                    if (ambiguousSamples.Count < 8)
+                                        ambiguousSamples.Add(t.def.defName + "@" + cx + "," + cz);
+                                }
 
                                 if (rank < bestRank)
                                 {
@@ -1784,6 +1809,13 @@ namespace DSH.FoodProbe
             if (doorN == 0) warnings.Add("没扫到门 —— 全封闭的房子小人进不去");
             if (furnitureN == 0 && lightN == 0) warnings.Add("没扫到家具/光源（可能还没放）");
             if (roofedN > 0) warnings.Add("这块区域里有 " + roofedN + " 格**有屋顶**（roof 只做统计，不进样板）");
+            if (skippedN > 0)
+                warnings.Add("跳过了 " + skippedN + " 个非家具蓝图/框架（" +
+                    string.Join(", ", skippedSamples.ToArray()) + "）—— 它们不该进样板");
+            if (ambiguousN > 0)
+                warnings.Add("⚠ 有 " + ambiguousN + " 个**认不出角色**的建筑被标成家具槽 A（" +
+                    string.Join(", ", ambiguousSamples.ToArray()) +
+                    "）—— 如果这些其实是环境杂物（石头/废墟），请把它们从 rows 里删掉");
 
             return new
             {
@@ -1798,15 +1830,21 @@ namespace DSH.FoodProbe
                     light = lightN,
                     empty,
                     roofedCells = roofedN,
+                    skippedNonFurnitureBlueprints = skippedN,
+                    ambiguousAsFurniture = ambiguousN,
                 },
                 rawRows,
                 trimmedRows = trimmed,
                 trim,
                 legend = legend.Values,
                 defsSeen,
+                skippedSamples,
+                ambiguousSamples,
                 warnings,
                 note = "rawRows = 你请求的矩形原样；trimmedRows = 裁到内容包围盒（这才是样板）。"
-                     + "代号：W 墙 / D 门 / B 床 / L 光源 / T 桌 / S 座 / E 储物 / C 工作台 / A 其他家具。",
+                     + "代号：W 墙 / D 门 / B 床 / L 光源 / T 桌 / S 座 / E 储物 / C 工作台 / A 其他家具。"
+                     + "⚠ A 是**认不出角色**的兜底 —— 扫完请核对 ambiguousSamples，"
+                     + "把环境杂物从 rows 里删掉。",
             };
         }
 
