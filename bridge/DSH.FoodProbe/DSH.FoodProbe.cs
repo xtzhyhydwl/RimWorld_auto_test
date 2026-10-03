@@ -584,6 +584,90 @@ namespace DSH.FoodProbe
             }
         }
 
+        [Tool("foodprobe/forbid_food",
+            Description = "★ 只禁取**食物物品**（用来造\"快断粮\"的验收场景）。返回改了几个、剩多少营养。会改地图。")]
+        public object ForbidFood(
+            [ToolParameter(Description = "目标：把可用食物营养降到这个值以下；默认 7.2（3人1.5天）")] double targetNutrition = 7.2,
+            [ToolParameter(Description = "最多禁几堆，默认 200")] int maxStacks = 200)
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            try
+            {
+                // 先数一下：现在可用的食物营养有多少
+                double allowedBefore = 0;
+                var candidates = new List<Thing>();
+
+                foreach (var t in map.listerThings.AllThings.ToList())
+                {
+                    if (t?.def == null) continue;
+                    if (t.def.category != ThingCategory.Item) continue;      // ★ 挡掉长在地里的植物
+                    if (!t.def.IsNutritionGivingIngestible) continue;
+                    var comp = t.TryGetComp<CompForbiddable>();
+                    if (comp == null) continue;
+
+                    double nutr = 0;
+                    try { nutr = t.GetStatValue(StatDefOf.Nutrition) * t.stackCount; }
+                    catch (Exception) { }
+
+                    if (!comp.Forbidden)
+                    {
+                        allowedBefore += nutr;
+                        candidates.Add(t);
+                    }
+                }
+
+                // 按"营养价值从大到小"禁 —— 这样能用最少的堆数达到目标
+                candidates.Sort((a, b) =>
+                {
+                    double na = 0, nb = 0;
+                    try { na = a.GetStatValue(StatDefOf.Nutrition) * a.stackCount; } catch (Exception) { }
+                    try { nb = b.GetStatValue(StatDefOf.Nutrition) * b.stackCount; } catch (Exception) { }
+                    return nb.CompareTo(na);
+                });
+
+                int changed = 0;
+                double allowedNow = allowedBefore;
+                var picked = new List<string>();
+
+                for (int i = 0; i < candidates.Count && changed < maxStacks; i++)
+                {
+                    if (allowedNow <= targetNutrition) break;
+                    Thing t = candidates[i];
+                    var comp = t.TryGetComp<CompForbiddable>();
+                    if (comp == null || comp.Forbidden) continue;
+
+                    double nutr = 0;
+                    try { nutr = t.GetStatValue(StatDefOf.Nutrition) * t.stackCount; }
+                    catch (Exception) { }
+
+                    comp.Forbidden = true;
+                    changed++;
+                    allowedNow -= nutr;
+                    if (picked.Count < 12) picked.Add(t.def.defName + "×" + t.stackCount + "(" + nutr.ToString("F1") + "营养)");
+                }
+
+                return new
+                {
+                    success = true,
+                    changed,
+                    allowedNutritionBefore = Math.Round(allowedBefore, 2),
+                    allowedNutritionAfter = Math.Round(allowedNow, 2),
+                    targetNutrition,
+                    picked,
+                    note = "★ 只动**食物物品**（`category == Item && IsNutritionGivingIngestible`），"
+                         + "按营养从大到小禁，用最少堆数达标。"
+                         + "（`forbid_some` 的 preferStuff 路径打不到食物上 —— 实测改了 8 个物品"
+                         + "但 forbiddenFoodNutrition 仍是 0，存粮一点没降。）",
+                };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = "forbid_food 失败：" + e.Message };
+            }
+        }
+
         [Tool("foodprobe/health", Description = "自检：FoodControl mod 加载了吗、内部类型和静态入口在不在。只读。")]
         public object Health()
         {

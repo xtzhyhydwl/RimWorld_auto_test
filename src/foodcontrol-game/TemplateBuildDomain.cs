@@ -191,7 +191,45 @@ namespace FoodControl.Game
                     return result;
                 }
 
-                // ⑦ 库存 → 角色解析（Core 纯逻辑）
+                // ⑦★ **建造前先算材料够不够**（用户 2026-10-03 指出的最糟失败方式）
+                //
+                // 用户原话：
+                //   「你造了一个 13×13，但是木头不够用，**所有人就卡在那了**……
+                //    其实**钢铁这个资源是够用的**。当时如果说就是在建造之前
+                //    **事先评估过这个材料够不够用**，那么可能就会**从木头转向钢铁**。」
+                //   「现在反而是**最糟糕的那种情况**，就是**材料不够也硬造**。」
+                //
+                // ★ 为什么必须**整栋先算**而不是逐格挑：
+                //   逐格挑的话，放第一格时木头够就选木头，放到第 30 格木头没了，
+                //   那格**还是会选木头**（只看"还剩多少"，不看"够不够整栋"）
+                //   → 半木半钢的壳子，或者干脆建不完 → 小人卡在建造上，别的活都不干。
+                //
+                // 不够就**不造**（宁可不动手，也不要放一堆永远建不完的蓝图占住材料）。
+                Dictionary<string, int> stuffAvailable = CountStuffAvailable(map);
+                var preference = new List<string> { "WoodLog", "Steel", "BlocksGranite", "BlocksSandstone", "BlocksMarble" };
+
+                // 成本按**角色**给（墙和门的 costStuffCount 可能不同）
+                Func<string, int> costPerCell = (roleName) =>
+                {
+                    try
+                    {
+                        ThingDef d = DefForRole(tpl, roleName);
+                        if (d != null && d.costStuffCount > 0) return d.costStuffCount;
+                    }
+                    catch (Exception) { }
+                    return 1;   // 保守：未知按 1
+                };
+
+                MaterialPlan matPlan = MaterialPlanner.Plan(tpl, costPerCell, stuffAvailable, preference);
+                if (!matPlan.CanBuild)
+                {
+                    result.Ok = true;
+                    result.DidWork = false;
+                    result.Summary = "★ 材料不够，**不造**（硬造会让小人卡在建造上）：" + matPlan.Reason;
+                    return result;
+                }
+
+                // ⑧ 库存 → 角色解析（Core 纯逻辑）
                 Dictionary<string, int> available = CountAvailableBuildables(map);
                 TemplatePlacement plan = TemplatePlacer.Plan(tpl, grid, siteX, siteZ, available, 0, false);
 
@@ -237,11 +275,23 @@ namespace FoodControl.Game
                     return result;
                 }
 
-                // ⑧ 真的放蓝图（逐格，复用 ShelterDomain 的放置纪律）
+                // ⑨ 真的放蓝图（逐格，复用 ShelterDomain 的放置纪律）
                 var report = new PlacementReport();
                 int placed = 0;
                 var materialUse = new Dictionary<string, int>();
                 int wallPlaced = 0, doorPlaced = 0, bedPlaced = 0, torchPlaced = 0;
+
+                // ★ 用**评估选定的那一种材料**，不再逐格重挑。
+                //   逐格挑正是"半木半钢/建不完"的成因（见 ⑦ 的注释）。
+                ThingDef plannedStuff = null;
+                if (!string.IsNullOrEmpty(matPlan.ChosenStuff))
+                {
+                    try { plannedStuff = DefDatabase<ThingDef>.GetNamedSilentFail(matPlan.ChosenStuff); }
+                    catch (Exception) { }
+                }
+                int stuffUsed = 0;
+                int stuffPerCell = 0;
+                try { stuffPerCell = plannedStuff != null ? plannedStuff.costStuffCount : 0; } catch (Exception) { }
 
                 for (int i = 0; i < plan.Blueprints.Count; i++)
                 {
@@ -255,13 +305,13 @@ namespace FoodControl.Game
                             continue;
                         }
 
-                        ThingDef stuff = PickStuffFor(map, def, bp.RoleName, available);
+                        // 需要材料的用**整栋选定的那一种**；成品家具传 null
+                        ThingDef stuff = bp.NeedsStuff ? plannedStuff : null;
                         var c = new IntVec3(bp.X, 0, bp.Z);
 
                         if (ShelterDomain.TryPlacePublic(map, def, c, Rot4.South, stuff, report))
                         {
                             placed++;
-                            // 分类计数（用 roleName，不靠 defName 猜）
                             if (bp.RoleName == "wall") wallPlaced++;
                             else if (bp.RoleName == "door") doorPlaced++;
                             else if (bp.RoleName == "bed") bedPlaced++;
@@ -271,6 +321,7 @@ namespace FoodControl.Game
                             {
                                 int u;
                                 materialUse[stuff.defName] = materialUse.TryGetValue(stuff.defName, out u) ? u + 1 : 1;
+                                stuffUsed += Math.Max(1, stuffPerCell);
                             }
                         }
                     }
@@ -343,10 +394,12 @@ namespace FoodControl.Game
                 result.Ok = true;
                 result.DidWork = placed > 0;
                 result.Summary = string.Format(
-                    "样板 {0} @({1},{2}) 基地距{3:F0}：计划 {4} 格 → 放下 {5} 格（墙{6}/门{7}/床{8}/灯{9}，未解决 {10}，蓝图回读 {11}，记账 {12}）",
+                    "样板 {0} @({1},{2}) 基地距{3:F0}：计划 {4} 格 → 放下 {5} 格（墙{6}/门{7}/床{8}/灯{9}，未解决 {10}，蓝图回读 {11}，记账 {12}）；材料评估 {13}（实耗 {14} 个 {15}）",
                     tpl.Id, siteX, siteZ, avgDist,
                     plan.Blueprints.Count, placed, wallPlaced, doorPlaced, bedPlaced, torchPlaced,
-                    plan.Unresolved.Count, seen, recorded);
+                    plan.Unresolved.Count, seen, recorded,
+                    matPlan.ToString(), stuffUsed,
+                    plannedStuff != null ? plannedStuff.defName : "无");
 
                 if (plan.Unresolved.Count > 0 && plan.Unresolved.Count <= 6)
                 {
@@ -561,6 +614,51 @@ namespace FoodControl.Game
                 }
             }
             return -1;
+        }
+
+        /// <summary>数"手上能用于建造的材料"：stuff defName → 数量（可搬运的）</summary>
+        public static Dictionary<string, int> CountStuffAvailable(Map map)
+        {
+            var counts = new Dictionary<string, int>();
+            if (map == null) return counts;
+            try
+            {
+                foreach (Thing t in map.listerThings.AllThings)
+                {
+                    try
+                    {
+                        if (t?.def == null) continue;
+                        if (t.def.category != ThingCategory.Item) continue;
+                        if (!t.def.IsStuff) continue;                      // ★ 只要"材料"
+                        if (t.IsForbidden(Faction.OfPlayer)) continue;     // 拿不到的不算
+                        int n;
+                        counts[t.def.defName] = counts.TryGetValue(t.def.defName, out n) ? n + t.stackCount : t.stackCount;
+                    }
+                    catch (Exception) { }
+                }
+            }
+            catch (Exception e)
+            {
+                try { Log.Warning("[FoodControl] CountStuffAvailable 失败：" + e.Message); } catch (Exception) { }
+            }
+            return counts;
+        }
+
+        /// <summary>按角色名找它在样板里对应的建筑 Def（取 accepts 首位）</summary>
+        public static ThingDef DefForRole(BuildTemplate tpl, string roleName)
+        {
+            if (tpl == null || string.IsNullOrEmpty(roleName)) return null;
+            foreach (var kv in tpl.Roles)
+            {
+                TemplateRole r = kv.Value;
+                if (r == null || r.Name != roleName) continue;
+                for (int i = 0; i < r.Accepts.Count; i++)
+                {
+                    ThingDef d = DefDatabase<ThingDef>.GetNamedSilentFail(r.Accepts[i]);
+                    if (d != null) return d;
+                }
+            }
+            return null;
         }
 
         /// <summary>

@@ -27,6 +27,7 @@ public static class CoreTests
         RunTemplatePlacerTests();
         RunTemplateReuseTests();
         RunRegistryTests();
+        RunMaterialTests();
 
         Console.WriteLine();
         Console.WriteLine(string.Format("=== 通过 {0} / 失败 {1} ===", _pass, _fail));
@@ -1594,6 +1595,110 @@ public static class CoreTests
 
         // ── 摘要 ──
         True("摘要里带栋数", reg.Summary().IndexOf("3 栋") >= 0, reg.Summary());
+    }
+
+    // ---------------- 建造前的材料评估 ----------------
+
+    private static void RunMaterialTests()
+    {
+        Console.WriteLine();
+        Console.WriteLine("-- MaterialPlanner（建造前材料评估）--");
+
+        BuildTemplate t = MakeSmallTemplate();     // 15 墙 + 1 门（都要材料）+ 床/光源（成品）
+        Func<string, int> cost = (role) => 5;
+        var pref = new List<string> { "WoodLog", "Steel", "BlocksGranite" };
+
+        // ── 1. 木头够 → 选木头 ──
+        {
+            var avail = new Dictionary<string, int> { { "WoodLog", 500 }, { "Steel", 1000 } };
+            MaterialPlan p = MaterialPlanner.Plan(t, cost, avail, pref);
+            Eq("★ 整栋需要 80（16 结构格 × 5）", p.NeededTotal, 80);
+            Eq("★★ 木头够 → 选木头（尊重首选顺序）", p.ChosenStuff, "WoodLog");
+            True("可以造", p.CanBuild);
+            Eq("结构格数 = 16", p.StructuralCells, 16);
+        }
+
+        // ── 2. ★★ 木头不够、钢够 → **转向钢**（用户要的核心行为）──
+        {
+            var avail = new Dictionary<string, int> { { "WoodLog", 50 }, { "Steel", 1000 } };
+            MaterialPlan p = MaterialPlanner.Plan(t, cost, avail, pref);
+            Eq("★★ 木头只有 50（需 80）→ 转向钢", p.ChosenStuff, "Steel");
+            True("可以造", p.CanBuild);
+            Eq("选中的钢需要 80", p.NeededTotal, 80);
+            Eq("钢有 1000", p.AvailableChosen, 1000);
+            bool woodShortShown = false;
+            for (int i = 0; i < p.Options.Count; i++)
+                if (p.Options[i].StuffDefName == "WoodLog" && p.Options[i].Short == 30)
+                    woodShortShown = true;
+            True("★ 诊断里写明木头缺 30", woodShortShown);
+        }
+
+        // ── 3. ★★ 都不够 → **不造**（"最糟糕的硬造"的对立面）──
+        {
+            var avail = new Dictionary<string, int>
+            {
+                { "WoodLog", 20 }, { "Steel", 30 }, { "BlocksGranite", 5 },
+            };
+            MaterialPlan p = MaterialPlanner.Plan(t, cost, avail, pref);
+            True("★★ 所有材料都不够 → ChosenStuff 为 null（不造）", !p.CanBuild);
+            True("★ 理由里带\"不造\"", p.Reason.IndexOf("不造") >= 0, p.Reason);
+            bool allShown = p.Reason.IndexOf("WoodLog") >= 0
+                && p.Reason.IndexOf("Steel") >= 0
+                && p.Reason.IndexOf("BlocksGranite") >= 0;
+            True("★ 理由里列出每种材料的缺口", allShown);
+        }
+
+        // ── 4/5. 边界：刚好够 / 差 1 个 ──
+        {
+            var just = new Dictionary<string, int> { { "WoodLog", 80 } };
+            Eq("★ 刚好 80 → 选木头（边界包含）",
+                MaterialPlanner.Plan(t, cost, just, pref).ChosenStuff, "WoodLog");
+
+            var oneLess = new Dictionary<string, int> { { "WoodLog", 79 } };
+            True("★ 79 < 80 → 不造（边界不含）",
+                !MaterialPlanner.Plan(t, cost, oneLess, pref).CanBuild);
+        }
+
+        // ── 6. ★★ 成本未知时按 1 算（保守），绝不能算成 0 ──
+        //
+        // 若把 0 采信 → 需要 0 → 永远"够" → **掩盖真实缺口** → 又变成"材料不够也硬造"。
+        {
+            Func<string, int> zeroCost = (role) => 0;
+            var exact = new Dictionary<string, int> { { "WoodLog", 16 } };
+            MaterialPlan p1 = MaterialPlanner.Plan(t, zeroCost, exact, pref);
+            Eq("★★ 未知成本按 1 算（16 格 → 需 16）", p1.NeededTotal, 16);
+            True("★ 恰好 16 可以造", p1.CanBuild);
+
+            var short1 = new Dictionary<string, int> { { "WoodLog", 15 } };
+            True("★★ 15 < 16 → 不造（没有被 0 成本蒙过去）",
+                !MaterialPlanner.Plan(t, zeroCost, short1, pref).CanBuild);
+        }
+
+        // ── 7. 边界：空输入不炸 ──
+        {
+            var empty = MaterialPlanner.Plan(t, cost, new Dictionary<string, int>(), pref);
+            True("没有任何材料 → 不造", !empty.CanBuild);
+            True("理由非空", empty.Reason.Length > 0, empty.Reason);
+
+            True("样板为 null → 不造",
+                !MaterialPlanner.Plan(null, cost, new Dictionary<string, int>(), pref).CanBuild);
+            True("材料表为 null → 不造（不炸）",
+                !MaterialPlanner.Plan(t, cost, null, pref).CanBuild);
+
+            var noStuff = MakeSmallTemplate();
+            foreach (var kv in new List<char>(noStuff.Roles.Keys))
+                noStuff.Roles[kv].NeedsStuff = false;
+            var p2 = MaterialPlanner.Plan(noStuff, cost, new Dictionary<string, int>(), pref);
+            True("★ 全是成品家具的样板 → 无需材料，可以造", p2.CanBuild);
+            Eq("无需材料时需要量为 0", p2.NeededTotal, 0);
+        }
+
+        // ── 8. 不传 preference 时用 available 的键（不炸）──
+        {
+            var avail = new Dictionary<string, int> { { "Steel", 1000 } };
+            Eq("没有首选顺序时也能选出够的那个",
+                MaterialPlanner.Plan(t, cost, avail, null).ChosenStuff, "Steel");
+        }
     }
 
     // ---------------- 工具 ----------------

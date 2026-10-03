@@ -186,10 +186,19 @@ async function main() {
 
         if (typeof days === 'number' && days <= 2.2) { ok = true; break; }
 
-        // 禁取一批可搬运物品（preferStuff=false → 优先动任意物品，包括食物）
-        const f = await call('foodprobe/forbid_some', { count: 25, preferStuff: false }).catch(() => null);
+        // ★ 必须用 `forbid_food`，不能用 `forbid_some`。
+        //
+        //   实测教训：`forbid_some` 带 `preferStuff:false` 时**打不到食物上** ——
+        //   它改了 8 个物品（totalForbidden 0→8），但 `forbiddenFoodNutrition` **仍然是 0**，
+        //   存粮一点没降。因为它的两遍挑选先挑建材、再挑"任意物品"，
+        //   而地图上任意物品（钢/银/零件）比食物多，挑不到食物。
+        //
+        //   没有这一步，验收就变成"验证了一个不吃紧的场景" —— 看起来"活下来了"，
+        //   其实是靠 11 天的存粮撑的，什么也没证明。
+        const f = await call('foodprobe/forbid_food', { targetNutrition: 7.2 }, 60000).catch(() => null);
+        log(`      forbid_food: changed=${f?.changed} 可用营养 ${f?.allowedNutritionBefore} → ${f?.allowedNutritionAfter}`);
         if ((f?.changed ?? 0) === 0) {
-          lastDetail += ' ｜ forbid_some 改不动了（可能没有可搬运物品）';
+          lastDetail += ' ｜ forbid_food 改不动了（可能地图上本来就没多少食物）';
           break;
         }
       }
@@ -205,6 +214,7 @@ async function main() {
     let advanced = 0;
     let nextSampleAt = sampleEvery;
     let stalls = 0;
+    let stallDiag = null;
 
     while (advanced < totalTicks && stalls < 20) {
       await clearForcePause();
@@ -215,7 +225,28 @@ async function main() {
       const dt = p?.advancedTicks ?? 0;
       advanced += dt;
 
-      if (dt === 0) stalls++; else stalls = 0;
+      if (dt === 0) {
+        stalls++;
+        // ★ 卡住时必须能说出**是什么挡着**（本项目的纪律：任何"没做成"都要能说为什么）。
+        //   我第一版只报"连续 20 次推进 0 tick"，完全不知道该关什么 —— 那种诊断等于没有。
+        if (stalls === 1 || stalls === 5 || stalls === 20) {
+          const ui = await call('rimworld/get_ui_state').catch(() => null);
+          stallDiag = {
+            stalls,
+            windowsForcePause: ui?.windowsForcePause,
+            programState: ui?.programState,
+            speed: ui?.speed,
+            paused: ui?.paused,
+            windows: (ui?.windows || []).map((w) => ({
+              type: w.type, forcePause: w.forcePause, id: w.id,
+            })),
+          };
+          log(`    ⚠ 卡住 #${stalls}：${JSON.stringify(stallDiag)}`);
+        }
+      } else {
+        stalls = 0;
+        stallDiag = null;
+      }
 
       while (advanced >= nextSampleAt && nextSampleAt <= totalTicks) {
         await sample(`+${(nextSampleAt / DAY_TICKS).toFixed(2)}天`);
@@ -229,7 +260,7 @@ async function main() {
 
     if (stalls >= 20) {
       record('推进过程没有卡死', false,
-        `连续 ${stalls} 次 play_for 推进 0 tick —— 检查是否又有 forcePause 窗口`);
+        `连续 ${stalls} 次 play_for 推进 0 tick —— 诊断：${JSON.stringify(stallDiag)}`);
     }
 
     // ── 4. 末帧 ──
