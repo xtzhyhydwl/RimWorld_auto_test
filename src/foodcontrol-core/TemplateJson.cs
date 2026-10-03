@@ -89,42 +89,23 @@ namespace FoodControl.Core
             return sb.ToString();
         }
 
+        /// <summary>
+        /// 转义字符串 → JSON 字面量。委托给 `SimpleJson`（建筑账本也要用，
+        /// 避免出现两份手写实现；重复实现这类逻辑是本项目出 bug 的主要来源）。
+        /// </summary>
         private static string Quote(string s)
         {
-            if (s == null) return "\"\"";
-            var sb = new StringBuilder(s.Length + 2);
-            sb.Append('"');
-            for (int i = 0; i < s.Length; i++)
-            {
-                char c = s[i];
-                switch (c)
-                {
-                    case '"': sb.Append("\\\""); break;
-                    case '\\': sb.Append("\\\\"); break;
-                    case '\n': sb.Append("\\n"); break;
-                    case '\r': sb.Append("\\r"); break;
-                    case '\t': sb.Append("\\t"); break;
-                    default:
-                        if (c < 0x20) sb.Append("\\u").Append(((int)c).ToString("x4"));
-                        else sb.Append(c);
-                        break;
-                }
-            }
-            sb.Append('"');
-            return sb.ToString();
+            return SimpleJson.Quote(s);
         }
 
         // ------------------------------------------------------------------
-        // 读（极简递归下降）
+        // 读（解析委托给 SimpleJson）
         // ------------------------------------------------------------------
 
         public static BuildTemplate Read(string json)
         {
             if (string.IsNullOrEmpty(json)) throw new ArgumentException("json 为空");
-            int pos = 0;
-            object root = ParseValue(json, ref pos);
-            SkipWs(json, ref pos);
-            if (pos < json.Length) throw new FormatException("JSON 结尾有多余内容，位置 " + pos);
+            object root = SimpleJson.Parse(json);
 
             var map = root as Dictionary<string, object>;
             if (map == null) throw new FormatException("顶层不是对象");

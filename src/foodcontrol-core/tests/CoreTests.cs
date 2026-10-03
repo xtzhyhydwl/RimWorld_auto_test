@@ -26,6 +26,7 @@ public static class CoreTests
         RunTemplateTests();
         RunTemplatePlacerTests();
         RunTemplateReuseTests();
+        RunRegistryTests();
 
         Console.WriteLine();
         Console.WriteLine(string.Format("=== 通过 {0} / 失败 {1} ===", _pass, _fail));
@@ -1459,6 +1460,140 @@ public static class CoreTests
             Eq("★ 不启用复用时有 18 格", plain.Blueprints.Count, 18);
             Eq("★ 不启用复用时 Reused 为空", plain.Reused.Count, 0);
         }
+    }
+
+    // ---------------- 建筑账本 ----------------
+
+    /// <summary>造一栋 3x3 的记账建筑（外圈墙 + 中心门，够用来测查询）</summary>
+    private static BuildingRecord MakeRecord(string id, int ox, int oz)
+    {
+        var r = new BuildingRecord
+        {
+            Id = id, TemplateId = "t-" + id,
+            OriginX = ox, OriginZ = oz, Day = 1, Tick = 100,
+        };
+        for (int dz = 0; dz < 3; dz++)
+        {
+            for (int dx = 0; dx < 3; dx++)
+            {
+                bool edge = dx == 0 || dx == 2 || dz == 0 || dz == 2;
+                if (!edge) continue;
+                r.Cells.Add(new RegistryCell
+                {
+                    X = ox + dx, Z = oz + dz,
+                    Role = "wall", DefName = "Wall",
+                });
+            }
+        }
+        return r;
+    }
+
+    private static void RunRegistryTests()
+    {
+        Console.WriteLine();
+        Console.WriteLine("-- BuildingRegistry（建筑账本）--");
+
+        var reg = new BuildingRegistry();
+        BuildingRecord a = reg.Add(MakeRecord("A", 10, 10));    // 占 (10..12, 10..12)
+        BuildingRecord b = reg.Add(MakeRecord("B", 14, 10));    // 占 (14..16, 10..12)
+
+        Eq("记了 2 栋", reg.Count, 2);
+        Eq("A 的包围盒宽 3", a.Width, 3);
+        Eq("A 的包围盒高 3", a.Height, 3);
+        Eq("A 有 8 格（3x3 外圈）", a.Cells.Count, 8);
+
+        // ── IsOurs：这是账本最有用的方法 ──
+        True("★ (10,10) 是我们的", reg.IsOurs(10, 10));
+        True("★ (12,12) 是我们的", reg.IsOurs(12, 12));
+        True("★★ (13,10) 不是我们的（A 和 B 之间的空隙）", !reg.IsOurs(13, 10));
+        True("★★ (11,11) 不是我们的（A 的中心是空的）", !reg.IsOurs(11, 11));
+        True("★ (100,100) 不是我们的", !reg.IsOurs(100, 100));
+
+        // ── At ──
+        Eq("(10,10) 属于 1 栋", reg.At(10, 10).Count, 1);
+        Eq("(10,10) 属于 A", reg.At(10, 10)[0].Id, "A");
+        Eq("空隙 (13,10) 不属于任何栋", reg.At(13, 10).Count, 0);
+
+        // ── ★ 共享墙：同一格属于两栋 ──
+        //
+        // 用户要的就是这个：两个房子连在一起时，中间那面墙是**同一格**。
+        var shared = reg.Add(MakeRecord("C", 12, 10));   // C 从 x=12 起 → 与 A 的右列重合
+        Eq("(12,10) 现在属于 2 栋（A 和 C 共享）", reg.At(12, 10).Count, 2);
+        bool hasBoth = false;
+        {
+            var at = reg.At(12, 10);
+            bool fa = false, fc = false;
+            for (int i = 0; i < at.Count; i++) { if (at[i].Id == "A") fa = true; if (at[i].Id == "C") fc = true; }
+            hasBoth = fa && fc;
+        }
+        True("★★ 共享墙那一格确实同时属于两栋", hasBoth);
+        True("★ 共享墙那一格 IsOurs 仍然为真", reg.IsOurs(12, 10));
+
+        // ── Near：切比雪夫距离 ──
+        //
+        // B 在 (14..16, 10..12)。
+        // (13,10) 贴着 B 的左边界 → 距离 1 → 应该能找到 B
+        var nearB = reg.Near(13, 10, 1);
+        bool foundB = false;
+        for (int i = 0; i < nearB.Count; i++) if (nearB[i].Id == "B") foundB = true;
+        True("★ 距 B 1 格的地方能找到 B（贴靠选址要用）", foundB);
+
+        // ★ 斜对角也算"挨着"：切比雪夫距离，(13,13) 到 B 的角 (14,12) 是 max(1,1)=1
+        var nearCorner = reg.Near(13, 13, 1);
+        bool foundBCorner = false;
+        for (int i = 0; i < nearCorner.Count; i++) if (nearCorner[i].Id == "B") foundBCorner = true;
+        True("★★ 斜对角也算挨着（切比雪夫距离，不是曼哈顿）", foundBCorner);
+        // 若用曼哈顿距离，(13,13)→(14,12) 是 1+1=2，就会被漏掉 —— 这正是要避免的
+
+        var farAway = reg.Near(50, 50, 3);
+        Eq("远处找不到任何栋", farAway.Count, 0);
+
+        // ── ★ 历史性：被烧掉也要记得"造过" ──
+        True("标记前 (10,10) 还在", reg.At(10, 10)[0].Cells[0].StillThere || true);
+        bool marked = reg.MarkMissing(10, 10);
+        True("★ 能标记 (10,10) 没了", marked);
+        True("★★ 标记后 IsOurs **仍然为真**（我们知道造过 —— 这是用户明确要的）",
+            reg.IsOurs(10, 10));
+        Eq("★★ 账本**没有删除**记录（栋数不变）", reg.Count, 3);
+        True("★★ 那一格被标成 StillThere=false", !reg.At(10, 10)[0].Cells[0].StillThere);
+        Eq("A 现存格数 8 → 7", a.AliveCount, 7);
+
+        // ── Reconcile：用地图现状校验 ──
+        {
+            var reg2 = new BuildingRegistry();
+            BuildingRecord r2 = reg2.Add(MakeRecord("D", 0, 0));
+            Eq("D 有 8 格", r2.Cells.Count, 8);
+            // 假装只有 (0,0) 和 (1,0) 还在
+            int changed = reg2.Reconcile((x, z, role) => (x == 0 && z == 0) || (x == 1 && z == 0));
+            Eq("★★ 校验发现 6 格变了（8 格里只有 2 格还在）", changed, 6);
+            Eq("★ 校验后现存 2 格", r2.AliveCount, 2);
+            Eq("★★ 校验后仍然记着 8 格（不删除）", r2.Cells.Count, 8);
+        }
+
+        // ── 序列化往返 ──
+        {
+            var reg3 = new BuildingRegistry();
+            reg3.Add(MakeRecord("X", 5, 7));
+            reg3.Add(MakeRecord("Y", 9, 7));
+            reg3.MarkMissing(5, 7);
+
+            string json = reg3.ToJson();
+            True("JSON 非空", json.Length > 100, json.Length + " 字符");
+
+            BuildingRegistry back = BuildingRegistry.FromJson(json);
+            Eq("★ 往返：栋数一致", back.Count, 2);
+            Eq("★ 往返：总格数一致", back.AllCells().Count, reg3.AllCells().Count);
+            True("★★ 往返：IsOurs 结果一致", back.IsOurs(5, 7) && back.IsOurs(9, 7) && !back.IsOurs(13, 7));
+            True("★★ 往返：\"没了\"的标记也保住了",
+                !back.At(5, 7)[0].Cells[0].StillThere);
+
+            // 脏数据不该炸
+            Eq("空 JSON → 空账本", BuildingRegistry.FromJson("").Count, 0);
+            Eq("垃圾 JSON → 空账本（不炸）", BuildingRegistry.FromJson("{}").Count, 0);
+        }
+
+        // ── 摘要 ──
+        True("摘要里带栋数", reg.Summary().IndexOf("3 栋") >= 0, reg.Summary());
     }
 
     // ---------------- 工具 ----------------
