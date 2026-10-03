@@ -264,12 +264,29 @@ namespace FoodControl.Game
 
                 result.Ok = true;
                 result.DidWork = built.Count > 0 && !(built.Count == 1 && built[0].StartsWith("（"));
+
+                // ★ 摘要必须带**每个簇的实况**。
+                //   我吃过教训：只报"没有达标的"会让人完全不知道该调什么 ——
+                //   而 Score 在 Area 过大/过小时会返回 -Infinity，两种原因看起来一模一样。
+                var clusterInfo = new List<string>();
+                for (int i = 0; i < clusters.Count && i < 6; i++)
+                {
+                    StockpileCluster c = clusters[i];
+                    if (c == null) { clusterInfo.Add("#" + i + "=null"); continue; }
+                    clusterInfo.Add(string.Format("#{0}[格{1} 基地距{2:F0} 填充{3:F2} 分{4:F0}]",
+                        i, c.Area, c.AvgDistanceToBase, c.FillRatio,
+                        double.IsNegativeInfinity(c.Score) ? -99999 : c.Score));
+                }
+
                 result.Summary = built.Count > 0
-                    ? string.Format("储藏区：{0}（候选 {1} 格 / {2} 个簇，可用 {3} 个）",
+                    ? string.Format("储藏区：{0}（候选 {1} 格 / {2} 个簇，可用 {3} 个；簇实况 {4}）",
                         string.Join(" / ", built.ToArray()),
-                        candidates.Count, clusters.Count, usable.Count)
-                    : string.Format("看了 {0} 个候选格 / {1} 个簇，但没有达标的（不动手）",
-                        candidates.Count, clusters.Count);
+                        candidates.Count, clusters.Count, usable.Count,
+                        string.Join(" ", clusterInfo.ToArray()))
+                    : string.Format("看了 {0} 个候选格 / {1} 个簇，但没有达标的（上限 {2} 格，下限 {3} 格）；簇实况：{4}",
+                        candidates.Count, clusters.Count,
+                        opts.MaxCellsPerCluster, opts.MinCellsPerCluster,
+                        string.Join(" ", clusterInfo.ToArray()));
             }
             catch (Exception e)
             {

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace FoodControl.Core
@@ -349,9 +349,70 @@ namespace FoodControl.Core
 
                 if (cluster.Cells.Count == 0) continue;
 
-                cluster.MinX = minX; cluster.MaxX = maxX;
-                cluster.MinZ = minZ; cluster.MaxZ = maxZ;
-                cluster.AvgDistanceToBase = distSum / cluster.Cells.Count;
+                // ★★ 把 `MaxCellsPerCluster` 从"否决条件"变成**真正的约束**。
+                //
+                // 这是一个真 bug（游戏里抓出来的）：原来 `MaxCellsPerCluster` **只**在
+                // `Score()` 里当否决条件用 —— K-means 把 25000 个候选分成 3 簇
+                // （每簇约 8400 格），全部 > 400 被否决 → **一个区都建不出来**，
+                // 摘要只说"没有达标的"，完全看不出原因。
+                // （历史上还出现过"建出 7001 格和 8055 格两个区"，也是同一个根因。）
+                //
+                // 正确做法：**先截断到上限，再计算 Area/Score** —— 按"资源权重"
+                // 取最值钱的格（权重高的地方本来就更该放储藏区）。
+                if (cluster.Cells.Count > opts.MaxCellsPerCluster && opts.MaxCellsPerCluster > 0)
+                {
+                    // 权重是按"候选格"存的（usable[i].ResourceWeight），不是按索引的数组，
+                    // 所以先建一个 索引 → 权重 的查找表。
+                    var wByIndex = new Dictionary<int, double>(usable.Count);
+                    for (int i = 0; i < usable.Count; i++)
+                    {
+                        if (usable[i] == null) continue;
+                        wByIndex[usable[i].CellIndex] = usable[i].ResourceWeight;
+                    }
+
+                    var scored = new List<KeyValuePair<int, double>>(cluster.Cells.Count);
+                    for (int i = 0; i < cluster.Cells.Count; i++)
+                    {
+                        int idx = cluster.Cells[i];
+                        double w;
+                        if (!wByIndex.TryGetValue(idx, out w)) w = 0;
+                        scored.Add(new KeyValuePair<int, double>(idx, w));
+                    }
+                    // 权重高的优先；同权重时按索引稳定排序（保证结果可复现）
+                    scored.Sort((a, b) =>
+                    {
+                        int c = b.Value.CompareTo(a.Value);
+                        return c != 0 ? c : a.Key.CompareTo(b.Key);
+                    });
+
+                    var kept = new List<int>(opts.MaxCellsPerCluster);
+                    for (int i = 0; i < opts.MaxCellsPerCluster && i < scored.Count; i++)
+                        kept.Add(scored[i].Key);
+
+                    kept.Sort();
+                    cluster.Cells = kept;
+                }
+
+                // 截断后要**重新**算这些量（否则算的是截断前的簇）
+                double distSum2 = 0;
+                int minX2 = int.MaxValue, maxX2 = int.MinValue, minZ2 = int.MaxValue, maxZ2 = int.MinValue;
+                for (int i = 0; i < cluster.Cells.Count; i++)
+                {
+                    int idx = cluster.Cells[i];
+                    if (idx < 0 || idx >= distField.Length) continue;
+                    distSum2 += distField[idx];
+
+                    int x = idx % mapWidth;
+                    int z = idx / mapWidth;
+                    if (x < minX2) minX2 = x;
+                    if (x > maxX2) maxX2 = x;
+                    if (z < minZ2) minZ2 = z;
+                    if (z > maxZ2) maxZ2 = z;
+                }
+
+                cluster.MinX = minX2; cluster.MaxX = maxX2;
+                cluster.MinZ = minZ2; cluster.MaxZ = maxZ2;
+                cluster.AvgDistanceToBase = cluster.Cells.Count > 0 ? distSum2 / cluster.Cells.Count : 0;
                 // 松散度用"包围盒面积 − 实际格数"当代理指标：
                 // 0 = 完美矩形，越大越散布。
                 cluster.Compactness = cluster.BBoxArea - cluster.Cells.Count;

@@ -571,6 +571,52 @@ public static class CoreTests
                 + " vs 远者分 " + (c0.AvgDistanceToBase < c1.AvgDistanceToBase ? c1.Score : c0.Score).ToString("F1"));
         }
 
+        // ── ★★ 回归：`MaxCellsPerCluster` 必须被**真正约束**，不能只当否决条件 ──
+        //
+        // 这是游戏里抓出来的真 bug：原来 `MaxCellsPerCluster` **只**在 `Score()` 里
+        // 当否决条件用 —— K-means 把两万多个候选分成 3 簇（每簇约 8400 格），
+        // 全部 > 400 被否决 → **一个储藏区都建不出来**，而摘要只说"没有达标的"。
+        // （历史上"建出 7001 格和 8055 格两个区"也是同一个根因。）
+        //
+        // 场景设计：给远超上限的一大片候选，断言产出的簇**每个都不超过上限**。
+        {
+            const int W2 = 200, H2 = 200;
+            double[] d2 = MakeDistField(W2, H2, 100, 100);
+            var opts2 = new StockpilePlannerOptions
+            {
+                ClusterCount = 2,
+                MaxDistanceFromBase = 400,
+                MinCellsPerCluster = 9,
+                MaxCellsPerCluster = 50,        // 故意设小，便于断言
+            };
+
+            // 铺一大片候选（40×40 = 1600 格，远超 50 的上限）
+            var bigCands = new List<StockpileCandidate>();
+            for (int x = 80; x < 120; x++)
+                for (int z = 80; z < 120; z++)
+                    bigCands.Add(new StockpileCandidate { CellIndex = z * W2 + x, ResourceWeight = 1 });
+
+            List<StockpileCluster> big = StockpilePlanner.Plan(d2, bigCands, W2, opts2);
+            True("★★ 候选远超上限时仍能产出簇（不是全被否决）", big.Count > 0,
+                "产出 " + big.Count + " 个簇");
+
+            bool allCapped = true;
+            int maxSeen = 0;
+            for (int i = 0; i < big.Count; i++)
+            {
+                int area = big[i].Area;
+                if (area > maxSeen) maxSeen = area;
+                if (area > opts2.MaxCellsPerCluster) allCapped = false;
+            }
+            True("★★ 每个簇的格数都不超过 MaxCellsPerCluster（真的被约束了）", allCapped,
+                "最大簇 " + maxSeen + " 格，上限 " + opts2.MaxCellsPerCluster);
+
+            bool finite = true;
+            for (int i = 0; i < big.Count; i++)
+                if (double.IsNegativeInfinity(big[i].Score) || double.IsInfinity(big[i].Score)) finite = false;
+            True("★★ 截断后评分是有限值（不再因为\"太大\"被否成 -Infinity）", finite);
+        }
+
         // ── 边界：空输入 ──
         Eq("空候选 → 返回空列表",
             StockpilePlanner.Plan(dist, new List<StockpileCandidate>(), W, opts).Count, 0);
