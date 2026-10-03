@@ -36,6 +36,27 @@ namespace FoodControl.Core
         /// <summary>是不是家具（放室内，不参与封闭性）</summary>
         public bool IsFurniture;
 
+        // ------------------------------------------------------------------
+        // 语义层（2026-10-03 新增）
+        //
+        // 上面那三个 bool 只够表达"这格能不能复用"，表达不了
+        // **"这是什么用途、该放几个、第几个放"**。现在补上这三个维度，
+        // 而且是**可选字段**：老样板 JSON 没有它们 → 默认 Unknown
+        // → 由 `SlotSemanticsResolver` 去注册表/旧字段兜底。
+        // 详见 `TemplateSemantics.cs` 与 `docs/样板语义层-设计.md`。
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 这个槽位的用途类别。`Unknown` = **没声明**（交给解析器判，不要在这里猜）。
+        /// </summary>
+        public SlotKind Kind = SlotKind.Unknown;
+
+        /// <summary>放几个。默认 `Fixed` = 照样板放满</summary>
+        public SlotCountPolicy CountPolicy = SlotCountPolicy.Fixed;
+
+        /// <summary>比例（仅 `PerColonistRatio` 用）</summary>
+        public double CountRatio = 1.0;
+
         /// <summary>
         /// 这个建筑**要不要建造材料（stuff）**。
         ///
@@ -106,6 +127,9 @@ namespace FoodControl.Core
                 IsDoorLike = IsDoorLike,
                 IsFurniture = IsFurniture,
                 NeedsStuff = NeedsStuff,
+                Kind = Kind,
+                CountPolicy = CountPolicy,
+                CountRatio = CountRatio,
             };
         }
     }
@@ -219,20 +243,42 @@ namespace FoodControl.Core
         /// 返回空列表 = 通过；否则是错误说明。
         /// 这一步很重要：样板是**手写/导出的**，可能写错，
         /// 而"抄一个坏样板"会盖出莫名其妙的房子。
+        ///
+        /// ⚠ 这个重载**只返回错误**（老调用方在用）。要同时拿到警告用 `ValidateDetailed()`。
         /// </summary>
         public List<string> Validate()
         {
-            var errs = new List<string>();
+            return ValidateDetailed(null).Errors;
+        }
+
+        /// <summary>
+        /// **带严重级别**的校验：错误（错误到不能抄）与警告（能抄，但值得看一眼）分开。
+        ///
+        /// ## 为什么必须分级（用户纠正过一次）
+        ///
+        /// 原来"没有任何门"被当成**错误**。但用户 2026-10-03 明确说
+        /// 「**门造不造其实无所谓**」—— 决定"房子成不成立"的是**墙**，门只是通路。
+        /// 把可选的东西判成致命错误，会让一个**完全能用的样板**被拒之门外，
+        /// 而且错误信息读起来像是"这样板是坏的"，与实际不符。
+        ///
+        /// 判据因此定死为：
+        ///   - **错**：抄了会出问题（尺寸空、代号没定义、`Accepts` 为空、没有墙）
+        ///   - **警**：抄了能用，但值得知道（没有门、某些角色说不清用途、定义了没用到）
+        /// </summary>
+        public TemplateValidation ValidateDetailed(SlotSemanticRegistry registry)
+        {
+            var errors = new List<string>();
+            var warnings = new List<string>();
             NormalizeSize();
 
             if (Width <= 0 || Height <= 0)
             {
-                errs.Add("尺寸为空（Rows 没有内容）");
-                return errs;
+                errors.Add("尺寸为空（Rows 没有内容）");
+                return new TemplateValidation(errors, warnings, this);
             }
             if (Width > 120 || Height > 120)
             {
-                errs.Add("尺寸过大（" + Width + "x" + Height + "），样板不该超过 120");
+                errors.Add("尺寸过大（" + Width + "x" + Height + "），样板不该超过 120");
             }
 
             // 行长是否一致
@@ -244,14 +290,14 @@ namespace FoodControl.Core
                 {
                     int len = Rows[z] == null ? 0 : Rows[z].Length;
                     if (len != Width)
-                        errs.Add("第 " + z + " 行长度 " + len + " != 宽度 " + Width);
+                        errors.Add("第 " + z + " 行长度 " + len + " != 宽度 " + Width);
                 }
             }
             else
             {
                 for (int z = 0; z < Rows.Count; z++)
                 {
-                    if (Rows[z] == null) errs.Add("第 " + z + " 行是 null");
+                    if (Rows[z] == null) errors.Add("第 " + z + " 行是 null");
                 }
             }
 
@@ -271,11 +317,11 @@ namespace FoodControl.Core
                     TemplateRole r;
                     if (!Roles.TryGetValue(c, out r))
                     {
-                        errs.Add("用了代号 '" + c + "' 但 Roles 里没有定义");
+                        errors.Add("用了代号 '" + c + "' 但 Roles 里没有定义");
                         continue;
                     }
                     if (r.Accepts == null || r.Accepts.Count == 0)
-                        errs.Add("角色 '" + c + "' 没有可接受的 Def（Accepts 为空）");
+                        errors.Add("角色 '" + c + "' 没有可接受的 Def（Accepts 为空）");
                     if (r.IsWallLike) wallLike++;
                     if (r.IsDoorLike) doorLike++;
                     if (r.IsFurniture) furniture++;
@@ -286,13 +332,29 @@ namespace FoodControl.Core
             foreach (KeyValuePair<char, TemplateRole> kv in Roles)
             {
                 if (!used.Contains(kv.Key))
-                    errs.Add("角色 '" + kv.Key + "' 定义了但没用到（可清理）");
+                    warnings.Add("角色 '" + kv.Key + "' 定义了但没用到（可清理）");
             }
 
-            if (wallLike == 0) errs.Add("没有任何墙类格 —— 这不像一间房");
-            if (doorLike == 0) errs.Add("没有任何门 —— 全封闭的房子小人进不去");
+            // 墙还是必须的：没有墙就没有"房子"，这是结构性的
+            if (wallLike == 0) errors.Add("没有任何墙类格 —— 这不像一间房");
 
-            return errs;
+            // ⚠ 门是**警告**不是错误（用户原话：「门造不造其实无所谓」）
+            if (doorLike == 0)
+                warnings.Add("没有任何门 —— 房子会完全封闭，小人进不去（用户认为门可以先不造，"
+                    + "所以只记警告；但真盖出来之前记得补门）");
+
+            // 语义说不清的角色 → 警告（不许猜，但要显式提出来）
+            if (registry != null)
+            {
+                List<string> unresolved = UnresolvedSemanticRoles(registry);
+                if (unresolved.Count > 0)
+                {
+                    warnings.Add("有 " + unresolved.Count + " 个角色的**用途说不清**（建造顺序会排到最后）："
+                        + string.Join("；", unresolved.ToArray()));
+                }
+            }
+
+            return new TemplateValidation(errors, warnings, this);
         }
 
         /// <summary>
@@ -310,22 +372,36 @@ namespace FoodControl.Core
             return cur;
         }
 
-        private BuildTemplate Rotated90()
+        /// <summary>
+        /// **造一个空壳副本**（Id/Name/标签/开关/角色表都拷过去，`Rows` 留空由调用方填）。
+        ///
+        /// 为什么单独提出来：`Rotated90()` 和 `Mirrored()` 原来各自抄了一遍
+        /// 这段"拷贝元数据 + 克隆角色表"（约 15 行 × 2）。这类重复的危险是
+        /// **加字段时只改一处** —— 比如上面新增的 `Kind`/`CountPolicy`，
+        /// 漏掉的那个变换就会**把语义丢掉**，而且不报错。
+        /// </summary>
+        private BuildTemplate EmptyShell(int width, int height)
         {
-            NormalizeSize();
             var outp = new BuildTemplate
             {
                 Id = Id,
                 Name = Name,
                 Origin = Origin,
-                Width = Height,
-                Height = Width,
+                Width = width,
+                Height = height,
                 Tags = new List<string>(Tags),
                 Rotatable = Rotatable,
                 Mirrorable = Mirrorable,
             };
             foreach (KeyValuePair<char, TemplateRole> kv in Roles)
                 outp.Roles[kv.Key] = kv.Value.Clone();
+            return outp;
+        }
+
+        private BuildTemplate Rotated90()
+        {
+            NormalizeSize();
+            BuildTemplate outp = EmptyShell(Height, Width);   // 旋转后宽高对调
 
             // 顺时针 90°：(x, z) -> (H-1-z, x)
             var newRows = new char[Width][];        // 新的高 = 旧宽
@@ -352,19 +428,7 @@ namespace FoodControl.Core
         public BuildTemplate Mirrored()
         {
             NormalizeSize();
-            var outp = new BuildTemplate
-            {
-                Id = Id,
-                Name = Name,
-                Origin = Origin,
-                Width = Width,
-                Height = Height,
-                Tags = new List<string>(Tags),
-                Rotatable = Rotatable,
-                Mirrorable = Mirrorable,
-            };
-            foreach (KeyValuePair<char, TemplateRole> kv in Roles)
-                outp.Roles[kv.Key] = kv.Value.Clone();
+            BuildTemplate outp = EmptyShell(Width, Height);
 
             for (int z = 0; z < Height; z++)
             {
@@ -412,6 +476,84 @@ namespace FoodControl.Core
             }
             return string.Format("{0} [{1}] {2}x{3}：{4}",
                 Id, Origin, Width, Height, string.Join(", ", parts.ToArray()));
+        }
+
+        /// <summary>
+        /// **每个角色解析出来的语义**（代号 → 语义）—— 与几何无关的那一层。
+        ///
+        /// 纯查询，不改样板。要"改"语义请直接改 `Roles[sym].Kind` 等字段。
+        /// </summary>
+        public Dictionary<char, SlotSemantics> RoleSemantics(SlotSemanticRegistry registry)
+        {
+            var map = new Dictionary<char, SlotSemantics>();
+            foreach (KeyValuePair<char, TemplateRole> kv in Roles)
+                map[kv.Key] = SlotSemanticsResolver.Resolve(kv.Value, registry);
+            return map;
+        }
+
+        /// <summary>
+        /// **语义自检**：哪些角色的用途说不清？
+        ///
+        /// 返回空列表 = 每个角色都能说出"这是什么"。
+        /// 这就是那条铁律的落地：**说不出来就要显式说出来**，
+        /// 而不是默默把它当成餐桌（`ChessTable` 那次就是这么错的）。
+        /// </summary>
+        public List<string> UnresolvedSemanticRoles(SlotSemanticRegistry registry)
+        {
+            var outp = new List<string>();
+            foreach (KeyValuePair<char, TemplateRole> kv in Roles)
+            {
+                SlotSemantics s = SlotSemanticsResolver.Resolve(kv.Value, registry);
+                if (s.Kind == SlotKind.Unknown)
+                    outp.Add(string.Format("{0}({1})：{2}", kv.Key, kv.Value.Name, s.Why));
+            }
+            return outp;
+        }
+    }
+
+    /// <summary>
+    /// **样板校验结果**：错误与警告**分开**（见 `BuildTemplate.ValidateDetailed`）。
+    ///
+    /// 分的理由不是"好看"，是**会拦住能用的样板**：
+    /// 用户明确说「门造不造其实无所谓」，把没门判成致命错误，
+    /// 会让一个完全能用的样板被拒，而且错误信息读起来像"这样板是坏的"。
+    /// </summary>
+    public sealed class TemplateValidation
+    {
+        public readonly List<string> Errors;
+        public readonly List<string> Warnings;
+
+        /// <summary>每种角色各有几格（结构/睡眠/…的规模，遥测与材料估算用）</summary>
+        public readonly Dictionary<string, int> CellsByRole;
+
+        public TemplateValidation(List<string> errors, List<string> warnings, BuildTemplate tpl)
+        {
+            Errors = errors ?? new List<string>();
+            Warnings = warnings ?? new List<string>();
+            CellsByRole = new Dictionary<string, int>();
+            if (tpl != null)
+            {
+                Dictionary<string, int> raw = tpl.CountByRole();
+                foreach (KeyValuePair<string, int> kv in raw)
+                {
+                    TemplateRole r;
+                    string name = tpl.Roles.TryGetValue(kv.Key[0], out r) ? r.Name : kv.Key;
+                    if (string.IsNullOrEmpty(name)) name = kv.Key;
+                    int n;
+                    CellsByRole[name] = CellsByRole.TryGetValue(name, out n) ? n + kv.Value : kv.Value;
+                }
+            }
+        }
+
+        public bool Ok
+        {
+            get { return Errors.Count == 0; }
+        }
+
+        public override string ToString()
+        {
+            return string.Format("校验：{0}（错误 {1} / 警告 {2}）",
+                Ok ? "通过" : "不通过", Errors.Count, Warnings.Count);
         }
     }
 }

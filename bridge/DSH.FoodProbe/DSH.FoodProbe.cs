@@ -1170,31 +1170,38 @@ namespace DSH.FoodProbe
         ///
         /// 为什么手写：探针**不引用 Core**（独立程序集），拿不到 `SimpleJson`。
         /// 而这里只需要这一种格式，手写比引入依赖简单。
+        ///
+        /// ★ 修过的一个真 bug（2026-10-03）：上一版是「找 `[` → 找最近的 `]` → 中间按逗号切两段」。
+        ///   对**嵌套** JSON（正是本文档所写的 `[[x,z],[x,z],...]`）它会这样：
+        ///     外层 `[` → 到第一个 `]` 之间是 `[150,150` → 切成 `["[150","150"]`
+        ///     → `int.TryParse("[150")` **失败** → 第一对坐标被**静默丢掉**；
+        ///     然后从第一个 `]` 之后继续，才解析出第二对 `[155,150]`。
+        ///   结果：传 2 个坐标只放下 1 个（实测 `count:1`，且返回的 x 是**第二**个）。
+        ///   → 上一轮"实验只跑了一半"的根因就是它，不是游戏行为。
+        ///   这正是铁律「**任何"没做成"的分支都必须能说出为什么**」的又一例：
+        ///   老版本什么都没说，还返回 `success:true`。
+        ///
+        /// 新做法：把所有 `[` `]` 换成空格，剩下 `x,z,x,z,...`，按顺序每两个数字配一对。
+        /// （对 `[[1,2],[3,4]]` → 得到 (1,2)、(3,4)，与文档格式一致。）
         /// </summary>
         private static List<int[]> ParseCellPairs(string s)
         {
             var result = new List<int[]>();
             if (string.IsNullOrEmpty(s)) return result;
 
-            // 找所有 [数字,数字]
-            int i = 0;
-            while (i < s.Length)
-            {
-                int open = s.IndexOf('[', i);
-                if (open < 0) break;
-                int close = s.IndexOf(']', open);
-                if (close < 0) break;
+            string cleaned = s.Replace("[", " ").Replace("]", " ");
+            string[] parts = cleaned.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
 
-                string inner = s.Substring(open + 1, close - open - 1);
-                string[] parts = inner.Split(',');
-                if (parts.Length >= 2)
-                {
-                    int a, b;
-                    if (int.TryParse(parts[0].Trim(), out a) && int.TryParse(parts[1].Trim(), out b))
-                        result.Add(new int[] { a, b });
-                }
-                i = close + 1;
+            var nums = new List<int>();
+            foreach (string p in parts)
+            {
+                int v;
+                if (int.TryParse(p.Trim(), out v)) nums.Add(v);
             }
+
+            for (int k = 0; k + 1 < nums.Count; k += 2)
+                result.Add(new int[] { nums[k], nums[k + 1] });
+
             return result;
         }
 
@@ -1623,7 +1630,13 @@ namespace DSH.FoodProbe
                     if (rm != null)
                     {
                         object cur = null;
-                        try { cur = rm.GetType().GetProperty("currentProj")?.GetValue(rm, null); }
+                        try
+                        {
+                            // ⚠ 实测：`ResearchManager.currentProj` 是**公有字段**，不是属性（读程序集元数据确证）
+                            var fld = rm.GetType().GetField("currentProj");
+                            if (fld != null) cur = fld.GetValue(rm);
+                            else cur = rm.GetType().GetProperty("currentProj")?.GetValue(rm, null);
+                        }
                         catch (Exception) { }
 
                         var finished = new List<string>();

@@ -18,20 +18,26 @@ namespace FoodControl.Core
         /// <summary>每格的肥力系数（1.0 = 普通土壤），仅用于评分。</summary>
         public double[] Fertility = new double[0];
 
-        public bool InBounds(int x, int z)
+        /// <summary>索引/边界逻辑**只有一份实现**（`GridIndex`）。</summary>
+        private GridIndex Bounds
         {
-            return x >= 0 && z >= 0 && x < Width && z < Height;
+            get { return new GridIndex(Width, Height); }
         }
 
+        public bool InBounds(int x, int z)
+        {
+            return Bounds.InBounds(x, z);
+        }
+
+        /// <summary>越界返回 -1（旧版会返回一个乱算出来的下标 —— 静默错位的来源）</summary>
         public int Index(int x, int z)
         {
-            return z * Width + x;
+            return Bounds.Index(x, z);
         }
 
         public bool IsArable(int x, int z)
         {
-            int i = Index(x, z);
-            return i >= 0 && i < Arable.Length && Arable[i];
+            return Bounds.At(Arable, x, z, false);
         }
     }
 

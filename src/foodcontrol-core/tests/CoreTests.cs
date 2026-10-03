@@ -28,6 +28,9 @@ public static class CoreTests
         RunTemplateReuseTests();
         RunRegistryTests();
         RunMaterialTests();
+        RunTemplateSemanticsTests();
+        RunSemanticJsonTests();
+        RunStagedMaterialTests();
 
         Console.WriteLine();
         Console.WriteLine(string.Format("=== 通过 {0} / 失败 {1} ===", _pass, _fail));
@@ -1054,12 +1057,25 @@ public static class CoreTests
         True("合法样板校验通过（无硬错误）", !hasHardError,
             errs.Count > 0 ? string.Join(" / ", errs.ToArray()) : "无错误");
 
-        // ── 缺门 → 必须报错（全封闭房子小人进不去）──
+        // ── 缺门 → **警告**（不是错误）──
+        //
+        // ★ 这里改过一次判据，来自用户 2026-10-03 的原话：
+        //   「**门造不造其实无所谓**」—— 决定"房子成不成立"的是墙。
+        //   原来把没门判成**致命错误**，会让一个完全能用的样板被拒，
+        //   而且错误信息读起来像"这样板是坏的"，与实际不符。
+        //   → 现在：没有门 = 警告；没有墙 = 错误（结构性）。
+        //   ⚠ 这条测试**仍然有效**：它断言"没有门这件事必须被说出来"，
+        //     只是说的级别从 Error 换成了 Warning —— 而不是"不说了"。
         var noDoor = MakeSmallTemplate();
         noDoor.Rows[3] = "W...W";
-        bool gotDoorErr = false;
-        foreach (string e in noDoor.Validate()) if (e.IndexOf("门") >= 0) gotDoorErr = true;
-        True("★ 没有门时校验报错（全封闭的房子进不去）", gotDoorErr);
+        TemplateValidation noDoorV = noDoor.ValidateDetailed(null);
+        bool gotDoorWarn = false;
+        for (int i = 0; i < noDoorV.Warnings.Count; i++)
+            if (noDoorV.Warnings[i].IndexOf("门") >= 0) gotDoorWarn = true;
+        True("★ 没有门时必须**说出来**（现在是警告，不是错误）", gotDoorWarn,
+            "错误=" + noDoorV.Errors.Count + " 警告=" + noDoorV.Warnings.Count);
+        True("★ 但没门不再算硬错误（样板仍可用）", noDoorV.Ok,
+            string.Join(" / ", noDoorV.Errors.ToArray()));
 
         // ── 缺墙 → 必须报错 ──
         var noWall = MakeSmallTemplate();
@@ -1701,10 +1717,372 @@ public static class CoreTests
         }
     }
 
+    // ==================================================================
+    // 样板语义层（2026-10-03 新增）
+    //
+    // 这一层的存在理由（用户原话）：
+    //   「在这个 13×13 有内容的房间里，在我心目中也是**有建造顺序**的……
+    //     先把墙都造好，然后把床造了，然后把桌子造了，然后把光源造了，
+    //     最后才是造娱乐设施。」
+    //   「一般来说，**有几个人造几个床**就可以了。」
+    //
+    // 以及那次真实事故：
+    //   扫描器把 `ChessTable`（国际象棋桌）按**字面名字**归成了"餐桌"，
+    //   而它其实是**娱乐设施**。教训：语义不能靠 Def 名字猜，要查真实分类。
+    //   → 本层把"哪一类"做成**注册表**，而注册表的数据由游戏层从 Def 读出来填。
+    // ==================================================================
+
+    /// <summary>一个"有内容的 13×13 房间"的迷你版，专门用来测语义/顺序/数量策略。</summary>
+    private static BuildTemplate MakeSemanticTemplate()
+    {
+        //    0123456
+        // 0  WWWWWWW
+        // 1  WBB.C.W     B=床 ×4  C=棋桌 ×1  T=餐桌 ×1  L=火把 ×1
+        // 2  WBB.C.W
+        // 3  W.....W
+        // 4  W.T.L.W
+        // 5  W.....W
+        // 6  WWWDWWW     D=门 ×1
+        var t = new BuildTemplate { Id = "sem", Name = "语义测试房" };
+        t.Rows = new List<string>
+        {
+            "WWWWWWW",
+            "WBB.C.W",
+            "WBB.C.W",
+            "W.....W",
+            "W.T.L.W",
+            "W.....W",
+            "WWWDWWW",
+        };
+        t.Roles['W'] = new TemplateRole { Symbol = 'W', Name = "wall", Accepts = new List<string> { "Wall" }, IsWallLike = true, NeedsStuff = true };
+        t.Roles['D'] = new TemplateRole { Symbol = 'D', Name = "door", Accepts = new List<string> { "Door" }, IsDoorLike = true, NeedsStuff = true };
+        t.Roles['B'] = new TemplateRole { Symbol = 'B', Name = "bed", Accepts = new List<string> { "Bed" }, IsFurniture = true, NeedsStuff = false };
+        // ★ 故意**不声明** Kind —— 让解析器去查注册表（这才是用户场景：样板是扫出来的）
+        t.Roles['C'] = new TemplateRole { Symbol = 'C', Name = "chess", Accepts = new List<string> { "ChessTable" }, IsFurniture = true, NeedsStuff = false };
+        t.Roles['T'] = new TemplateRole { Symbol = 'T', Name = "table", Accepts = new List<string> { "Table2x2c" }, IsFurniture = true, NeedsStuff = false };
+        t.Roles['L'] = new TemplateRole { Symbol = 'L', Name = "light", Accepts = new List<string> { "TorchLamp" }, IsFurniture = true, NeedsStuff = false };
+        t.NormalizeSize();
+        return t;
+    }
+
+    private static void RunTemplateSemanticsTests()
+    {
+        Console.WriteLine();
+        Console.WriteLine("-- SlotSemantics（样板语义层） --");
+
+        SlotSemanticRegistry reg = SlotSemanticRegistry.CreateDefault();
+
+        // ── ① ★ 那次真实事故：ChessTable 是娱乐，不是餐桌 ──
+        var chess = new TemplateRole { Symbol = 'C', Name = "chess", Accepts = new List<string> { "ChessTable" }, IsFurniture = true };
+        SlotSemantics chessSem = SlotSemanticsResolver.Resolve(chess, reg);
+        Eq("★★ ChessTable 判成娱乐设施（不是餐桌）", chessSem.Kind.ToString(), "Entertainment");
+        True("★ 娱乐排在最后（顺序 5）", chessSem.Order == BuildOrder.Entertainment,
+            "实际顺序 " + chessSem.Order);
+        True("★ 判定理由里写明了是靠注册表查到的（不是猜名字）",
+            chessSem.Why.IndexOf("注册表") >= 0, chessSem.Why);
+
+        // 真的餐桌仍是进食
+        var table = new TemplateRole { Symbol = 'T', Name = "table", Accepts = new List<string> { "Table2x2c" }, IsFurniture = true };
+        Eq("真餐桌 Table2x2c 是进食", SlotSemanticsResolver.Resolve(table, reg).Kind.ToString(), "Eating");
+
+        // ── ② ★ 说不清就必须说"说不清"，不许猜 ──
+        var mystery = new TemplateRole { Symbol = 'X', Name = "mystery", Accepts = new List<string> { "SomethingUnknown" }, IsFurniture = true };
+        SlotSemantics unknownSem = SlotSemanticsResolver.Resolve(mystery, reg);
+        Eq("★ 查不到的 Def → Unknown（不猜成任何一类）", unknownSem.Kind.ToString(), "Unknown");
+        True("★ 且理由里要求补注册表", unknownSem.Why.IndexOf("注册表") >= 0, unknownSem.Why);
+
+        // ── ③ 角色自己声明 > 注册表 ──
+        var declared = new TemplateRole
+        {
+            Symbol = 'C', Name = "chess", Accepts = new List<string> { "ChessTable" },
+            Kind = SlotKind.Sleeping,      // 故意声明成"睡眠"，测优先级
+        };
+        Eq("角色自己声明的语义优先于注册表", SlotSemanticsResolver.Resolve(declared, reg).Kind.ToString(), "Sleeping");
+
+        // ── ④ 旧布尔开关仍能兜底（老样板没有 kind 字段）──
+        var legacyWall = new TemplateRole { Symbol = 'W', Name = "wall", Accepts = new List<string> { "Wall" }, IsWallLike = true };
+        Eq("旧字段 IsWallLike → Structure", SlotSemanticsResolver.Resolve(legacyWall, reg).Kind.ToString(), "Structure");
+        var legacyFurniture = new TemplateRole { Symbol = 'F', Name = "furniture", Accepts = new List<string> { "Whatever" }, IsFurniture = true };
+        Eq("只有 IsFurniture 的旧角色说不出哪一类 → Unknown", SlotSemanticsResolver.Resolve(legacyFurniture, reg).Kind.ToString(), "Unknown");
+
+        // ── ⑤ 建造顺序 = 用户给的公式（照抄，不发明）──
+        Eq("墙在最前（顺序 0）", BuildOrder.For(SlotKind.Structure).ToString(), "0");
+        Eq("门在墙之后（顺序 1）", BuildOrder.For(SlotKind.Door).ToString(), "1");
+        Eq("床（顺序 2）", BuildOrder.For(SlotKind.Sleeping).ToString(), "2");
+        Eq("桌子（顺序 3）", BuildOrder.For(SlotKind.Eating).ToString(), "3");
+        Eq("光源（顺序 4）", BuildOrder.For(SlotKind.Lighting).ToString(), "4");
+        Eq("娱乐最后（顺序 5）", BuildOrder.For(SlotKind.Entertainment).ToString(), "5");
+        True("★ 顺序严格递增（墙 < 门 < 床 < 桌 < 光 < 娱乐）",
+            BuildOrder.For(SlotKind.Structure) < BuildOrder.For(SlotKind.Door)
+            && BuildOrder.For(SlotKind.Door) < BuildOrder.For(SlotKind.Sleeping)
+            && BuildOrder.For(SlotKind.Sleeping) < BuildOrder.For(SlotKind.Eating)
+            && BuildOrder.For(SlotKind.Eating) < BuildOrder.For(SlotKind.Lighting)
+            && BuildOrder.For(SlotKind.Lighting) < BuildOrder.For(SlotKind.Entertainment));
+        Eq("没规定过的类别排最后", BuildOrder.For(SlotKind.Unknown).ToString(),
+            BuildOrder.Unspecified.ToString());
+
+        // ── ⑥ 数量策略：有几个人造几个床（★ 用户原话）──
+        var bedSem = new SlotSemantics(SlotKind.Sleeping, SlotCountPolicy.PerColonist, "test");
+        Eq("★ 8 个床槽 + 3 个殖民者 → 只放 3 张", BuildOutline.HowManyToPlace(bedSem, 8, 3).ToString(), "3");
+        Eq("★ 8 个床槽 + 12 个殖民者 → 上限是样板给的 8", BuildOutline.HowManyToPlace(bedSem, 8, 12).ToString(), "8");
+        Eq("8 个床槽 + 8 个殖民者 → 8", BuildOutline.HowManyToPlace(bedSem, 8, 8).ToString(), "8");
+        Eq("★ 0 个殖民者时也至少放 1（否则整栋看起来没事可做）",
+            BuildOutline.HowManyToPlace(bedSem, 8, 0).ToString(), "1");
+        var lightSem = new SlotSemantics(SlotKind.Lighting, SlotCountPolicy.AtLeastOne, "test");
+        Eq("光源 atLeastOne → 1 个（就算样板有 5 个位置）", BuildOutline.HowManyToPlace(lightSem, 5, 3).ToString(), "1");
+        var wallSem = new SlotSemantics(SlotKind.Structure, SlotCountPolicy.Fixed, "test");
+        Eq("墙 fixed → 照样板放满", BuildOutline.HowManyToPlace(wallSem, 24, 3).ToString(), "24");
+        var halfTable = new SlotSemantics(SlotKind.Eating, SlotCountPolicy.PerColonistRatio, "test").WithRatio(0.5);
+        Eq("桌子 0.5/人 → 3 人放 2 张（向上取整）", BuildOutline.HowManyToPlace(halfTable, 4, 3).ToString(), "2");
+        var optional = new SlotSemantics(SlotKind.Unknown, SlotCountPolicy.Optional, "test");
+        Eq("Optional → 0", BuildOutline.HowManyToPlace(optional, 5, 3).ToString(), "0");
+
+        // ── ⑦ 纲要：段的顺序与数量 ──
+        BuildTemplate t = MakeSemanticTemplate();
+        BuildOutline outline = BuildOutline.Build(t, reg, 3);
+        Eq("纲要共 6 段（墙/门/床/进食/照明/娱乐 各成一段）",
+            outline.Stages.Count.ToString(), "6");
+        True("★ 第一段是墙（结构）", outline.Stages[0].Kind == SlotKind.Structure,
+            outline.Stages[0].Kind + " / " + outline.OrderSummary);
+        True("★ 第二段是门", outline.Stages[1].Kind == SlotKind.Door, outline.OrderSummary);
+        True("★ 第三段是床", outline.Stages[2].Kind == SlotKind.Sleeping, outline.OrderSummary);
+        True("★ 最后一段是娱乐", outline.Stages[outline.Stages.Count - 1].Kind == SlotKind.Entertainment,
+            outline.OrderSummary);
+
+        BuildOutline.Stage bedStage = outline.Find(BuildOrder.Sleeping);
+        True("床段存在", bedStage != null);
+        if (bedStage != null)
+        {
+            Eq("★ 床段：样板 4 格、3 个殖民者 → 实放 3", bedStage.ToPlace.ToString(), "3");
+            Eq("床段格数仍是样板给的 4（位置数不变，只是不全放）", bedStage.CellCount.ToString(), "4");
+        }
+        BuildOutline.Stage wallStage = outline.Find(BuildOrder.Structure);
+        // 样板是 7×7。墙数**用脚本独立数过**（不是手推）：
+        //   W=23 D=1 B=4 C=1 T=1 L=1 → 非空格 32
+        //   （我手推时算成 18，错了 —— 教训：这种数就交给脚本数）
+        Eq("墙段照样板放满（23 面）", wallStage.ToPlace.ToString(), "23");
+        Eq("★ 全部实放 = 墙23 + 门1 + 床3 + 桌1 + 光1 + 棋1 = 30",
+            outline.TotalToPlace.ToString(), "30");
+
+        // ── ⑧ 语义说不清的角色要被列出来（不是默默放过）──
+        BuildTemplate withMystery = MakeSemanticTemplate();
+        withMystery.Roles['M'] = new TemplateRole { Symbol = 'M', Name = "mystery", Accepts = new List<string> { "Nope" }, IsFurniture = true };
+        withMystery.Rows[3] = "W..M..W";
+        List<string> unresolved2 = withMystery.UnresolvedSemanticRoles(reg);
+        Eq("★ 有一个角色说不清用途", unresolved2.Count.ToString(), "1");
+        True("★ 理由里带上 Def 名，便于去补注册表",
+            unresolved2.Count > 0 && unresolved2[0].IndexOf("Nope") >= 0, string.Join(" / ", unresolved2.ToArray()));
+    }
+
+    // ==================================================================
+    // 语义层的 JSON 往返（样板是人能审查的文件，读写必须对称）
+    // ==================================================================
+
+    private static void RunSemanticJsonTests()
+    {
+        Console.WriteLine();
+        Console.WriteLine("-- 语义层 JSON 往返 --");
+
+        var t = new BuildTemplate { Id = "json", Name = "往返测试" };
+        t.Rows = new List<string> { "WC", "WD" };
+        t.Roles['W'] = new TemplateRole { Symbol = 'W', Name = "wall", Accepts = new List<string> { "Wall" }, IsWallLike = true, NeedsStuff = true };
+        // 显式声明语义
+        t.Roles['C'] = new TemplateRole
+        {
+            Symbol = 'C', Name = "chess", Accepts = new List<string> { "ChessTable" },
+            IsFurniture = true, NeedsStuff = false,
+            Kind = SlotKind.Entertainment, CountPolicy = SlotCountPolicy.AtLeastOne,
+        };
+        // 半开比例
+        t.Roles['D'] = new TemplateRole
+        {
+            Symbol = 'D', Name = "table", Accepts = new List<string> { "Table2x2c" },
+            IsFurniture = true, NeedsStuff = false,
+            Kind = SlotKind.Eating, CountPolicy = SlotCountPolicy.PerColonistRatio, CountRatio = 0.5,
+        };
+        t.NormalizeSize();
+
+        string json = TemplateJson.Write(t);
+        BuildTemplate back = TemplateJson.Read(json);
+
+        Eq("kind 往返", back.Roles['C'].Kind.ToString(), "Entertainment");
+        Eq("count 往返", back.Roles['C'].CountPolicy.ToString(), "AtLeastOne");
+        Eq("比例往返", back.Roles['D'].CountRatio.ToString("0.##"), "0.5");
+        Eq("kind 也往返（比例那条）", back.Roles['D'].Kind.ToString(), "Eating");
+
+        // 没声明语义的角色：写出去**不含** kind 字段（老样板 diff 不受污染）
+        True("未声明语义的角色不写 kind 字段", json.IndexOf("\"kind\": \"Unknown\"") < 0);
+        Eq("未声明语义的角色读回来仍是 Unknown", back.Roles['W'].Kind.ToString(), "Unknown");
+
+        // 认不出来的枚举名 → 退到安全默认值（不抛、不猜类别）
+        string mangled = json.Replace("\"Entertainment\"", "\"NotAThing\"");
+        BuildTemplate bad = TemplateJson.Read(mangled);
+        Eq("拼错的 kind 名 → Unknown（不是瞎猜一类）", bad.Roles['C'].Kind.ToString(), "Unknown");
+
+        // 语义声明后，建造顺序自动跟着走
+        SlotSemanticRegistry reg = SlotSemanticRegistry.CreateDefault();
+        BuildOutline o = BuildOutline.Build(back, reg, 3);
+        True("★ 显式声明的语义也参与排序（娱乐在最后）",
+            o.Stages[o.Stages.Count - 1].Kind == SlotKind.Entertainment, o.OrderSummary);
+    }
+
+    // ==================================================================
+    // 分段材料决策（推翻"整栋一次评估"）
+    // ==================================================================
+
+    private static List<StageNeed> MakeStageNeeds(int[] needs)
+    {
+        var list = new List<StageNeed>();
+        for (int i = 0; i < needs.Length; i++)
+        {
+            list.Add(new StageNeed
+            {
+                Order = i,
+                Label = "第" + i + "段",
+                StuffNeeded = needs[i],
+                StuffCells = needs[i],
+            });
+        }
+        return list;
+    }
+
+    private static void RunStagedMaterialTests()
+    {
+        Console.WriteLine();
+        Console.WriteLine("-- MaterialStagedPlanner（分段材料决策） --");
+
+        var pref = new List<string> { "WoodLog", "Steel" };
+
+        // ── ① ★★ 用户给的那个例子的**纯算术版** ──
+        //   整栋需 320，木头 300、钢 900：
+        //     整栋一次评估 → 木头不够整栋 → 选钢 → **木头 300 一点没用上**
+        //     分段         → 外墙用木头 260 → 剩 40 → 床用钢 60
+        //
+        //   ⚠ 这里刻意**不拿真样板**做对照：真样板的整栋需求是 19（7×7 只有 19 格吃料），
+        //     300 木头**够**，那就复现不出"被迫转钢"的场景，对照会变成一句空话。
+        //     "用已知答案验证工具"——所以对照用一个**需求明确大于木头存量**的样板。
+        var avail = new Dictionary<string, int> { { "WoodLog", 300 }, { "Steel", 900 } };
+        var bigTpl = new BuildTemplate { Id = "big", Name = "需要 320 的大样板" };
+        bigTpl.Roles['W'] = new TemplateRole
+        {
+            Symbol = 'W', Name = "wall", Accepts = new List<string> { "Wall" },
+            IsWallLike = true, NeedsStuff = true,
+        };
+        for (int i = 0; i < 320; i++) bigTpl.Rows.Add("W");     // 320 格墙 = 需要 320 材料
+        bigTpl.NormalizeSize();
+
+        MaterialPlan whole = MaterialPlanner.Plan(bigTpl, delegate (string role) { return 1; }, avail, pref);
+        Eq("（对照）整栋需 320 > 木头 300 → 整栋一次评估选了钢", whole.ChosenStuff, "Steel");
+        True("（对照）整栋一次评估**一点木头都没用上** —— 这就是要改的局部最优",
+            !whole.Options[0].Enough, "木头 300 不够整栋 " + whole.Options[0].Needed);
+        Eq("（对照）整栋需求确实是 320", whole.Options[0].Needed.ToString(), "320");
+
+        // 分段决策：外墙 260、床 60
+        List<StageNeed> stages = MakeStageNeeds(new int[] { 260, 60 });
+        StagedMaterialPlan staged = MaterialStagedPlanner.Plan(stages, avail, pref);
+
+        Eq("第 0 段（外墙）用木头", staged.Find(0).ChosenStuff, "WoodLog");
+        Eq("★ 外墙把木头用掉了 260", staged.Find(0).Allocated.ToString(), "260");
+        Eq("第 1 段（床）用钢", staged.Find(1).ChosenStuff, "Steel");
+        Eq("★ 钢只用了 60", staged.Find(1).Allocated.ToString(), "60");
+        Eq("★ 木头剩 40（整栋一次评估时是剩 300 —— 全没用）",
+            staged.Remaining["WoodLog"].ToString(), "40");
+        Eq("钢剩 840", staged.Remaining["Steel"].ToString(), "840");
+        True("整体可完整覆盖", staged.FullyCovered);
+        Eq("总划走 = 320", staged.TotalAllocated.ToString(), "320");
+        Eq("总缺口 = 0", staged.TotalShort.ToString(), "0");
+
+        // ★ 对照总结：分段用掉木头 260 + 钢 60；整栋用掉钢 320、木头 0
+        int stagedUsed = staged.Used["WoodLog"] + staged.Used["Steel"];
+        Eq("分段总用料同样是 320（但没有浪费可用材料）", stagedUsed.ToString(), "320");
+        True("★ 分段确实用上了整栋评估没用上的木头",
+            staged.Used["WoodLog"] > 0, "木头用掉 " + staged.Used["WoodLog"]);
+
+        // ── ② 都不够 → 部分满足 + **缺口必须说出来** ──
+        var thin = new Dictionary<string, int> { { "WoodLog", 100 }, { "Steel", 20 } };
+        StagedMaterialPlan partial = MaterialStagedPlanner.Plan(MakeStageNeeds(new int[] { 260 }), thin, pref);
+        Eq("都不够时用现有最多的那种（木头 100）", partial.Find(0).ChosenStuff, "WoodLog");
+        Eq("划走 100", partial.Find(0).Allocated.ToString(), "100");
+        Eq("★ 缺口 = 160（明写出来，不静默）", partial.Find(0).Short.ToString(), "160");
+        True("★ 理由里写明缺多少", partial.Find(0).Reason.IndexOf("缺 160") >= 0, partial.Find(0).Reason);
+        True("有缺口 → 不算完整覆盖", !partial.FullyCovered);
+
+        // ── ③ 完全没有材料 → 每一段都不造 ──
+        StagedMaterialPlan none = MaterialStagedPlanner.Plan(
+            MakeStageNeeds(new int[] { 260, 60 }),
+            new Dictionary<string, int>(),
+            pref);
+        Eq("没有任何材料 → 每段都不造", none.Find(0).ChosenStuff, null);
+        True("理由说清这段不造（并带上需要的量）",
+            none.Find(0).Reason.IndexOf("不造") >= 0, none.Find(0).Reason);
+        True("没有任何段可造", !none.AnyStageBuildable);
+
+        // ── ④ 不需要材料的段：可以造，但不用料 ──
+        var onlyFurniture = new List<StageNeed>
+        {
+            new StageNeed { Order = 2, Label = "床", StuffNeeded = 0, StuffFreeCells = 3 },
+        };
+        StagedMaterialPlan free = MaterialStagedPlanner.Plan(onlyFurniture, avail, pref);
+        Eq("全是成品家具的段 → ChosenStuff 是空串（= 可以造、不用料）",
+            free.Find(2).ChosenStuff, "");
+        True("该段可造", free.Find(2).CanBuild);
+        Eq("且不划走任何材料", free.TotalAllocated.ToString(), "0");
+
+        // ── ⑤ ★ 不改调用方的库存表（纯函数纪律）──
+        var original = new Dictionary<string, int> { { "WoodLog", 300 }, { "Steel", 900 } };
+        MaterialStagedPlanner.Plan(MakeStageNeeds(new int[] { 260, 60 }), original, pref);
+        Eq("★ 决策**不改**调用方传进来的库存表", original["WoodLog"].ToString(), "300");
+        Eq("★ 钢也没被改", original["Steel"].ToString(), "900");
+
+        // ── ⑥ 段顺序**真的**影响结果（证明"顺序"是输入而不是摆设）──
+        //   同样两段，把"床"(60) 放前面、"外墙"(260) 放后面：
+        //   床先用钢 60（木头 300 够但它排在后面？不 —— 首选是木头，所以床也会用木头）
+        //   → 用"钢优先"的顺序测：外墙先 → 用钢；床后 → 用钢
+        //   反过来：床先 → 也还是钢。所以改用"总量刚好只够一段"的场景才看得出顺序。
+        var scarce = new Dictionary<string, int> { { "WoodLog", 70 }, { "Steel", 0 } };
+        StagedMaterialPlan orderA = MaterialStagedPlanner.Plan(MakeStageNeeds(new int[] { 60, 260 }), scarce, pref);
+        StagedMaterialPlan orderB = MaterialStagedPlanner.Plan(MakeStageNeeds(new int[] { 260, 60 }), scarce, pref);
+        Eq("★ 顺序 A（小段先）第 1 段拿得到木头 60", orderA.Find(0).Allocated.ToString(), "60");
+        Eq("★ 顺序 A 第 2 段只剩 10", orderA.Find(1).Allocated.ToString(), "10");
+        Eq("★ 顺序 B（大段先）第 1 段把 70 全用掉", orderB.Find(0).Allocated.ToString(), "70");
+        Eq("★ 顺序 B 第 2 段一点都拿不到", orderB.Find(1).Allocated.ToString(), "0");
+        True("★ 两段合计都不超过库存 70",
+            orderA.TotalAllocated <= 70 && orderB.TotalAllocated <= 70,
+            "A=" + orderA.TotalAllocated + " B=" + orderB.TotalAllocated);
+
+        // ── ⑦ 从纲要算需求：只有 NeedsStuff 的角色吃料 ──
+        SlotSemanticRegistry reg = SlotSemanticRegistry.CreateDefault();
+        BuildTemplate t = MakeSemanticTemplate();
+        BuildOutline outline = BuildOutline.Build(t, reg, 3);
+        List<StageNeed> needs = MaterialStagedPlanner.NeedsFrom(outline,
+            t, delegate (string role) { return 1; });
+        Eq("段数与纲要一致", needs.Count.ToString(), outline.Stages.Count.ToString());
+
+        StageNeed wallNeed = null, bedNeed = null;
+        for (int i = 0; i < needs.Count; i++)
+        {
+            if (needs[i].Order == BuildOrder.Structure) wallNeed = needs[i];
+            if (needs[i].Order == BuildOrder.Sleeping) bedNeed = needs[i];
+        }
+        True("找得到墙段", wallNeed != null);
+        // 墙 23 + 门 1 = 24 格吃料（每格成本 1）
+        Eq("★ 墙段要吃料（23 格 × 1 = 23）", wallNeed.StuffNeeded.ToString(), "23");
+        Eq("墙段吃料格 23", wallNeed.StuffCells.ToString(), "23");
+        True("找得到床段", bedNeed != null);
+        Eq("★ 床段**不吃**建造材料（成品家具）", bedNeed.StuffNeeded.ToString(), "0");
+        Eq("床段免料格 = 4", bedNeed.StuffFreeCells.ToString(), "4");
+
+        // 成本未知时按 1 算（★ 绝不按 0 —— 那条铁律）
+        List<StageNeed> zeroCost = MaterialStagedPlanner.NeedsFrom(outline, t,
+            delegate (string role) { return 0; });
+        StageNeed zw = null;
+        for (int i = 0; i < zeroCost.Count; i++) if (zeroCost[i].Order == BuildOrder.Structure) zw = zeroCost[i];
+        Eq("★ 成本返回 0 时按 1 算（不是 0）", zw.StuffNeeded.ToString(), "23");
+    }
+
     // ---------------- 工具 ----------------
 
-    private static PassabilityMap MakeMap(int w, int h)
-    {
+    private static PassabilityMap MakeMap(int w, int h)    {
         int n = w * h;
         var m = new PassabilityMap
         {

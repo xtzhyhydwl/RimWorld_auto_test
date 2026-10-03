@@ -20,21 +20,26 @@ namespace FoodControl.Core
         /// <summary>每格的通行代价（&lt;=0 表示不可通行），用来算"离基地多远"</summary>
         public double[] MoveCost = new double[0];
 
-        public bool InBounds(int x, int z)
+        /// <summary>索引/边界逻辑**只有一份实现**（`GridIndex`）。</summary>
+        private GridIndex Bounds
         {
-            return x >= 0 && z >= 0 && x < Width && z < Height;
+            get { return new GridIndex(Width, Height); }
         }
 
+        public bool InBounds(int x, int z)
+        {
+            return Bounds.InBounds(x, z);
+        }
+
+        /// <summary>越界返回 -1（旧版会返回一个乱算出来的下标 —— 静默错位的来源）</summary>
         public int Index(int x, int z)
         {
-            return z * Width + x;
+            return Bounds.Index(x, z);
         }
 
         public bool IsBuildable(int x, int z)
         {
-            if (!InBounds(x, z)) return false;
-            int i = Index(x, z);
-            return i >= 0 && i < Buildable.Length && Buildable[i];
+            return Bounds.At(Buildable, x, z, false);
         }
     }
 

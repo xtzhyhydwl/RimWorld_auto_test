@@ -80,6 +80,14 @@ namespace FoodControl.Core
                 if (r.IsDoorLike) sb.Append(", \"isDoorLike\": true");
                 if (r.IsFurniture) sb.Append(", \"isFurniture\": true");
                 if (r.NeedsStuff) sb.Append(", \"needsStuff\": true");
+
+                // 语义层（可选）：**只在显式声明过时才写出去**。
+                // 这样老样板文件不会被无故改动，diff 保持可读（"样板是人能审查的文件"）。
+                if (r.Kind != SlotKind.Unknown) sb.Append(", \"kind\": ").Append(Quote(r.Kind.ToString()));
+                if (r.CountPolicy != SlotCountPolicy.Fixed)
+                    sb.Append(", \"count\": ").Append(Quote(r.CountPolicy.ToString()));
+                if (r.CountPolicy == SlotCountPolicy.PerColonistRatio && Math.Abs(r.CountRatio - 1.0) > 1e-9)
+                    sb.Append(", \"countRatio\": ").Append(r.CountRatio.ToString(CultureInfo.InvariantCulture));
                 sb.Append(" }");
                 if (i < roleKeys.Count - 1) sb.Append(",");
                 sb.Append("\n");
@@ -165,6 +173,12 @@ namespace FoodControl.Core
                         role.IsDoorLike = GetBool(rm, "isDoorLike", false);
                         role.IsFurniture = GetBool(rm, "isFurniture", false);
                         role.NeedsStuff = GetBool(rm, "needsStuff", false);
+
+                        // 语义层（可选字段）：**没写就是"没声明"**，不是"猜一个"。
+                        // 解析交给 `SlotSemanticsResolver`（注册表 → 旧字段 → Unknown）。
+                        role.Kind = ParseEnum(GetString(rm, "kind", ""), SlotKind.Unknown);
+                        role.CountPolicy = ParseEnum(GetString(rm, "count", ""), SlotCountPolicy.Fixed);
+                        role.CountRatio = GetDouble(rm, "countRatio", 1.0);
 
                         object acceptsObj;
                         if (rm.TryGetValue("accepts", out acceptsObj))
@@ -318,6 +332,32 @@ namespace FoodControl.Core
         {
             object v;
             if (map.TryGetValue(key, out v) && v is bool) return (bool)v;
+            return dflt;
+        }
+
+        private static double GetDouble(Dictionary<string, object> map, string key, double dflt)
+        {
+            object v;
+            if (map.TryGetValue(key, out v) && v is double) return (double)v;
+            return dflt;
+        }
+
+        /// <summary>
+        /// 字符串 → 枚举，**认不出来就用默认值**（不抛异常）。
+        ///
+        /// 为什么宽容：样板是**手写文件**，把整个样板因为一个拼错的枚举名读不出来，
+        /// 代价远大于"按默认值处理"。但默认值必须是**安全的那个**
+        /// （`Unknown` / `Fixed`），而不是随手挑一个具体类别 ——
+        /// 猜错类别会盖出语义不对的房子。
+        /// </summary>
+        private static T ParseEnum<T>(string text, T dflt) where T : struct
+        {
+            if (string.IsNullOrEmpty(text)) return dflt;
+            try
+            {
+                if (Enum.IsDefined(typeof(T), text)) return (T)Enum.Parse(typeof(T), text, true);
+            }
+            catch (Exception) { }
             return dflt;
         }
     }

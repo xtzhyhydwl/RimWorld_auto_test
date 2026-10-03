@@ -165,21 +165,29 @@ namespace FoodControl.Core
         /// <summary>该格是墙类/实体（放门/墙时这里被占没关系，因为要拆掉重建）</summary>
         public bool[] BlockedBySolid = new bool[0];
 
-        public bool InBounds(int x, int z)
+        /// <summary>
+        /// 索引/边界逻辑**只有一份实现**（`GridIndex`）。
+        /// 这里用属性转发而不是每次 new 一个：`GridIndex` 是 readonly struct，开销可忽略。
+        /// </summary>
+        private GridIndex Bounds
         {
-            return x >= 0 && z >= 0 && x < Width && z < Height;
+            get { return new GridIndex(Width, Height); }
         }
 
+        public bool InBounds(int x, int z)
+        {
+            return Bounds.InBounds(x, z);
+        }
+
+        /// <summary>越界返回 -1（与 `GridIndex.Index` 一致）</summary>
         public int Index(int x, int z)
         {
-            return z * Width + x;
+            return Bounds.Index(x, z);
         }
 
         public bool IsPlaceable(int x, int z)
         {
-            if (!InBounds(x, z)) return false;
-            int i = Index(x, z);
-            return i >= 0 && i < CanPlace.Length && CanPlace[i];
+            return Bounds.At(CanPlace, x, z, false);
         }
     }
 
