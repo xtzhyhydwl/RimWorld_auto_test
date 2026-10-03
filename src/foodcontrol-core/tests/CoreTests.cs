@@ -73,57 +73,62 @@ public static class CoreTests
         Console.WriteLine();
         Console.WriteLine("-- Projection（预测器） --");
 
-        // 水稻：满速 3 天从 0 长到 1；12 小时有效光 → 实际 6 天
+        // 水稻：growDays = 2（游戏 XML 实测值），收获阈值 harvestMinGrowth = 0.65
+        // 公式对应游戏：GrowthPerTick = GrowthRate / (60000 × growDays)
         var cal = new Calibration
         {
             NutritionPerCellAtMaturity = 20.0,
-            EffectiveGrowthHoursPerDay = 12.0,
-            FullSpeedGrowthHoursPerDay = 24.0,
+            HarvestMinGrowth = 0.65,
             HorizonDays = 15,
         };
 
-        var g = new PlantGroup("Plant_Rice", 100, 0.0, 1.0, 3.0);
-        double days = Projection.DaysUntilMature(g, cal);
-        Near("水稻 0% 生长、12h 光照 → 6 天成熟", days, 6.0, 0.01);
+        // GrowthRate = 1、growDays = 2、从 0 到 0.65 → 0.65 × 2 = 1.3 天
+        var g = new PlantGroup("Plant_Rice", 100, 0.0, 1.0, 2.0);
+        double days = Projection.DaysUntilHarvest(g, cal);
+        Near("水稻 0%、GrowthRate=1、growDays=2 → 1.3 天到可收获", days, 1.3, 0.001);
 
-        // 半天光照 = 双倍时间
-        var calFull = cal.Clone();
-        calFull.EffectiveGrowthHoursPerDay = 24.0;
-        Near("同样作物 24h 光照 → 3 天成熟", Projection.DaysUntilMature(g, calFull), 3.0, 0.01);
+        // ★ 这一条钉住最容易错的地方：终点是 0.65 而不是 1.0
+        // 如果哪天有人把 HarvestMinGrowth 改回 1.0，这里会变成 2.0 天
+        True("收获终点是 harvestMinGrowth(0.65) 而非 1.0（否则会算成 2.0 天）", days < 1.5,
+            "实际 " + days + " 天");
 
-        // 已经长了一半 → 时间减半
-        var gHalf = new PlantGroup("Plant_Rice", 100, 0.5, 1.0, 3.0);
-        Near("已长 50% → 3 天成熟", Projection.DaysUntilMature(gHalf, cal), 3.0, 0.01);
+        // GrowthRate 减半（比如肥力/光照差）→ 时间加倍
+        var gSlow = new PlantGroup("Plant_Rice", 100, 0.0, 0.5, 2.0);
+        Near("GrowthRate=0.5 → 2.6 天", Projection.DaysUntilHarvest(gSlow, cal), 2.6, 0.001);
 
-        // ★ 光周期：晚上不生长，绝不能被忽略
-        var calDark = cal.Clone();
-        calDark.EffectiveGrowthHoursPerDay = 0.0;
-        double dDark = Projection.DaysUntilMature(g, calDark);
-        True("无光 → 永不成熟（而非算出有限天数）", double.IsPositiveInfinity(dDark) || dDark > 1e6,
+        // growDays 加倍 → 时间加倍
+        var gLong = new PlantGroup("Plant_Rice", 100, 0.0, 1.0, 4.0);
+        Near("growDays=4 → 2.6 天", Projection.DaysUntilHarvest(gLong, cal), 2.6, 0.001);
+
+        // 已经长过阈值 → 现在就能收
+        var gReady = new PlantGroup("Plant_Rice", 100, 0.8, 1.0, 2.0);
+        Near("growth 0.8 > 0.65 → 0 天（立刻可收）", Projection.DaysUntilHarvest(gReady, cal), 0.0, 1e-9);
+
+        // ★ 夜里 GrowthRate = 0（机制是 Plant.Resting，不是光照因子）→ 推不出成熟时间
+        var gNight = new PlantGroup("Plant_Rice", 100, 0.0, 0.0, 2.0);
+        double dDark = Projection.DaysUntilHarvest(gNight, cal);
+        True("GrowthRate=0（夜里）→ 不给出有限天数", double.IsPositiveInfinity(dDark) || dDark > 1e6,
             "实际返回 " + dDark);
 
-        // 肥力减半 → 时间加倍
-        var gPoor = new PlantGroup("Plant_Rice", 100, 0.0, 0.5, 3.0);
-        Near("肥力 0.5 → 12 天成熟", Projection.DaysUntilMature(gPoor, cal), 12.0, 0.01);
-
-        // 存量曲线：100 存量、2/天消耗、第 6 天收 2000
+        // 存量曲线：100 存量、2/天消耗、第 2 天收 2000
         var st = new FoodState
         {
             Stock = 100,
             BurnRatePerDay = 2.0,
             Calibration = cal,
-            Planted = new List<PlantGroup> { new PlantGroup("Plant_Rice", 100, 0.0, 1.0, 3.0) },
+            Planted = new List<PlantGroup> { new PlantGroup("Plant_Rice", 100, 0.0, 0.5, 2.0) },
         };
         ForecastResult p = Projection.Forecast(st);
         Eq("曲线长度 = 窗口+1", p.ProjectedReserve.Length, 16);
         Near("第 0 天 = 当前存量", p.ProjectedReserve[0], 100, 1e-9);
         Near("第 1 天 = 100-2", p.ProjectedReserve[1], 98, 1e-9);
-        Near("第 5 天 = 100-10", p.ProjectedReserve[5], 90, 1e-9);
-        Near("第 6 天 = 90-2+2000", p.ProjectedReserve[6], 2088, 1e-6);
-        Near("第 6 天新增产出 = 100格×20", p.DailySupply[6], 2000, 1e-9);
+        Near("第 2 天 = 98-2（当天还没收）", p.ProjectedReserve[2], 96, 1e-9);
+        Near("第 3 天 = 96-2+2000", p.ProjectedReserve[3], 2094, 1e-6);
+        Near("第 3 天新增产出 = 100格×20", p.DailySupply[3], 2000, 1e-9);
 
         // 窗口外的作物不计入
-        var gFar = new PlantGroup("Plant_Rice", 100, 0.0, 1.0, 30.0);   // 60 天，远超 15 天窗口
+        // growDays=30 且 GrowthRate=0.5 → 0.65×30/0.5 = 39 天，远超 15 天窗口
+        var gFar = new PlantGroup("Plant_Corn", 100, 0.0, 0.5, 30.0);
         var stFar = new FoodState { Stock = 100, BurnRatePerDay = 2.0, Calibration = cal,
             Planted = new List<PlantGroup> { gFar } };
         ForecastResult pFar = Projection.Forecast(stFar);
@@ -149,8 +154,7 @@ public static class CoreTests
         };
         var cal = new Calibration
         {
-            NutritionPerCellAtMaturity = 20.0, EffectiveGrowthHoursPerDay = 12.0,
-            FullSpeedGrowthHoursPerDay = 24.0, HorizonDays = 15,
+            NutritionPerCellAtMaturity = 20.0, HarvestMinGrowth = 0.65, HorizonDays = 15,
         };
         var baseState = new FoodState { BurnRatePerDay = 2.0, Calibration = cal, ArableCellsAvailable = 1000 };
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace FoodControl.Core
@@ -12,29 +12,38 @@ namespace FoodControl.Core
     public static class Projection
     {
         /// <summary>
-        /// 按「有效生长小时」把某组作物的成熟时间算出来。
-        /// 为什么不用墙上时间：实测晚上作物生长速率为 0，直接按 24 小时外推会严重高估产出。
+        /// 距离「可收获」还有多少天。
         ///
-        /// 约定（单一约定，避免两个系数打架）：
-        ///   DaysToMatureAtFullSpeed = 该作物在「肥力 1.0 + 全天有效生长」下从 0 长到 1 的天数
-        ///   实际每天生长的 growth 增量 = (1 / DaysToMature) × 肥力 × (有效小时 / 满速小时)
+        /// 公式直接对应游戏（见 `docs/游戏API符号确证.md`，均为实测确证）：
+        ///   游戏内部：`GrowthPerTick = GrowthRate / (60000 × def.plant.growDays)`
+        ///   → 每天增长   `GrowthRate / growDays`
+        ///   → 距离可收获 `(harvestMinGrowth − Growth) / (GrowthRate / growDays)`
+        ///
+        /// ⚠ 两个曾经写错、且**会系统性高估成熟时间**的地方：
+        ///   1. 终点是 `harvestMinGrowth`（默认 **0.65**），**不是 1.0**
+        ///   2. 夜里 `GrowthRate` 是 0（机制是 `Plant.Resting`，**不是**光照因子），
+        ///      所以"夜里不长"由 GrowthRate 自然反映，Core 不需要自己造光周期模型
         /// </summary>
+        public static double DaysUntilHarvest(PlantGroup g, Calibration cal)
+        {
+            if (g == null) return double.MaxValue;
+
+            double remaining = g.RemainingToHarvest(cal.HarvestMinGrowth);
+            if (remaining <= 0) return 0;                    // 现在就能收
+
+            if (g.GrowDays <= 0) return double.MaxValue;
+            if (g.GrowthRate <= 0) return double.MaxValue;   // 当前完全不生长（夜里 / 太冷）
+
+            double growthPerDay = g.GrowthRate / g.GrowDays;
+            if (growthPerDay <= 0) return double.MaxValue;
+
+            return remaining / growthPerDay;
+        }
+
+        /// <summary>旧名字，语义同 <see cref="DaysUntilHarvest"/>。</summary>
         public static double DaysUntilMature(PlantGroup g, Calibration cal)
         {
-            if (g == null || g.RemainingGrowth <= 0) return 0;
-
-            double baseDays = g.DaysToMatureAtFullSpeed;
-            if (baseDays <= 0) return double.MaxValue;
-
-            double fertility = SafeFertility(g.Fertility);
-            double fullHours = cal.FullSpeedGrowthHoursPerDay > 0 ? cal.FullSpeedGrowthHoursPerDay : 24.0;
-            double lightFactor = cal.EffectiveGrowthHoursPerDay / fullHours;
-
-            // 每天能推进的 growth 量（0~1）
-            double growthPerDay = (1.0 / baseDays) * fertility * lightFactor;
-            if (growthPerDay <= 0) return double.MaxValue;   // 完全不长（冬天/无光）
-
-            return g.RemainingGrowth / growthPerDay;
+            return DaysUntilHarvest(g, cal);
         }
 
         public static ForecastResult Forecast(FoodState state)
@@ -116,12 +125,6 @@ namespace FoodControl.Core
                 if (reserve[d] < threshold) return d;
             }
             return -1;
-        }
-
-        private static double SafeFertility(double f)
-        {
-            if (f <= 0) return 0.01;
-            return f;
         }
     }
 }

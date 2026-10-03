@@ -6,26 +6,28 @@ namespace FoodControl.Core
     /// <summary>
     /// 预测器用到的标定系数。
     ///
-    /// 设计要点：**这些数字不来自对 RimWorld 公式的硬编码，而是由游戏内适配层实测后填入。**
-    /// 这样 Core 不依赖 Assembly-CSharp，可以离线（毫秒级）测试，
-    /// 而且游戏公式变了也只是重新标定，不用改预测器。
+    /// 设计要点：**不硬编码 RimWorld 的公式**，而是用游戏内适配层实测/调用公开 API 得到的值填入。
+    /// 这样 Core 不依赖 Assembly-CSharp，可以离线（毫秒级）测试。
+    ///
+    /// ⚠ 本文件里的注释涉及游戏机制的地方，都来自 `docs/游戏API符号确证.md` 的**实测确证**，
+    ///   不是凭记忆写的。曾经验证过：`PlantGrowthRateCalculator`、`ZoneDefOf.Growing`、
+    ///   `TerrainAffordanceDefOf.GrowSoil` 这些"看起来很合理"的名字**在 1.6 根本不存在**。
     /// </summary>
     public sealed class Calibration
     {
-        /// <summary>成熟作物每格能提供的 nutrition。由「每株产量 × 营养值」实测填入。</summary>
+        /// <summary>
+        /// 成熟作物每格能提供的 nutrition。由「每株产量 × 营养值」实测填入。
+        /// </summary>
         public double NutritionPerCellAtMaturity = 18.0;
 
         /// <summary>
-        /// 每天的有效生长小时数（受光周期限制）。实测晚上生长速率为 0。
-        /// 用于把「满速成熟天数」折算成当前季节的实际成熟天数。
+        /// 可收获的 growth 阈值。
+        ///
+        /// ⚠ **这是 0.65，不是 1.0。** 游戏的 `Plant.HarvestableNow` 用的是
+        /// `def.plant.harvestMinGrowth`（ctor 默认 0.65）。
+        /// 按 1.0 算会**系统性高估成熟时间**，进而高估缺口、过度种植。
         /// </summary>
-        public double EffectiveGrowthHoursPerDay = 12.0;
-
-        /// <summary>
-        /// 光照充足（24 小时有效生长）时的有效生长小时数，作为归一化基准。
-        /// 默认 24 = 室内水培 / 无光周期限制的情形。
-        /// </summary>
-        public double FullSpeedGrowthHoursPerDay = 24.0;
+        public double HarvestMinGrowth = 0.65;
 
         /// <summary>产出摊开的预测天数窗口。</summary>
         public int HorizonDays = 15;
@@ -41,31 +43,45 @@ namespace FoodControl.Core
     {
         public string PlantDefName = "";
         public int CellCount;
-        /// <summary>0~1</summary>
+
+        /// <summary>当前 growth（0~1）。注意"可收获"发生在 <see cref="Calibration.HarvestMinGrowth"/>，不是 1.0。</summary>
         public double Growth;
-        /// <summary>土壤肥力系数，1.0 = 普通土壤</summary>
-        public double Fertility = 1.0;
-        /// <summary>该作物从 0 长到 1 需要的游戏天数（在肥力 1.0、光照充足条件下）</summary>
-        public double DaysToMatureAtFullSpeed = 6.0;
+
+        /// <summary>
+        /// 当前的生长速率。
+        ///
+        /// 对应游戏的 `Plant.GrowthRate`（**public，可读**），
+        /// 由公开的 `PlantUtility.GrowthRateFactorFor_Light / _Temperature / _Fertility` 相乘得到。
+        /// 游戏层把它算好填进来，Core 不去猜游戏公式。
+        ///
+        /// 注意：**夜里它是 0**，但原因不是光照因子，而是 `Plant.Resting`
+        /// （一天中约 0.25–0.8 的时段之外）让 `GrowthPerTick` 直接返回 0。
+        /// 所以"每晚不长"这件事通过 GrowthRate=0 自然反映进来，Core 不需要额外的光周期模型。
+        /// </summary>
+        public double GrowthRate = 1.0;
+
+        /// <summary>
+        /// 该作物从 0 长到 1 需要的游戏天数，对应 `ThingDef.plant.growDays`（水稻 = 2）。
+        /// 游戏里的公式是 `GrowthPerTick = GrowthRate / (60000 × growDays)`。
+        /// </summary>
+        public double GrowDays = 5.8;
 
         public PlantGroup() { }
 
-        public PlantGroup(string defName, int cells, double growth, double fertility, double daysToMature)
+        public PlantGroup(string defName, int cells, double growth, double growthRate, double growDays)
         {
             PlantDefName = defName;
             CellCount = cells;
             Growth = growth;
-            Fertility = fertility;
-            DaysToMatureAtFullSpeed = daysToMature;
+            GrowthRate = growthRate;
+            GrowDays = growDays;
         }
 
-        public double RemainingGrowth
+        /// <summary>距离「可收获」还差多少 growth。</summary>
+        public double RemainingToHarvest(double harvestMinGrowth)
         {
-            get
-            {
-                double r = 1.0 - Growth;
-                return r > 0 ? r : 0;
-            }
+            double r = harvestMinGrowth - Growth;
+            return r > 0 ? r : 0;
         }
     }
 

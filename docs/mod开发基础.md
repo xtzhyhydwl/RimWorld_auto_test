@@ -162,6 +162,16 @@ public sealed class MyModTools
 - 本会话验证过的替代方案：**用 `findstr` 直接搜 DLL 里的类型名/字符串** ✅
   （够用来确认「某个类/方法存不存在」，成本极低）
 
+> ⚠ **2026-10-03 修正：`findstr` 不足以确证符号存在。**
+> 它是**子串匹配**，会误报。实测踩到多次：搜 `PlantGrowthRateCalculator` 有命中，
+> 但真实类型是 `MapPlantGrowthRateCalculator`，前者**根本不存在**；
+> 同理 `PlantUtility.TemperatureFactor`、`ZoneDefOf.Growing`、`TerrainAffordanceDefOf.GrowSoil`
+> 都是"看起来很合理但不存在"的名字。
+>
+> **可靠做法**（已在 `tools/asmdump/` 落地，含 `AsmDump`/`IlDump`/`ApiProbe`）：
+> 元数据反射 + IL 反汇编 + **Roslyn 编译探针收口 —— 编过才算数**。
+> 详见 [游戏API符号确证.md](游戏API符号确证.md) 与 [tools/asmdump/README.md](../tools/asmdump/README.md)。
+
 ---
 
 ## 四、怎么"读"这个游戏
