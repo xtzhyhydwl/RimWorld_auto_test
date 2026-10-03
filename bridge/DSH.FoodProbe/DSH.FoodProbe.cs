@@ -527,6 +527,102 @@ namespace DSH.FoodProbe
             };
         }
 
+        [Tool("foodprobe/list_stockpiles",
+            Description = "列出地图上所有储藏区（Zone_Stockpile）：ID/格数/filter 是否允许物品。只读。")]
+        public object ListStockpiles()
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return new { success = false, message = "没有当前地图" };
+
+            var zones = new List<object>();
+            int totalCells = 0;
+            try
+            {
+                foreach (var z in map.zoneManager.AllZones)
+                {
+                    var sp = z as Zone_Stockpile;
+                    if (sp == null) continue;
+
+                    int cells = 0;
+                    bool acceptsAnything = false;
+                    int sampleAllowed = 0;
+                    try
+                    {
+                        cells = sp.cells != null ? sp.cells.Count : 0;
+                        totalCells += cells;
+
+                        // filter 是否"允许所有"：拿几个常见 def 试
+                        if (sp.settings != null && sp.settings.filter != null)
+                        {
+                            var f = sp.settings.filter;
+                            var probes = new[] { "WoodLog", "Steel", "Silver", "RawRice", "MealSimple" };
+                            foreach (var dn in probes)
+                            {
+                                var d = DefDatabase<ThingDef>.GetNamedSilentFail(dn);
+                                if (d == null) continue;
+                                try { if (f.Allows(d)) sampleAllowed++; } catch { }
+                            }
+                            acceptsAnything = sampleAllowed > 0;
+                        }
+                    }
+                    catch { }
+
+                    zones.Add(new
+                    {
+                        zoneId = sp.ID,
+                        cells,
+                        registered = map.zoneManager.AllZones.Contains(sp),
+                        acceptsCommonItems = acceptsAnything,
+                        allowedProbeCount = sampleAllowed,
+                        label = sp.label,
+                        firstCell = cells > 0 ? (object)new { x = sp.cells[0].x, z = sp.cells[0].z } : null,
+                    });
+                }
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message };
+            }
+
+            return new
+            {
+                success = true,
+                count = zones.Count,
+                totalCells,
+                zones,
+                note = "count>0 且 totalCells>0 才说明真的建出了储藏区（只看调用成功不算）。",
+            };
+        }
+
+        [Tool("foodprobe/run_stockpile",
+            Description = "让 mod 立刻跑一次储藏区域（不等调度），返回一行结果。")]
+        public object RunStockpile()
+        {
+            var asm = FindMod();
+            if (asm == null) return new { success = false, message = "FoodControl 未加载" };
+            var comp = FindType(asm, "FoodControlGameComponent");
+            if (comp == null) return new { success = false, message = "找不到 FoodControlGameComponent" };
+
+            try
+            {
+                var r = CallStatic(comp, "RunStockpileNow");
+                if (r == null)
+                {
+                    return new
+                    {
+                        success = false,
+                        message = "没有 RunStockpileNow() 静态方法。现有静态方法："
+                            + string.Join(", ", comp.GetMethods(ANY_STATIC).Select(m => m.Name).Distinct().ToArray()),
+                    };
+                }
+                return new { success = true, result = r.ToString() };
+            }
+            catch (Exception e)
+            {
+                return new { success = false, message = e.Message, exception = e.GetType().FullName };
+            }
+        }
+
         [Tool("foodprobe/domains",
             Description = "读域协调器状态：注册了哪些域、每个域上次跑过哪天、当前游戏日/时段。只读。")]
         public object Domains()

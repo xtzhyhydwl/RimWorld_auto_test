@@ -165,6 +165,7 @@ namespace FoodControl.Game
         public static void RegisterBuiltIns()
         {
             Register(new FoodDomain());
+            Register(new StockpileDomain());   // 排在食物之后（Priority 20）
         }
 
         /// <summary>测试用：把"按天去重"清掉，让下一轮重新跑。</summary>

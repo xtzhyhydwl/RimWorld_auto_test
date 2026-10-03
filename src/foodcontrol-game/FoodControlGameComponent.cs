@@ -279,8 +279,55 @@ namespace FoodControl.Game
         }
 
         // ------------------------------------------------------------------
-        // 一次性初始化的测试钩子
+        // 测试钩子（桥接 / 手动跑一轮）
         // ------------------------------------------------------------------
+
+        /// <summary>给测试钩子复用的单例（真实调度走协调器各自 new；这里只为手动触发）</summary>
+        private static StockpileDomain _stockpileForManualRun;
+
+        /// <summary>
+        /// **静态测试钩子**：立刻跑一次储藏区域（**忽略"每 N 天"的调度**）。
+        ///
+        /// 为什么需要它：储藏区域的正常节奏是每 3 个游戏日一次，
+        /// 测试如果只能等真实调度，就要推进 3 天，慢且不好定位。
+        /// </summary>
+        public static string RunStockpileNow()
+        {
+            try
+            {
+                Map map = Verse.Find.CurrentMap;
+                if (map == null) return "没有当前地图";
+
+                if (_stockpileForManualRun == null) _stockpileForManualRun = new StockpileDomain();
+
+                DomainContext ctx;
+                if (Instance != null)
+                {
+                    ctx = Instance.BuildContext(map, CalendarDay(map), GenLocalDate.HourOfDay(map));
+                }
+                else
+                {
+                    ctx = new DomainContext
+                    {
+                        Map = map,
+                        Day = CalendarDay(map),
+                        Hour = GenLocalDate.HourOfDay(map),
+                        Policy = new PolicyConfig(),
+                        Calibration = new Calibration(),
+                        SiteOptions = new SiteSelectionOptions(),
+                        CropDef = ResolveCropDef("Plant_Rice"),
+                    };
+                }
+
+                DomainCycleResult r = _stockpileForManualRun.RunCycle(ctx);
+                return r == null ? "返回 null" : r.Summary;
+            }
+            catch (Exception e)
+            {
+                try { Log.Error("[FoodControl] RunStockpileNow 异常：" + e); } catch (Exception) { }
+                return "RunStockpileNow 异常：" + e.Message;
+            }
+        }
 
         /// <summary>
         /// **静态测试钩子**：立刻跑一次"允许所有被禁取物资"，并返回一行结果。

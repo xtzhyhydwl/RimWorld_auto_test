@@ -12,10 +12,20 @@
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
 | S1 | 开局允许所有被禁取物资 | ✅ **完成** 14/14（`runs/s1-unforbid/report.md`） |
-| S2 | 抽 `INeedDomain` 框架（只搬食物，零行为变化） | ⬜ 下一步 |
-| S3 | 储藏区 domain（复用 `SiteSelection`） | ⬜ |
-| S4 | 住处 domain（方块房：选址 → 选建材 → 放蓝图） | ⬜ |
+| S2 | 抽 `INeedDomain` 框架（只搬食物，零行为变化） | ✅ **完成**（+ 修掉自己引入的去重 bug，8/8：`runs/s2b-dedup/report.md`） |
+| S3 | 储藏区 domain（复用 `SiteSelection`） | ✅ **完成** 13/13（`runs/s3-stockpile/report.md`） |
+| S4 | 住处 domain（方块房：选址 → 选建材 → 放蓝图） | ⬜ 下一步 |
 | S5 | 5 天生存验收（3 人全有饭吃 + 心情不崩） | ⬜ |
+
+### ★ S2 期间自己引入又自己抓到的一个 bug（留档）
+
+重构 `NeedCoordinator` 时我**删掉了"按天去重"的检查**，只留"执行后记账"，
+结果**一天跑了约 900 次决策**（日志实证：tick 间隔 64、内容完全相同）。
+
+极具欺骗性：**日志里"有决策"看起来是对的** —— 我最初就是看到日志有正常输出才以为没事。
+教训：**验证不能只看"有没有发生"，要看"发生了几次"**。
+回禁用 `scripts/verify-s2b-dedup.mjs` 兜住（断言数量而非有无）。
+详情见 [docs/foodcontrol-架构与流程.md](docs/foodcontrol-架构与流程.md) §四。
 
 设计文档：[docs/生产自动化-设计.md](docs/生产自动化-设计.md)
 扩展需求：[docs/生产自动化-扩展需求.md](docs/生产自动化-扩展需求.md)
