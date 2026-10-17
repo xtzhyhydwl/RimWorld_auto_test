@@ -70,9 +70,22 @@ namespace VoiceDeputy
             }
         }
 
-        // 每帧一次：交出本帧待组装的句子（含已在 Receive 里成好的句）。
+        // 每帧一次：先把聚合批冲成句，再交出本帧待组装的所有句子。
         public static Utterance[] Tick()
         {
+            try
+            {
+                BatchSummary[] batches = BatchAggregator.Flush();
+                for (int i = 0; i < batches.Length; i++)
+                {
+                    Accept(batches[i]);
+                }
+            }
+            catch
+            {
+                // 聚合出句失败只影响这一批，不牵连同帧的其它句。
+            }
+
             if (ready.Count == 0)
             {
                 return EmptyUtterances;
@@ -111,6 +124,13 @@ namespace VoiceDeputy
 
                 LastAcceptedMs[key] = now;
 
+                // 能聚合的类别先进聚合节点（同 tick 合并），其余直接成句。
+                if (notice.BatchKey != null)
+                {
+                    BatchAggregator.Add(notice);
+                    return;
+                }
+
                 Utterance utterance = SegmentPlanner.Plan(notice);
                 if (utterance == null)
                 {
@@ -124,6 +144,32 @@ namespace VoiceDeputy
             catch
             {
                 // 同 Receive：异常不出 Announcer（01 §5.3 失败模式）。
+            }
+        }
+
+        // 聚合批出句的唯一出口：开关、成句、日志都走与单事件同一套。
+        private static void Accept(BatchSummary batch)
+        {
+            try
+            {
+                if (!Switchboard.Enabled(batch.Category))
+                {
+                    Trace.Step("2", "off");
+                    return;
+                }
+
+                Utterance utterance = SegmentPlanner.Plan(batch);
+                if (utterance == null)
+                {
+                    Trace.Step("2", "bad-phrase");
+                    return;
+                }
+
+                Trace.Step("2", utterance.FullText);
+                ready.Add(utterance);
+            }
+            catch
+            {
             }
         }
 

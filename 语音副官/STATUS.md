@@ -5,10 +5,16 @@
 
 ## 现在
 
-- **第 6 步（合成与落库）已完成**：`TtsClient` / `WavReader` / `LoudnessNormalizer` / `SpeechLibrary`（键/读写/索引/Usage）/ `SegmentSynthesizer` / `ClipAssembler` / `AssemblyResult` / `DeputyGameComponent` / `VoicePlayer`（最小版），`Announcer.Tick()` 交句，试听接真。`dotnet build` **0 错误 0 警告**；**从未进游戏**（A 过，B/C/D 类没跑）。
-- **代码状态**：第 1–6 步全部写完、编译通过、**未进过游戏**；配置齐全且 key 有效时理论上会出声。
-- **下一步**：第 7 步——`SpeechQueue` / `BatchAggregator` / `VoicePlayer` 完整版 / `Announcer.Tick` 串聚合。
-- **进游戏看这几行判定第 6 步**（先在调试页打开 `TraceEnabled`）：
+- **第 7 步（播放调度与聚合）已完成**：`SpeechQueue`（上限 / 优先级插队 / 丢最旧最低）、`BatchAggregator`（同 tick 合并 + tick 末出句）、`VoicePlayer` 完整版（`clipIndex` + `nextDspTime` + 最近 20 条 + `CurrentPriority`）、`BatchSummary.Single`、`Announcer.Tick` 串聚合。`dotnet build` **0 错误 0 警告**；**从未进游戏**（A 过，B/C/D 类没跑）。
+- **代码状态**：第 1–7 步全部写完、编译通过、**未进过游戏**；配置齐全且 key 有效时理论上会出声、会排队。
+- **下一步**：第 8 步——`LibraryJanitor` / `WarmupScheduler` / `DeputyGameComponent` 两个计时器 / `VoicePlayer` 播完交整句 / `Tab_Debug` 接真。
+- **进游戏看这几行判定第 7 步**（先在调试页打开 `TraceEnabled`）：
+  - 单句：`[VD] 3a Ready n <整句>` → `[VD] 3b <队列长度> <类别>` → `[VD] 4 <整句>` → … → `[VD] 6 <整句>`
+  - 连发 3 条：`[VD] 3b` 出现 3 次且队列长度不超过 `QueueLimit`；`[VD] 4` 与 `[VD] 6` 交替、不重叠；超限时出现 `[VD] 3b drop-old …` 或 `[VD] 3b drop-new …`
+  - 威胁插队：当前句 `[VD] 6` 之后紧接威胁句的 `[VD] 4`（中间不夹普通句的 `4`）
+  - 同 tick 两人阵亡：只有一句 `[VD] 2 2 人阵亡：<名字>、<名字>。`，随后 `[VD] 4` 一次
+  - 单人阵亡（批内合计 1）：`[VD] 2 <名字>阵亡。<死因>`（走单事件模板，不是"1 人阵亡"）
+- **进游戏看这几行判定第 6 步**：
   - 点语音页「试听」⇒ `[VD] 5.1 副官就位` → `[VD] 5.2 副官就位` → `[VD] 3a Ready 1 副官就位` → `[VD] 4 副官就位` → 出声 → `[VD] 6 副官就位`
   - 未配置（`ApiKey` 空）：点试听 ⇒ `[VD] 5.1 …` → `[VD] 5.3 副官就位 未配置`，**没有 5.2、没有请求**，状态条显示「未配置」
   - 事件播报：`[VD] 1 …` → `[VD] 2 <整句>` → `[VD] 3a Missing n <整句>` → `[VD] 5.1 <片段>` → `[VD] 5.2 <片段>` → `[VD] 3a Ready n <整句>` → `[VD] 4 <整句>` → `[VD] 6 <整句>`
@@ -29,15 +35,19 @@
 - **`DiseaseOutbreak` 的 `Args` 比 02 §4.5 多一个人数**：03 §3 的模板 `疾病爆发，{0}，{1}人感染。` 有两个槽（`Enum` + `Number`），只给 `def.label` 会命中"Args ≠ ArgKinds ⇒ 不播半句"。所以 `IncidentHooks` 交 `[def.label, Count]`（`Count` 字段仍是 `max(1, parms.pawnCount)`）。02 §4.5 那一行要补。
 - **`Pawn.LabelShort` 可能带富文本**（实测 `Pawn.get_LabelNoCount` IL：有头衔时走 `ColoredText.Colorize`）⇒ 带 Royalty 头衔的殖民者名字里会有 `<color=#…>…</color>`；名字清洗只删 `<` `>`，剩下的 `color=#…` 会念出来。进游戏若真见到，只改 `PawnHooks.NameOf` 一处（改用 `pawn.Name.ToStringShort`）。
 - **第 5 步留下的 4 处**：
-  1. `BatchSummary`（01 §6.5）在 06 §11 没有指定文件 ⇒ 和 `Utterance`/`UtteranceSource` 一起放在 `Utterance.cs`；第 7 步加 `Single` 字段时仍在原处。
-  2. `Plan(BatchSummary)` **还没有 `Single` 分支**（字段第 7 步才加）⇒ "批内合计 == 1 走单事件模板"（03 §5.2）现在不可达；聚合模板只有 `Count > 1` 才会被调用。
-  3. `PlanRaw` 的 `Category` 取 `OtherMessage`：01 §6.17 没给 `FromText` 的 Category，取兜底值；第 6 步接试听时定稿。
+  1. `BatchSummary`（01 §6.5）在 06 §11 没有指定文件 ⇒ 和 `Utterance`/`UtteranceSource` 一起放在 `Utterance.cs`；第 7 步加的 `Single` 字段也在原处。
+  2. ~~`Plan(BatchSummary)` 没有 `Single` 分支~~ **第 7 步已补**：`Single != null` ⇒ 走该 `Notice` 的单事件模板（`UtteranceSource.From(Notice)`），否则用 `CategoryEntry.BatchPhrase`。
+  3. `PlanRaw` 的 `Category` 取 `OtherMessage`（第 6 步接试听时定稿：保持兜底值，优先级 0，只在队列里排最后）。
   4. `Settings.NumericText` **没有这个字段**（05 §6 标"待加字段"）⇒ `Number` 段一律原样送 TTS（03 §4.4 的默认分支）；等字段补上再接中文转换。
 - **TEMP 自检要删**：`SpeechCatalog.SelfCheck()`（`#region TEMP`，打 `[VD] 0 …`）＋ `VoiceDeputyMod` 构造里的调用，**第 4/5 步进游戏验收后整段删除**。只在 `Settings.TraceEnabled` 为真时跑（`LongEventHandler.ExecuteWhenFinished`，等语言包就绪）。
 - **第 4 步的两处补做**（都是第 3 步的缺口，不是新设计）：
   1. `SpeechCatalog.SinglePhraseOf(SpokenCategory)`：`SourceBinding` 没有 `Phrase` 字段，`Notice.Phrase` 只能由类别反查单事件模板（派生，不加表）；查不到 `throw`（01 §5.2）。
   2. `SpeechCatalog.ChannelName(SpeechChannel)`：`SpeechTypes.cs` 的注释早就写"日志拼写由 `SpeechCatalog.ChannelName` 给"，但没实现；`[VD] 1` 的通道名（含中文 `自算`）只能从这里出，钩子里不留中文字面量。
-- **`BatchKey != null` 的 Notice 现在也走去重→丢弃**（还没有同 tick 合并）；`BatchAggregator` 与 `Announcer.Tick` 是第 7 步。
+- ~~**`BatchKey != null` 的 Notice 现在也走去重→丢弃**~~ **第 7 步已补**：去重通过后进 `BatchAggregator`，tick 一变由 `Announcer.Tick` 冲成句。
+- **第 7 步与文档不一致的 3 处**：
+  1. **`BatchAggregator` 的持有状态是"暂存成员表"而不是"当前批"**：01 §5.3 写的是单批 `{BatchTick, Category, BatchKey, 成员, TotalCount}`，但同一 tick 里可能同时存在多个 `(Category, BatchKey)`（同一帧死人 + 崩溃）。实现改成"暂存 `Notice` 列表 + Flush 时按 `(Category, BatchKey)` 分组"，合并键与"同 tick"边界都没变。
+  2. **插队多了一个 `pending.Count > 0` 条件**：01 §5.4 写"`ThreatInterrupts` 且新句优先级更高 ⇒ `pending.Insert(0, u)`"；队列为空时 `Insert(0)` 与 `Add` 等价，加这个条件是为了不让空闲时的入队打乱同级 FIFO。
+  3. **`SpeechCatalog.PriorityOf` 是派生方法**：01 §5.2 / §5.4 引用它但代码里没有，按"从 `EntryOf(category).Priority` 派生、查不到回 0"补上（不新增数据表）。
 - **1.6 API 与文档不一致的 4 处**（实测本机 `Assembly-CSharp 1.6.9676.17735`；按能编过的写法实现，等设计侧决定改文档还是改代码）：
   1. `Pawn.LabelShortCap` **不存在**（`Thing`/`Pawn` 都没有）⇒ 用 `LabelShort.CapitalizeFirst()`（`PawnHooks.NameOf` 一处）。
   2. `IncidentParms.def` **不存在** ⇒ 用 `IncidentWorker.def`（`__instance.def`）；`IncidentParms.pawns` **不存在** ⇒ 用 `parms.pawnCount`；`pawnsArrivalMode` 实名是 `raidArrivalMode`。
@@ -80,6 +90,7 @@
 
 ## 历史（只记里程碑）
 
+- 2026-10-17 夜：第 6 步（合成与落库，第一次出声）+ 第 7 步（队列、聚合、播放调度）完成，编译 0/0，**未进游戏**。
 - 2026-10-17 晚：第 4 步（8 钩子，只打 `[VD] 1`）+ 第 5 步（`SegmentPlanner` 切分，打 `[VD] 2`）完成，编译 0/0，**未进游戏**。
 - 2026-10-17 下午：两轮拷打 → 模块 I/O 契约 → 两轮独立审查（21 + 23 条）→ 设计定稿 6 份。
 - 2026-10-17 上午：一轮 grilling 产出初版设计；发现"被推翻的结论与推翻后的结论并列"。

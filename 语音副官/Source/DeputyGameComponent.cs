@@ -99,7 +99,7 @@ namespace VoiceDeputy
             switch (result.Outcome)
             {
                 case AssemblyOutcome.Ready:
-                    VoicePlayer.Play(result.Playable);
+                    SpeechQueue.Enqueue(result.Playable);
                     return;
 
                 case AssemblyOutcome.Missing:

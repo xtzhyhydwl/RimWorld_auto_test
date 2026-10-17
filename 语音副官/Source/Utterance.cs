@@ -35,21 +35,23 @@ namespace VoiceDeputy
         private static readonly Segment[] EmptySegments = new Segment[0];
     }
 
-    // 批出句的载荷（01 §6.5）。Single（合计 Count == 1 时指向原 Notice）第 7 步才加，
-    // 那时 BatchAggregator 与 SegmentPlanner 的单事件分支一起接。
+    // 批出句的载荷（01 §6.5）。Single：批内合计只有 1 条时指向原 Notice，
+    // 由 SegmentPlanner 据此走该类别的单事件模板（03 §5.2），否则走聚合模板。
     public sealed class BatchSummary
     {
         public readonly SpokenCategory Category;
         public readonly string BatchKey;
         public readonly int Count;
         public readonly string[] Names;
+        public readonly Notice Single;
 
-        public BatchSummary(SpokenCategory category, string batchKey, int count, string[] names)
+        public BatchSummary(SpokenCategory category, string batchKey, int count, string[] names, Notice single = null)
         {
             Category = category;
             BatchKey = batchKey;
             Count = count;
             Names = names == null || names.Length == 0 ? new string[0] : (string[])names.Clone();
+            Single = single;
         }
     }
 
@@ -83,12 +85,18 @@ namespace VoiceDeputy
             return new UtteranceSource(notice.Category, notice.Phrase, notice.Args, notice.Names, notice.Count, notice.BatchKey);
         }
 
-        // 聚合模板由 CategoryEntry.BatchPhrase 给；该类别没有聚合模板 ⇒ 交不出句子（01 §6.17）。
+        // 合计只有 1 条 ⇒ 走原通知的单事件模板（点名 + 原因齐全）；否则聚合模板由
+        // CategoryEntry.BatchPhrase 给；该类别没有聚合模板 ⇒ 交不出句子（01 §6.17 / 03 §5.2）。
         public static UtteranceSource From(BatchSummary batch)
         {
             if (batch == null)
             {
                 return null;
+            }
+
+            if (batch.Single != null)
+            {
+                return From(batch.Single);
             }
 
             CategoryEntry entry = SpeechCatalog.EntryOf(batch.Category);

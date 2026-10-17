@@ -1,45 +1,71 @@
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 using Verse;
 
 namespace VoiceDeputy
 {
-    // 出声（01 §5.4）：独占"当前句 + clip 游标"，dspTime 按序连播，音量与停顿每帧现读 Settings。
-    // 第 6 步是最小版：单句、按序播、无队列（队列在第 7 步的 SpeechQueue）。
+    // 最近播报的一行（05 §5）：时间 / 类别 / 原文 / 是否整句命中 / 用时 ms。
+    public sealed class RecentPlay
+    {
+        public readonly int Tick;
+        public readonly SpokenCategory Category;
+        public readonly string Text;
+        public readonly bool FromSentenceCache;
+        public readonly int Millis;
+
+        public RecentPlay(int tick, SpokenCategory category, string text, bool fromSentenceCache, int millis)
+        {
+            Tick = tick;
+            Category = category;
+            Text = text ?? string.Empty;
+            FromSentenceCache = fromSentenceCache;
+            Millis = millis;
+        }
+    }
+
+    // 出声（01 §5.4）：独占"当前句 + clip 游标"，从 SpeechQueue 取下一句，dspTime 按序连播；
+    // 音量与停顿每帧现读 Settings，优先级只在开场时从 Category 查一次。
     public static class VoicePlayer
     {
+        public const int RecentCapacity = 20;
+
         private const string HostName = "VoiceDeputy";
+
+        private static readonly List<RecentPlay> recent = new List<RecentPlay>(RecentCapacity);
 
         private static GameObject host;
         private static AudioSource source;
         private static PlayableUtterance current;
         private static int clipIndex;
         private static double nextDspTime;
+        private static int startedMs;
 
-        public static void Play(PlayableUtterance playable)
+        public static int CurrentPriority { get; private set; }
+
+        public static RecentPlay[] RecentSnapshot()
         {
-            if (playable == null || playable.Clips.Length == 0)
-            {
-                return;
-            }
-
-            // 最小版没有队列：新句直接顶掉旧句（第 7 步起由 SpeechQueue 排队）。
-            current = playable;
-            clipIndex = 0;
-            nextDspTime = 0.0;
-            Trace.Step("4", Text(playable));
+            return recent.ToArray();
         }
 
         public static void Tick()
         {
             if (current == null)
             {
-                return;
+                PlayableUtterance next;
+                if (!SpeechQueue.TryTake(out next))
+                {
+                    return;
+                }
+
+                Start(next);
             }
 
             AudioSource audio = Source();
             if (audio == null)
             {
                 current = null;
+                CurrentPriority = 0;
                 return;
             }
 
@@ -62,6 +88,16 @@ namespace VoiceDeputy
             nextDspTime = start + clip.length + GapSeconds();
         }
 
+        private static void Start(PlayableUtterance playable)
+        {
+            current = playable;
+            clipIndex = 0;
+            nextDspTime = 0.0;
+            startedMs = Environment.TickCount;
+            CurrentPriority = playable.Source == null ? 0 : SpeechCatalog.PriorityOf(playable.Source.Category);
+            Trace.Step("4", Text(playable));
+        }
+
         private static AudioClip NextClip()
         {
             while (clipIndex < current.Clips.Length)
@@ -77,12 +113,30 @@ namespace VoiceDeputy
             return null;
         }
 
+        // 播完置空 current（clip 交给 GC，I6），并把这一条记进"最近播报"。
         private static void Finish()
         {
-            string text = Text(current);
+            PlayableUtterance finished = current;
             current = null;
             clipIndex = 0;
             nextDspTime = 0.0;
+            CurrentPriority = 0;
+
+            string text = Text(finished);
+            int millis = Environment.TickCount - startedMs;
+
+            if (recent.Count >= RecentCapacity)
+            {
+                recent.RemoveAt(recent.Count - 1);
+            }
+
+            recent.Insert(0, new RecentPlay(
+                GenTicks.TicksGame,
+                finished == null || finished.Source == null ? SpokenCategory.OtherMessage : finished.Source.Category,
+                text,
+                finished != null && finished.FromSentenceCache,
+                millis));
+
             Trace.Step("6", text);
         }
 
