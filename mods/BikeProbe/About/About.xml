@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>Bike Probe（用完即弃 · Step 0.5 地基探针）</name>
+  <author>dsh</author>
+  <packageId>dsh.bikeprobe</packageId>
+  <supportedVersions>
+    <li>1.6</li>
+  </supportedVersions>
+  <description>
+【这不是产品代码】这是 docs\共享单车-Step0.5-地基探针方案.md 的测量工具，测完即删。
+
+它只做 12 项探针（A1a/A1b/A1c、A2、A3、A4、A9、A17、C1、C2、C3、D），
+每一行输出都以 [BikeProbe] 开头，写进 Player.log，同时以 JSONL 落到磁盘。
+它不实现任何共享单车玩法：不做停放区、不做整理调度、不做加速补丁、不做贴图。
+
+销毁方式（见方案 §⑥）：删工作区 mods/BikeProbe + 删 junction + 从 activeMods 去掉 dsh.bikeprobe。
+  </description>
+  <modDependencies>
+    <li>
+      <packageId>brrainz.harmony</packageId>
+      <displayName>Harmony</displayName>
+    </li>
+  </modDependencies>
+  <loadAfter>
+    <li>brrainz.harmony</li>
+  </loadAfter>
+</ModMetaData>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  BikeProbe · JobDefs（探针 A2 / A4 / C2 / C3 / D）
+  两个极简 Job：
+    · ProbeTidyBike  —— 整理链：走到车 → Uninstall 收起 → 进背包 → 走到落点 → 放下
+                        （测 A2 的 Uninstall/枚举、A4 的 toil 形状、C3 的背包质量闸门）
+    · ProbeRideBike  —— 骑行链：走到车 → DeSpawn + carryTracker.TryStartCarry → 骑到目的地 → TryDropCarriedThing
+                        （测 C2 的上下车开销 O、D 的贴图跟随与落点、A1a-c 的前置状态）
+  ⚠ 不是产品 Job：没有预约仲裁、没有共享语义、没有停放区。
+-->
+<Defs>
+
+  <JobDef>
+    <defName>ProbeTidyBike</defName>
+    <driverClass>BikeProbe.Probe_JobDriver_Tidy</driverClass>
+    <reportString>整理探针单车。</reportString>
+    <casualInterruptible>true</casualInterruptible>
+    <allowOpportunisticPrefix>false</allowOpportunisticPrefix>
+  </JobDef>
+
+  <JobDef>
+    <defName>ProbeRideBike</defName>
+    <driverClass>BikeProbe.Probe_JobDriver_Ride</driverClass>
+    <reportString>骑探针单车。</reportString>
+    <casualInterruptible>true</casualInterruptible>
+    <allowOpportunisticPrefix>false</allowOpportunisticPrefix>
+  </JobDef>
+
+</Defs>

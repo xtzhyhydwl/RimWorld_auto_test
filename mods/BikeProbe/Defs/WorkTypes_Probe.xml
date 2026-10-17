@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  BikeProbe · WorkTypeDef（探针 A2 / A4 · 纯 XML，零 C# 注册）
+  ⚠ 真值表 §2.2 已确证：新增 WorkType 不需要碰 RimWorld.WorkTypeDefOf（它只是便利缓存）。
+  ⚠ naturalPriority 必须落在 0..10000，否则 Verse.WorkTypeDef::ConfigErrors 直接红字。
+  ⚠ WorkTags 里有“恰好一套 Manual*”的约定（WorkTypeDefsUtility::ExactlyOneWorkTagSet），
+     所以照抄原版 Hauling 的写法（ManualDumb + Hauling）。
+-->
+<Defs>
+
+  <WorkTypeDef>
+    <defName>ProbeBikeTidying</defName>
+    <labelShort>probe tidy</labelShort>
+    <pawnLabel>Probe Tidier</pawnLabel>
+    <gerundLabel>tidying probe bikes</gerundLabel>
+    <description>探针用工作类型：把地上的探针单车收起来。用完即弃。</description>
+    <verb>Tidy</verb>
+    <naturalPriority>310</naturalPriority>
+    <alwaysStartActive>false</alwaysStartActive>
+    <requireCapableColonist>true</requireCapableColonist>
+    <workTags>
+      <li>ManualDumb</li>
+      <li>Hauling</li>
+      <li>Commoner</li>
+    </workTags>
+  </WorkTypeDef>
+
+</Defs>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  BikeProbe · ThinkTreeDef（探针 A9 · 纯 XML，可 Hot reload Defs 热改）
+
+  ★ 机制（本轮 IL 确证，不再依赖“技术调研”的转述）：
+     原版 Humanlike 思考树在 Data\Core\Defs\ThinkTreeDefs\Humanlike.xml:383 放了一个
+     `<li Class="ThinkNode_SubtreesByTag"><insertTag>Humanlike_PostMain</insertTag></li>`
+     —— 注释原文就是 “Insertion hook for modders”。
+     `Verse.AI.ThinkNode_SubtreesByTag::TryIssueJobPackage` 的做法是：
+       DefDatabase<ThinkTreeDef>.AllDefs 里筛 `insertTag == 本节点的 insertTag`，
+       然后 `OrderByDescending(t => t.insertPriority)`，逐个 `thinkRoot.TryIssueJobPackage(...)`，
+       命中即返回（`ThinkResult.IsValid`），全不中返回 `ThinkResult.NoJob`。
+     ⇒ insertPriority 越 **大** 越先被问。
+
+  ★ A9 的跑法（X1 · 零重启）：
+     把下面的 <insertPriority> 依次改成 0 / 100 / 500，每次执行 `Actions\Hot reload Defs`，
+     看日志里 `[BikeProbe] A9` 的 TryGiveJob 命中次数与打印出来的 insertPriority 是否跟着变。
+     判通过 = 至少一个取值能让 TryGiveJob 在殖民者身上被周期调用。
+-->
+<Defs>
+
+  <ThinkTreeDef>
+    <defName>ProbeThinkTree_Tidy</defName>
+    <insertTag>Humanlike_PostMain</insertTag>
+    <insertPriority>500</insertPriority>
+    <thinkRoot Class="BikeProbe.Probe_JobGiver_Tidy" />
+  </ThinkTreeDef>
+
+</Defs>
