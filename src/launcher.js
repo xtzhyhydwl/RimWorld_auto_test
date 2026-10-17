@@ -347,6 +347,9 @@ export async function startGame({
       GABP_SERVER_PORT: String(bridgeEnv.port),
       GABP_TOKEN: bridgeEnv.token,
       GABS_GAME_ID: `dsh-rimworld-${profile}`,
+      // 游戏侧事件通道（mods/DSH_GameLink）的落点：给它一个绝对目录，mod 就写 <dir>\<profile>.ndjson。
+      // DSH 侧的 `node src/cli.js live` 读同一个目录（见 src/live.js 的 resolveEventFile）。
+      DSH_LIVE_DIR: path.join(WS, 'runs', 'live'),
       ...env,
     },
   });

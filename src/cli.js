@@ -8,6 +8,7 @@
  *   node src/cli.js tools [关键词]
  *   node src/cli.js call <工具名> ['{"参数":...}']
  *   node src/cli.js logs [行数]
+ *   node src/cli.js live --profile voiced --until 'kind=colony_started' [--timeout 120000]
  *   node src/cli.js stop
  */
 import fs from 'node:fs';
@@ -318,6 +319,17 @@ async function main() {
       break;
     }
 
+    case 'live': {
+      /**
+       * 等一个游戏侧事件，而不是「睡固定时长 + 事后读日志」。
+       * 退出码就是结果：0=命中 / 2=超时 / 1=参数错（见 src/live.js 顶部）。
+       * 挂成后台 job 时，job 完成的通知本身就是「事件到了」的推送。
+       */
+      const { runLive } = await import('./live.js');
+      process.exitCode = await runLive({ profile, flags });
+      break;
+    }
+
     case 'stop': {
       const r = await stopGame();
       out(r);
@@ -349,6 +361,7 @@ async function main() {
           '  dump-tools  把所有工具 schema 导出到 runs/tools.json',
           '  call     调用一个游戏内工具',
           '  logs     打印 Player.log 尾部',
+          '  live     等游戏侧事件（DSH_GameLink 的 NDJSON 或 Player.log），命中即返回',
           '  stop     关闭测试实例',
           '  smoke    跑冒烟测试闭环',
         ].join('\n'),
