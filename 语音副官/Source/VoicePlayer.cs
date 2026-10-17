@@ -26,6 +26,9 @@ namespace VoiceDeputy
 
     // 出声（01 §5.4）：独占"当前句 + clip 游标"，从 SpeechQueue 取下一句，dspTime 按序连播；
     // 音量与停顿每帧现读 Settings，优先级只在开场时从 Category 查一次。
+    // [StaticConstructorOnStartup]：本类有 UnityEngine.Object 类型的静态字段（host / source），
+    // 让静态构造在主线程、资源加载之前跑完，否则原版会报 "probably needs a StaticConstructorOnStartup"。
+    [StaticConstructorOnStartup]
     public static class VoicePlayer
     {
         public const int RecentCapacity = 20;

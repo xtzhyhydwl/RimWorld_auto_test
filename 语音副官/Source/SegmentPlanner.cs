@@ -46,13 +46,13 @@ namespace VoiceDeputy
             List<Segment> segments = new List<Segment>();
             if (entry.Form == PhraseForm.RawText)
             {
-                // 03 §4.1：裸文本整段一个 RawText 片段，不清洗、不切分。
-                if (source.Args.Length != 1 || string.IsNullOrEmpty(source.Args[0]))
+                // 03 §4.1：裸文本整段一个 RawText 片段，不走名字清洗、不切分；去标签与其它参数段同一处（AddArg）。
+                if (source.Args.Length != 1)
                 {
                     return null;
                 }
 
-                segments.Add(new Segment(source.Args[0], SegmentKind.RawText));
+                AddArg(segments, source.Args[0], SegmentKind.RawText);
             }
             else
             {
@@ -140,20 +140,145 @@ namespace VoiceDeputy
 
         private static void AddArg(List<Segment> segments, string value, SegmentKind kind)
         {
-            // 空段整段丢弃（03 §4.2 步 6）。
-            if (string.IsNullOrEmpty(value))
+            // 原版自由文本（死因、信件标题、消息原文、事件名）都可能带富文本标签，进 Segment 前统一去掉；
+            // 只在这里跑，Const 字面量是模板原文，不在此列。PersonName 的清洗在去标签之后（否则标签里的字母会被念出来）。
+            string text = StripRichText(value);
+            if (text.Length == 0)
             {
                 return;
             }
 
             if (kind == SegmentKind.PersonName)
             {
-                AddPersonName(segments, value);
+                AddPersonName(segments, text);
                 return;
             }
 
             // Number 原样送 TTS（03 §4.4）：中文转换开关 NumericText 还没有设置字段（05 §6 标"待加字段"）。
-            segments.Add(new Segment(value, kind));
+            segments.Add(new Segment(text, kind));
+        }
+
+        // 去富文本标签 + 折叠空白（03 §4.2 步 2 的例外：参数段要先洗掉标签再进 Segment）。
+        // 实测形态两种：成对/自闭合的 `<color=#fff>…</color>`、`<b>`，以及被括号化过的 `(*Name)…(/Name)`。
+        private static string StripRichText(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return string.Empty;
+            }
+
+            StringBuilder builder = new StringBuilder(text.Length);
+            int i = 0;
+            while (i < text.Length)
+            {
+                int afterTag = TagEndAt(text, i);
+                if (afterTag > i)
+                {
+                    i = afterTag;
+                    continue;
+                }
+
+                char c = text[i];
+                if (char.IsWhiteSpace(c))
+                {
+                    AppendSpaceOnce(builder);
+                }
+                else
+                {
+                    builder.Append(c);
+                }
+
+                i++;
+            }
+
+            // AppendSpaceOnce 已保证开头没有空格；末尾那个空格要 Trim 掉（"开始唱。（*…）" 之类）。
+            return builder.ToString().Trim();
+        }
+
+        // i 处若是一个标签，返回标签之后的下标；不是则原样返回 i。
+        private static int TagEndAt(string text, int i)
+        {
+            char closing;
+            if (text[i] == '<')
+            {
+                closing = '>';
+            }
+            else if (text[i] == '(')
+            {
+                closing = ')';
+            }
+            else
+            {
+                return i;
+            }
+
+            int end = IndexOfTagEnd(text, i + 1, closing);
+            if (end < 0 || !IsTagBody(text.Substring(i + 1, end - i - 1), text[i]))
+            {
+                return i;
+            }
+
+            return end + 1;
+        }
+
+        // 标签体不跨行、不跨另一个开括号，免得把 "血量<50 点，>正常" 这种整段吃进标签。
+        private static int IndexOfTagEnd(string text, int from, char closing)
+        {
+            for (int i = from; i < text.Length; i++)
+            {
+                char c = text[i];
+                if (c == closing)
+                {
+                    return i;
+                }
+
+                if (c == '<' || c == '(' || c == '\n' || c == '\r')
+                {
+                    return -1;
+                }
+            }
+
+            return -1;
+        }
+
+        private static bool IsTagBody(string body, char opening)
+        {
+            if (opening == '<')
+            {
+                // <b> / <i> / <color=#fff> / </color>：字母或 '/' 开头、不带空白。
+                char first = body.Length == 0 ? '\0' : body[0];
+                return (char.IsLetter(first) || first == '/') && !ContainsWhitespace(body);
+            }
+
+            // 括号化标签只认实测的 (*Name)…(/Name)：'*' 或 '/' 开头，名字部分不带空白。
+            if (body.Length < 2 || (body[0] != '*' && body[0] != '/'))
+            {
+                return false;
+            }
+
+            for (int i = 1; i < body.Length; i++)
+            {
+                char c = body[i];
+                if (!char.IsLetterOrDigit(c) && c != '_' && c != '-' && c != '/' && c != '*')
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool ContainsWhitespace(string text)
+        {
+            for (int i = 0; i < text.Length; i++)
+            {
+                if (char.IsWhiteSpace(text[i]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         // 03 §4.3：一次清洗可能产出两个片段（名字 + 编号数字）。
@@ -187,10 +312,12 @@ namespace VoiceDeputy
         }
 
         // 尾部编号后缀拆成 Number，剩下的部分做清洗（03 §4.3 步 1–4）。
+        // 名字有两条来路（单事件的 AddArg、聚合的 JoinNames）⇒ 去标签必须在这里再跑一次：
+        // 顺序固定"先去掉标签、再走 CleanName"，否则标签里的字母会被念出来。StripRichText 幂等，跑两次没有代价。
         private static string SplitPersonName(string raw, out List<string> numbers)
         {
             numbers = null;
-            string name = raw;
+            string name = StripRichText(raw);
             while (true)
             {
                 int separator = TrailingNumberSeparator(name);

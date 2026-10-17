@@ -29,6 +29,8 @@
 
 ## 待办
 
+- **F1（死亡句带富文本标签）已修 2026-10-17**：实测 `[VD] 2 Jidai阵亡。(*Name)Jidai(/Name)已死亡。`（同一串还进了 `[VD] 5.1` → TTS）。修法：`SegmentPlanner` 新增私有纯函数 `StripRichText`，在 `AddArg` 里对**每个参数段**各跑一次（`AddArg` 是唯一入口 ⇒ 只改一处），去 `<...>` 标签与括号化标签 `(*Name)…(/Name)`、折叠空白、trim，结果空则整段丢弃（沿用旧规则）；`Const` 字面量不跑。顺序是**先去标签、再走 `PersonName` 清洗**（`SplitPersonName` 入口也跑同一个 `StripRichText`：名字有 `AddArg` / `JoinNames` 两条来路，幂等）。`PlanCore` 的 `RawText` 分支改走 `AddArg`（原先直接 `new Segment`），所以试听/朗读的裸文本也一并洗。**未进游戏验证**：判据是 `[VD] 2 <名字>阵亡。…` 与 `[VD] 5.1 …` 里不再出现 `(*` 或 `</`。
+- **F2（`VoicePlayer` 静态资产告警）已修 2026-10-17**：类上加 `[StaticConstructorOnStartup]`，行为不动（仍是首次 `Source()` 才建 `GameObject`）。按 1.6 IL 核对过告警判定只看 `Texture`/`Material`/`Shader`/`Graphic`/`GameObject`/`MaterialPropertyBlock`（数组解到元素类型）⇒ 全 mod 只有 `VoicePlayer.host` 命中，`AssemblyResult.EmptyClips`（`AudioClip[]`）与 `AudioSource source` 不在名单里。顺带给 `About.xml` 的 Harmony 依赖补了 `<downloadUrl>`。**未进游戏验证**。
 - **第 8 步与文档不一致 / 补做的 10 处（都记在这里等设计侧决定改文档还是改代码）**：
   1. **`SpeechLibrary.ListFiles()` 读目录失败时返回 `null`（不是空数组）**：04 §2.4 写"失败 ⇒ 空数组"，但 04 §4.1 ① 要求"失败 ⇒ 本轮跳过对账"。空数组会把"读目录失败"变成"索引全部失效"⇒ 缓存被清空。现在 `null` = 跳过、空数组 = 目录里真没有文件。
   2. **`SpeechLibrary.SaveIndex()` 改成返回 `bool`**：04 §4.1 ④ 要"落盘失败 ⇒ 记日志，下轮再试"，不返回成功与否就只能瞎猜；`[VD] janitor index-write-failed` 由它触发。
