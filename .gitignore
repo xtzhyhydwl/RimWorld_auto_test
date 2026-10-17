@@ -15,6 +15,9 @@ bridge/**/*.pdb
 .research/
 tmp/
 
+# ── 脚本运行期输出（一次性脚本的产物；结论已整理进 docs/mod列表整理-结论.md）──
+data/
+
 # ── 编辑器/系统 ──
 .vs/
 .vscode/
