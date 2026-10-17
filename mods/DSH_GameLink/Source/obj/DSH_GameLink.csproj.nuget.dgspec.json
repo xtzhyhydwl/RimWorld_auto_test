@@ -1,0 +1,53 @@
+{
+  "format": 1,
+  "restore": {
+    "E:\\2026.7以后的新工程\\DSH\\RimWorld_auto_test\\mods\\DSH_GameLink\\Source\\DSH_GameLink.csproj": {}
+  },
+  "projects": {
+    "E:\\2026.7以后的新工程\\DSH\\RimWorld_auto_test\\mods\\DSH_GameLink\\Source\\DSH_GameLink.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "E:\\2026.7以后的新工程\\DSH\\RimWorld_auto_test\\mods\\DSH_GameLink\\Source\\DSH_GameLink.csproj",
+        "projectName": "DSH_GameLink",
+        "projectPath": "E:\\2026.7以后的新工程\\DSH\\RimWorld_auto_test\\mods\\DSH_GameLink\\Source\\DSH_GameLink.csproj",
+        "packagesPath": "E:\\2026.7以后的新工程\\DSH\\RimWorld_auto_test\\tmp\\dotnethome\\.nuget\\packages\\",
+        "outputPath": "E:\\2026.7以后的新工程\\DSH\\RimWorld_auto_test\\mods\\DSH_GameLink\\Source\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\MikanseiP\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net472"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net472": {
+            "framework": "net472",
+            "targetAlias": "net472",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "false",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.400"
+      },
+      "frameworks": {
+        "net472": {
+          "framework": "net472",
+          "targetAlias": "net472",
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.401\\RuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}

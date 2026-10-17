@@ -53,6 +53,11 @@
       <HintPath>$(HarmonyDir)\0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- 心跳用 UnityEngine.Time.realtimeSinceStartup：主菜单里没有 tick，只能靠实时时间。 -->
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(RimWorldManagedDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>

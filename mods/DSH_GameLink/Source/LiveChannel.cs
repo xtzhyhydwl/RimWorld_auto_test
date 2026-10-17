@@ -136,7 +136,8 @@ namespace DSH_GameLink
             sb.Append(",\"kind\":\"").Append(kind).Append('"');
             if (fields != null && fields.Length > 0)
             {
-                sb.Append(',').Append(fields);
+                // EventLine 的每个字段自带前导逗号（见 EventLine.Num/Text/Flag），这里不能再补一个。
+                sb.Append(fields);
             }
 
             sb.Append('}');

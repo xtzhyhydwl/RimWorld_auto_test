@@ -1,0 +1,7 @@
+E:\2026.7以后的新工程\DSH\RimWorld_auto_test\mods\DSH_GameLink\Source\obj\Debug\DSH_GameLink.csproj.AssemblyReference.cache
+E:\2026.7以后的新工程\DSH\RimWorld_auto_test\mods\DSH_GameLink\Source\obj\Debug\DSH_GameLink.GeneratedMSBuildEditorConfig.editorconfig
+E:\2026.7以后的新工程\DSH\RimWorld_auto_test\mods\DSH_GameLink\Source\obj\Debug\DSH_GameLink.csproj.CoreCompileInputs.cache
+E:\2026.7以后的新工程\DSH\RimWorld_auto_test\mods\DSH_GameLink\Assemblies\DSH_GameLink.dll
+E:\2026.7以后的新工程\DSH\RimWorld_auto_test\mods\DSH_GameLink\Assemblies\DSH_GameLink.pdb
+E:\2026.7以后的新工程\DSH\RimWorld_auto_test\mods\DSH_GameLink\Source\obj\Debug\DSH_GameLink.dll
+E:\2026.7以后的新工程\DSH\RimWorld_auto_test\mods\DSH_GameLink\Source\obj\Debug\DSH_GameLink.pdb

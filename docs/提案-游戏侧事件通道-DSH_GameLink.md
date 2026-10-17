@@ -94,6 +94,17 @@ node src/cli.js live --profile voiced --last 30
 - 落点：`$DSH_LIVE_DIR\<profile>.ndjson`（profile = `GABS_GAME_ID` 去掉 `dsh-rimworld-`，拿不到 ⇒ `game`）；无该变量 ⇒ `<存档目录>\dsh-live\game.ndjson`。目录自建。
 - 写盘失败 ⇒ 吞掉 + `Log.Error` 一次，之后**永久停写**；超过 8 MB ⇒ 当前文件改名 `<file>.1`（覆盖旧代）后继续写新文件。
 
+## B2. 首次部署后实测修掉的三件事（2026-10-17 16:20 起）
+
+| 问题（实测） | 现象 | 修法 |
+|---|---|---|
+| NDJSON 多一个逗号 | `{"ts":…,"kind":"log",,"level":…}` —— 15/15 行都不合法 | `LiveChannel.BuildLine` 不再补 `,`（`EventLine` 的字段自带前导逗号） |
+| 警告刷屏 | RimBridge 的 `STARTUP_TIMING` 是 Warning 级，每条都进事件文件 | `LogTap` 的 `Warning` 只转发含 `[VD]` 的行；`Error` 仍全转 |
+| 主菜单没有心跳 | `GameComponent` 只存在于**局内**（主菜单 `Find.CurrentGame` 为 null ⇒ 组件没被收养），当时事件文件在菜单期只有启动那几条 log | 心跳改挂 `GameComponentUpdate` + `UnityEngine.Time.realtimeSinceStartup`，3 s 一条；csproj 补 `UnityEngine.CoreModule` 引用 |
+
+> 由此得到一条**能力边界**：`game_loaded`/`colony_started`/`window`/`heartbeat` 只在**局内**产生；主菜单阶段只能用 `log` 事件（LogTap 是静态构造，启动即挂）。要监控"游戏进程起来了没有"，仍然看 `Player.log` 或 `src/cli.js status`。
+
+
 ## C. 命令用法（DSH 侧）
 
 ```powershell

@@ -17,14 +17,14 @@ namespace DSH_GameLink
         /// <summary>心跳开关：把它置 false（或用下面的常量改间隔）就不写 heartbeat。默认开。</summary>
         public static bool HeartbeatEnabled = true;
 
-        /// <summary>心跳间隔（tick）。60 tick = 1 游戏秒（正常速度下约 1 实时秒）。</summary>
-        public const int HeartbeatIntervalTicks = 60;
+        /// <summary>心跳间隔（实时秒）。用实时时间而不是游戏 tick：主菜单里 tick 不走，但「游戏活着」这件事仍然要能观测到。</summary>
+        public const float HeartbeatIntervalSeconds = 3f;
 
         private const string NoWindow = "";
 
         private bool gameLoadedPending;
         private bool colonyStartedReported;
-        private int nextHeartbeatTick;
+        private float nextHeartbeatAt;
         private string lastWindowType = NoWindow;
 
         public GameLinkComponent(Game game)
@@ -71,35 +71,33 @@ namespace DSH_GameLink
             {
                 LiveChannel.ReportError("window", ex);
             }
+
+            try
+            {
+                EmitHeartbeatIfDue();
+            }
+            catch (Exception ex)
+            {
+                LiveChannel.ReportError("heartbeat", ex);
+            }
         }
 
-        public override void GameComponentTick()
+        // 主菜单里没有 tick，所以心跳必须挂 Update（实时时间）；进游戏后同一套逻辑继续用，不另设 tick 通道。
+        private void EmitHeartbeatIfDue()
         {
             if (!HeartbeatEnabled)
             {
                 return;
             }
 
-            int now = GenTicks.TicksGame;
-            if (nextHeartbeatTick == 0)
-            {
-                nextHeartbeatTick = now + HeartbeatIntervalTicks;
-            }
-
-            if (now < nextHeartbeatTick)
+            float now = UnityEngine.Time.realtimeSinceStartup;
+            if (now < nextHeartbeatAt)
             {
                 return;
             }
 
-            nextHeartbeatTick = now + HeartbeatIntervalTicks;
-            try
-            {
-                EmitHeartbeat(now);
-            }
-            catch (Exception ex)
-            {
-                LiveChannel.ReportError("heartbeat", ex);
-            }
+            nextHeartbeatAt = now + HeartbeatIntervalSeconds;
+            EmitHeartbeat(GenTicks.TicksGame);
         }
 
         // 读档 / 新开局之后的第一次 Update：此时 world、maps 都已就绪（见 取证 §2.4），map 才有意义。

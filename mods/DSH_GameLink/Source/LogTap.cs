@@ -46,7 +46,9 @@ namespace DSH_GameLink
 
         public static void PostfixWarning(string __0)
         {
-            Emit("Warning", __0, false);
+            // 只转发带 [VD] 的警告：其它 mod 的警告（例如 RimBridge 的 STARTUP_TIMING）每秒刷屏，
+            // 会把事件文件变成垃圾。红字（Log.Error）仍然全转发。
+            Emit("Warning", __0, true);
         }
 
         public static void PostfixError(string __0)
