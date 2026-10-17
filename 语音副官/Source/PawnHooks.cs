@@ -107,11 +107,11 @@ namespace VoiceDeputy
                 batchKey);
         }
 
-        // 1.6 没有 Pawn.LabelShortCap（实测：Thing/Pawn 都没这个成员），LabelShort + 首字母大写等价。
+        // 名字清洗（去标签 / 拆编号 / 首字母大写）只在 SegmentPlanner 一处（03 §4.3）：
+        // 这里交 LabelShort 原文，自己先大写会与清理器名单分叉，名单匹配不上（P0-2）。
         private static string NameOf(Pawn pawn)
         {
-            string label = pawn.LabelShort;
-            return label == null ? string.Empty : label.CapitalizeFirst();
+            return pawn.LabelShort ?? string.Empty;
         }
 
         private static Pawn ReadPawn(FieldInfo field, object owner)

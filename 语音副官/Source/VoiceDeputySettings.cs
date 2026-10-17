@@ -3,19 +3,11 @@ using Verse;
 
 namespace VoiceDeputy
 {
-    public enum SpeechStyle
-    {
-        Deputy,
-        Neutral,
-        Terse
-    }
-
     public class VoiceDeputySettings : ModSettings
     {
         public const string DefaultBaseUrl = "https://api.siliconflow.cn/v1/audio/speech";
         public const string DefaultModel = "FunAudioLLM/CosyVoice2-0.5B";
         public const string DefaultVoice = "FunAudioLLM/CosyVoice2-0.5B:alex";
-        public const string DefaultResponseFormat = "wav";
 
         public bool ThreatRaid;
         public bool ThreatSiege;
@@ -44,13 +36,11 @@ namespace VoiceDeputy
         public string ApiKey;
         public string Model;
         public string Voice;
-        public string ResponseFormat;
 
         public float MasterVolume;
         public float TtsVolume;
         public float Speed;
         public int GapMs;
-        public int BatchWindowMs;
         public int MaxNamedInBatch;
         public int QueueLimit;
         public bool ThreatInterrupts;
@@ -59,7 +49,6 @@ namespace VoiceDeputy
         public int JanitorIntervalSeconds;
         public int WarmupJobsPerMinute;
         public bool TraceEnabled;
-        public SpeechStyle SpeechStyle;
 
         private bool dirty;
 
@@ -195,13 +184,11 @@ namespace VoiceDeputy
             ApiKey = string.Empty;
             Model = DefaultModel;
             Voice = DefaultVoice;
-            ResponseFormat = DefaultResponseFormat;
 
             MasterVolume = 1f;
             TtsVolume = 1f;
             Speed = 1f;
             GapMs = 120;
-            BatchWindowMs = 1500;
             MaxNamedInBatch = 2;
             QueueLimit = 6;
             ThreatInterrupts = true;
@@ -210,7 +197,6 @@ namespace VoiceDeputy
             JanitorIntervalSeconds = 300;
             WarmupJobsPerMinute = 100000;
             TraceEnabled = false;
-            SpeechStyle = VoiceDeputy.SpeechStyle.Deputy;
         }
 
         // 全字段走同一个 Look：缺键 ⇒ 保持当前值（构造函数已设过默认值），写盘 ⇒ 一律落盘。
@@ -229,13 +215,11 @@ namespace VoiceDeputy
             Look(ref ApiKey, "apiKey");
             Look(ref Model, "model");
             Look(ref Voice, "voice");
-            Look(ref ResponseFormat, "responseFormat");
 
             Look(ref MasterVolume, "masterVolume");
             Look(ref TtsVolume, "ttsVolume");
             Look(ref Speed, "speed");
             Look(ref GapMs, "gapMs");
-            Look(ref BatchWindowMs, "batchWindowMs");
             Look(ref MaxNamedInBatch, "maxNamedInBatch");
             Look(ref QueueLimit, "queueLimit");
             Look(ref ThreatInterrupts, "threatInterrupts");
@@ -244,7 +228,6 @@ namespace VoiceDeputy
             Look(ref JanitorIntervalSeconds, "janitorIntervalSeconds");
             Look(ref WarmupJobsPerMinute, "warmupJobsPerMinute");
             Look(ref TraceEnabled, "traceEnabled");
-            Look(ref SpeechStyle, "speechStyle");
         }
 
         // 唯一的存取点：defaultValue 传当前值（读档缺键 ⇒ 原样保留），forceSave 让保存不跳过。

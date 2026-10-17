@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 using Verse;
 
@@ -7,10 +6,6 @@ namespace VoiceDeputy.UI
     internal sealed class Tab_Voice : IVoiceSettingsTab
     {
         private const float LabelColumnWidth = 130f;
-
-        private static readonly string[] ResponseFormats = { "wav", "mp3", "opus", "pcm" };
-        private static readonly SpeechStyle[] Styles = { SpeechStyle.Deputy, SpeechStyle.Neutral, SpeechStyle.Terse };
-        private static readonly string[] StyleLabels = { "副官", "中性", "简省" };
 
         public void Draw(Rect inRect)
         {
@@ -29,22 +24,6 @@ namespace VoiceDeputy.UI
             settings.SetIfChanged(ref settings.Model, listing.TextEntryLabeled("模型", settings.Model));
             settings.SetIfChanged(ref settings.Voice, listing.TextEntryLabeled("音色", settings.Voice));
             HintText.Line(listing, "音色必须带模型名前缀，例：FunAudioLLM/CosyVoice2-0.5B:alex");
-
-            listing.Gap(4f);
-            int format = Array.IndexOf(ResponseFormats, settings.ResponseFormat);
-            int chosenFormat = DrawChoiceRow(listing, "输出格式", ResponseFormats, format);
-            if (chosenFormat != format)
-            {
-                settings.SetIfChanged(ref settings.ResponseFormat, ResponseFormats[chosenFormat]);
-            }
-
-            int style = Array.IndexOf(Styles, settings.SpeechStyle);
-            int chosenStyle = DrawChoiceRow(listing, "说话风格", StyleLabels, style);
-            if (chosenStyle != style)
-            {
-                settings.SpeechStyle = Styles[chosenStyle];
-                settings.MarkDirty();
-            }
 
             listing.Gap(10f);
             Rect listenRow = listing.GetRect(32f);
@@ -91,25 +70,6 @@ namespace VoiceDeputy.UI
             }
 
             return apiKey.Length <= 4 ? "••••" : "••••" + apiKey.Substring(apiKey.Length - 4);
-        }
-
-        private static int DrawChoiceRow(Listing_Standard listing, string label, string[] options, int current)
-        {
-            Rect row = listing.GetRect(24f);
-            Widgets.Label(new Rect(row.x, row.y, LabelColumnWidth, row.height), label);
-
-            int chosen = current;
-            float cellWidth = (row.width - LabelColumnWidth) / options.Length;
-            for (int i = 0; i < options.Length; i++)
-            {
-                Rect cell = new Rect(row.x + LabelColumnWidth + i * cellWidth, row.y, cellWidth - 4f, row.height);
-                if (Widgets.RadioButtonLabeled(cell, options[i], i == current))
-                {
-                    chosen = i;
-                }
-            }
-
-            return chosen;
         }
     }
 }

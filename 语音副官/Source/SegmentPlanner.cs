@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using Verse;
 
 namespace VoiceDeputy
 {
@@ -49,6 +50,7 @@ namespace VoiceDeputy
                 // 03 §4.1：裸文本整段一个 RawText 片段，不走名字清洗、不切分；去标签与其它参数段同一处（AddArg）。
                 if (source.Args.Length != 1)
                 {
+                    TraceBadPhrase(entry, source.Args.Length);
                     return null;
                 }
 
@@ -59,6 +61,7 @@ namespace VoiceDeputy
                 string[] args = SlotValues(entry, source, maxNamedInBatch);
                 if (args == null || args.Length != entry.ArgKinds.Length)
                 {
+                    TraceBadPhrase(entry, args == null ? -1 : args.Length);
                     return null;
                 }
 
@@ -85,6 +88,15 @@ namespace VoiceDeputy
             }
 
             return new[] { source.Count.ToString(CultureInfo.InvariantCulture), JoinNames(source.Names, maxNamedInBatch) };
+        }
+
+        // 数量不符以前只报一句 bad-phrase，认不出是哪条短语、哪个数量；种类错配不会当场炸
+        // （片段按错种类落到 global 作用域永久缓存，04 §2），所以两个数量必须一起打出来。
+        private static void TraceBadPhrase(PhraseEntry entry, int argCount)
+        {
+            string count = argCount < 0 ? "null" : argCount.ToString(CultureInfo.InvariantCulture);
+            Trace.Step("2", "bad-phrase " + entry.Id + " args=" + count
+                + " kinds=" + entry.ArgKinds.Length.ToString(CultureInfo.InvariantCulture));
         }
 
         // 模板按 {n} 切成"字面量 / 占位符"交替的段序列（03 §4.2 步 1–3）。返回 false = 模板不合法。
@@ -305,6 +317,7 @@ namespace VoiceDeputy
 
         // 04 §4.3：清理器的名单要按"能念出来的名字"匹配（条目里存的是清洗后的 PersonName 文本）。
         // 名字清洗只有这一处（03 §4.3），所以清理器从这里取结果，不自己抄一遍规则。
+        // 首字母大写也归这里：钩子与清理器各调一次 CapitalizeFirst 时大小写会分叉，名单就匹配不上。
         public static string PersonNameText(string raw)
         {
             List<string> numbers;
@@ -312,6 +325,7 @@ namespace VoiceDeputy
         }
 
         // 尾部编号后缀拆成 Number，剩下的部分做清洗（03 §4.3 步 1–4）。
+        // 首字母大写收在最后一步：PersonNameText 与 AddArg 共用这个函数，清理器名单与播报文本才是同一个串。
         // 名字有两条来路（单事件的 AddArg、聚合的 JoinNames）⇒ 去标签必须在这里再跑一次：
         // 顺序固定"先去掉标签、再走 CleanName"，否则标签里的字母会被念出来。StripRichText 幂等，跑两次没有代价。
         private static string SplitPersonName(string raw, out List<string> numbers)
@@ -335,7 +349,9 @@ namespace VoiceDeputy
                 name = name.Substring(0, separator);
             }
 
-            return CleanName(name);
+            // 全是不发音符号的名字会被洗成空串，空串不必让 CapitalizeFirst 负责。
+            string cleaned = CleanName(name);
+            return cleaned.Length == 0 ? cleaned : cleaned.CapitalizeFirst();
         }
 
         // 尾部编号后缀 `.数字` / `-数字` / `_数字` 的分隔符下标；没有则 −1（03 §4.3 步 1）。

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Text;
 using Verse;
 
 namespace VoiceDeputy
@@ -464,6 +466,8 @@ namespace VoiceDeputy
             Log.Message("[VD] 0 self-check phrases=" + Phrases.Length + " bindings=" + Bindings.Length
                 + " constants=" + ConstantTexts().Length + " categories=" + covered + "/" + total);
 
+            CheckTemplates();
+
             foreach (SelfCheckSample sample in SelfCheckSamples)
             {
                 if (sample.Call == null)
@@ -483,6 +487,129 @@ namespace VoiceDeputy
                         + Describe(sample.Expected) + " actual=" + Describe(actual));
                 }
             }
+        }
+
+        // 模板与 ArgKinds 是纯位置配对（SegmentPlanner 按下标取值），配对错了运行时只会静默：
+        // 名字会当 Enum 念、还按 global 作用域永久缓存（04 §2），所以构造期按代码契约静态对一遍。
+        // 契约按实际代码写，不按理想写：
+        //   SingleEvent 每个 kind 都必须被模板引用，且下标按 0,1,2… 连续升序（SplitTemplate 按下标取值）；
+        //   Batch 的 ArgKinds 恒为 2（SlotValues 强制），但 {1}=Names 允许不被模板引用（现有 3 条如此）；
+        //   RawText 不切模板（PlanCore 走"Args 恰好 1 个"的分支），模板空、占位符必须为 0。
+        private static void CheckTemplates()
+        {
+            int passed = 0;
+            foreach (PhraseEntry phrase in Phrases)
+            {
+                List<int> slots = TemplateSlots(phrase.Template);
+                if (TemplateMatches(phrase, slots))
+                {
+                    passed++;
+                    continue;
+                }
+
+                Log.Message("[VD] 0 phrase-check MISMATCH " + phrase.Id
+                    + " placeholders=" + SlotList(slots) + " kinds=" + phrase.ArgKinds.Length);
+            }
+
+            Log.Message("[VD] 0 phrase-check " + passed + "/" + Phrases.Length);
+        }
+
+        private static bool TemplateMatches(PhraseEntry phrase, List<int> slots)
+        {
+            if (slots == null)
+            {
+                return false;
+            }
+
+            switch (phrase.Form)
+            {
+                case PhraseForm.RawText:
+                    return slots.Count == 0 && phrase.ArgKinds.Length == 1;
+                case PhraseForm.Batch:
+                    if (phrase.ArgKinds.Length != 2)
+                    {
+                        return false;
+                    }
+
+                    foreach (int slot in slots)
+                    {
+                        if (slot >= 2)
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
+                default:
+                    if (slots.Count != phrase.ArgKinds.Length)
+                    {
+                        return false;
+                    }
+
+                    for (int i = 0; i < slots.Count; i++)
+                    {
+                        if (slots[i] != i)
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
+            }
+        }
+
+        // 占位符下标按出现顺序；模板不合法（缺 '}'、下标非数字）返回 null —— 运行时 SplitTemplate 也会拒绝它。
+        private static List<int> TemplateSlots(string template)
+        {
+            List<int> slots = new List<int>();
+            if (string.IsNullOrEmpty(template))
+            {
+                return slots;
+            }
+
+            int start = 0;
+            int open = template.IndexOf('{');
+            while (open >= 0)
+            {
+                int close = template.IndexOf('}', open);
+                if (close < 0)
+                {
+                    return null;
+                }
+
+                int slot;
+                if (!int.TryParse(template.Substring(open + 1, close - open - 1), NumberStyles.None, CultureInfo.InvariantCulture, out slot))
+                {
+                    return null;
+                }
+
+                slots.Add(slot);
+                start = close + 1;
+                open = template.IndexOf('{', start);
+            }
+
+            return slots;
+        }
+
+        private static string SlotList(List<int> slots)
+        {
+            if (slots == null)
+            {
+                return "invalid";
+            }
+
+            StringBuilder builder = new StringBuilder("[");
+            for (int i = 0; i < slots.Count; i++)
+            {
+                if (i > 0)
+                {
+                    builder.Append(',');
+                }
+
+                builder.Append(slots[i].ToString(CultureInfo.InvariantCulture));
+            }
+
+            return builder.Append(']').ToString();
         }
 
         private static string Describe(SpokenCategory? category)

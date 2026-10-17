@@ -19,7 +19,6 @@ namespace VoiceDeputy.UI
 
             listing.Gap(8f);
             settings.SetIfChanged(ref settings.GapMs, Mathf.RoundToInt(listing.SliderLabeled("句间停顿 " + settings.GapMs + " ms", settings.GapMs, 0f, 500f)));
-            settings.SetIfChanged(ref settings.BatchWindowMs, Mathf.RoundToInt(listing.SliderLabeled("合并窗口 " + Seconds(settings.BatchWindowMs) + " s", settings.BatchWindowMs, 0f, 5000f)));
             settings.SetIfChanged(ref settings.MaxNamedInBatch, Mathf.RoundToInt(listing.SliderLabeled("同句最多点名 " + settings.MaxNamedInBatch + " 人", settings.MaxNamedInBatch, 0f, 8f)));
             settings.SetIfChanged(ref settings.QueueLimit, Mathf.RoundToInt(listing.SliderLabeled("队列上限 " + settings.QueueLimit + " 句", settings.QueueLimit, 1f, 20f)));
 
@@ -32,11 +31,6 @@ namespace VoiceDeputy.UI
         private static string Percent(float value)
         {
             return Mathf.RoundToInt(value * 100f).ToString(CultureInfo.InvariantCulture) + "%";
-        }
-
-        private static string Seconds(int milliseconds)
-        {
-            return (milliseconds / 1000f).ToString("0.0", CultureInfo.InvariantCulture);
         }
     }
 }
