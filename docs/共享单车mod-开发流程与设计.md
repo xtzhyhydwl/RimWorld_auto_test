@@ -73,7 +73,7 @@ node src/cli.js call rimworld/list_colonists --profile bike
 ### 1.2 两个必须知道的操作事实
 
 1. **游戏必须由长驻宿主托管。** 一次性命令里启动的游戏会随该命令结束被进程树清理掉。
-   正确做法是后台任务里 `start` 之后挂 `Start-Sleep`。
+   正确做法是后台任务里跑 `start`，再等游戏进到某状态：`node src/cli.js live --profile <p> --until '<条件>' --timeout <ms>`（后台 job，job 完成即命中；**不要** `Start-Sleep`）。
 2. **`call` 必须带 `--profile bike`**，否则它会去找 `vanilla` 的桥接信息。
 
 ### 1.3 一个已经踩过的工具坑（会影响你以后所有取证）⚠
@@ -315,5 +315,5 @@ Patch_TicksPerMove.cs      Postfix Pawn.TicksPerMove(bool)
 
 - 干净实例**正在运行**：PID 14668，`profiles/bike`，桥接 `127.0.0.1:5174`，
   3 名殖民者（Arnold / Buffy / Yuzuki）在 250×250 的 `Map_0` 上
-- 它由后台任务托管（`start` 之后挂 `Start-Sleep`），**停掉：`node src/cli.js stop --profile bike`**
+- 它由后台任务托管（等状态用 `node src/cli.js live --profile bike --until '<条件>' --timeout <ms>`，不挂 `Start-Sleep`），**停掉：`node src/cli.js stop --profile bike`**
 - 满配的 `profiles/vanilla`（567 项）**未被改动**

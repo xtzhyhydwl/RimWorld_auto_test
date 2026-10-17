@@ -26,6 +26,10 @@
 |进度、待办、已知坑|`STATUS.md`（**顶部留 ≤30 行"现在"摘要**，历史往下堆）|
 |测试产物、报告、截图|`runs/`|
 
+5. **等游戏状态一律事件驱动，禁止 `Start-Sleep`。**
+用 `node src/cli.js live --profile <p> --until '<条件>' --timeout <ms>` 挂后台 job，**job 完成通知就是推送**。
+参数、`kind` 表与「为什么固定延时是错的」见 skill `rimworld-auto-test` 的「等游戏状态：事件驱动」一节。
+
 ## 写代码的三条原则（用户 2026-10-17 定，**顶层，优先于"先能跑"**）
 
 1. **Easy to Change** —— 改一个东西只改一处。

@@ -41,6 +41,43 @@ node src/cli.js tools | Select-String '工具总数'
 
 ---
 
+## 等游戏状态：事件驱动，禁止 `Start-Sleep`
+
+**规则**：要等「游戏到了某状态 / 某事件发生」，用事件推送；**不要**用固定秒数的 `Start-Sleep` 去赌。
+
+```powershell
+# 挂成后台 job；命中打印那条事件并 exit 0，超时 exit 2，参数错 exit 1
+node src/cli.js live --profile <profile> --until 'kind=colony_started' --timeout 180000
+```
+
+- **job 完成的通知本身就是推送** —— 不用轮询、不用 sleep。
+- 默认从文件头扫（watcher 比游戏晚起也能命中历史事件）；只等此刻之后的新事件加 `--new-only`。
+- 条件语法：`key=value` 相等、`key~value` **子串**（不是正则）；空格或 `&&` 连接，全部成立才命中；键 = 事件 JSON 顶层字段。
+- `--last N` 事后回看（`runs\live\<profile>.ndjson`，**游戏没开也能读**）；`--source log` 改跟 `Player.log`（按纯文本行匹配）。
+
+| kind | 什么时候发 | 典型 `--until` |
+| --- | --- | --- |
+| `game_loaded` | 读档 / 新开局后第一次 Update | `kind=game_loaded` |
+| `colony_started` | 首次出现玩家主基地地图（只报一次） | `kind=colony_started` |
+| `window` | 顶层窗口类型变了（`opened` / `type` / `forcePause`） | `kind=window opened=true` |
+| `log` | 含 `[VD]` 的 Message/Warning、**全部** Error | `kind=log text~[VD] 1 incident` |
+| `heartbeat` | 每 3 秒一条（`tick` / `programState` / `speed`，暂停 = 0） | `kind=heartbeat speed=1` |
+| `error` | mod 自己捕获到异常（`where` / `message`） | `kind=error` |
+
+**为什么固定延时是错的**：延时**既不必要**（状态早到了还在白等）**也不充分**（机器忙/加载慢就没到，后面全错）；
+一次性命令挂死还会被外部超时**掐死**，等于什么都没干。能不能往下走，由**可观测条件**决定，不由墙钟决定
+（与第一原则 2「回读状态确认」同源）。
+
+**兜底**：事件通道没覆盖的（进程/桥接是否活），只读能力 + 有界超时轮询：
+`node src/cli.js status`、`rimworld/get_game_info`、`rimworld/get_ui_state`；
+库里已有 `src/ui.js:94` 的 `waitUntil(fn, { timeoutMs, intervalMs })`。
+**等待逻辑只准出现在一个地方**（一条 `live` 命令 / 一个 `waitUntil`），不要散成一堆 sleep。
+
+**派子代理**：用全新上下文的子代理做游戏侧测试时，提示词里**必须显式给出这条规则与具体 `live` 命令**
+（它看不到本 skill 之外的对话）；子代理自己发明 `Start-Sleep` ⇒ **视为不合格**。
+
+---
+
 ## 已知地雷（实测确认，别踩）
 
 | 工具 | 症状 | 对策 |
