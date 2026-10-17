@@ -10,7 +10,13 @@
   - 第一轮报告 `runs/游戏内验收-20261017.md`：自检 `28/23/32/22` + 17 sample 全 ok；8 个补丁点里 6 个被真实触发（incident 3 类 / 自算 3 类 / message 1 类 / letter 丢弃表）；合成闸（无 key 时）`5.1→5.3 未配置`、0 请求、0 异常；发现 F1（死亡句富文本）与 `VoicePlayer` 告警，均已修（`fe2b0e9`）。
   - 第二轮（进行中）：配好 `ApiKey` 后真合成成功（`5.2` 45 条、`Cache/Voice` 46 个 wav / 2.36 MB）、`[VD] 3a Ready`→`3b`→`4`→`6` 首次跑通；`[VD] 4 Taisia阵亡。Taisia已死亡。` 证明 F1 已修、第 7 步开始真播放。
   - 新装 `DSH_GameLink`（事件通道，见 `docs/提案-游戏侧事件通道-DSH_GameLink.md`）：`runs/live/voiced.ndjson` 163 行、0 行非法 JSON；`node src/cli.js live --until …` 实测 12.6 s 命中并退出。
-- **下一步**：第二轮报告出来后，按它补齐 `06` §10 全链验收（类别开关跨重启读回、听感、队列截断/插队/聚合）。
+- **下一步**：按第二轮报告补齐剩余项：
+- **第三轮（2026-10-17 16:50 收尾，全部实测）——两个持久化 bug 已修并验完**：
+  - `1a9b772`：`VoiceDeputySettings` 全部改走 `Look<T>`（`Scribe_Values.Look(..., true)`）。修前 XML 永远是空对象；修后 `update_mod_settings` 落全 40 项（22 个 `enabled_*` + 全部标量），**重启**后 `get_mod_settings` 读回 `QueueLimit=3` / `MaxNamedInBatch=1` / `TraceEnabled=true` / `ApiKey` 非空 ⇒ `06 §10` 第 4 条成立。
+  - `1a9b772`：`SpeechLibrary.IndexDirty` + `LibraryJanitor.SaveIndexIfDue`（5 s 节流）。实测连播后 `Cache\Voice\index.json` 5 s 内非空；**重启后 25 个 wav 全部保留**（修前那 5 个未入索引的孤立文件被 reconcile 删掉，两阶段/对账都对）。
+  - `1a9b772`：`cli live --until` 默认从头扫 + `--new-only`；实测历史命中 0.2 s、新事件等待正常。
+- **还没验**：人耳听感（停顿/爆音/语速）、`3b drop-new`、`5.3 HTTP 401` 错误串、`鼠条.18` 名字清洗、精神崩溃/分娩两个钩子、22 类全覆盖。
+
 
 - **进游戏看这几行判定第 8 步**（先在调试页打开 `TraceEnabled`）：
   - 启动首帧：`[VD] janitor roster new=<n> gone=0`；2 s 后：`[VD] warmup first-batch <入队>/<总数>` → 一批 `[VD] 5.1 <常量片段>` + `[VD] 5.2 <片段>`（**不伴随** `[VD] 4`），随后 `[VD] warmup sent <n> left=<n>`
