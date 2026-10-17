@@ -14,18 +14,20 @@
     --line:#d7dfea;
     --main:#2563c9;
     --main-soft:#e8f0fd;
-    --bg-thread:#c2690a;
-    --bg-soft:#fdf2e4;
+    --bgthread:#c2690a;
+    --bgthread-soft:#fdf2e4;
     --disk:#15803d;
     --disk-soft:#e7f5ec;
-    --pending:#6b7280;
-    --pending-soft:#f0f1f4;
+    --self:#7c3aed;
+    --self-soft:#f3e9fe;
+    --probe:#6b7280;
+    --probe-soft:#f0f1f4;
     --loop:#1743b8;
     --warn:#b45309;
     --radius:8px;
     --shadow:0 1px 2px rgba(20,40,70,.06),0 2px 10px rgba(20,40,70,.05);
     --mono:"Cascadia Mono","Consolas","SFMono-Regular","Menlo",monospace;
-    --sans:"Segoe UI","Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;
+    --sans:"Segoe UI","Microsoft YaHei",sans-serif;
   }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0}
@@ -40,7 +42,7 @@
   code,.mono{font-family:var(--mono);font-size:.92em}
   code{background:#f2f5fa;border:1px solid #e3e9f2;border-radius:4px;padding:0 4px;color:#1f3350;white-space:nowrap}
   h1,h2,h3{font-weight:600;margin:0}
-  .wrap{max-width:1440px;margin:0 auto;padding:0 20px 56px}
+  .wrap{max-width:1460px;margin:0 auto;padding:0 20px 56px}
 
   /* ---------- 顶部状态条 ---------- */
   .top{
@@ -49,28 +51,24 @@
     box-shadow:0 1px 3px rgba(20,40,70,.05);
     margin-bottom:22px;
   }
-  .top-inner{max-width:1440px;margin:0 auto;padding:16px 20px 14px}
+  .top-inner{max-width:1460px;margin:0 auto;padding:16px 20px 14px}
   .title-row{display:flex;flex-wrap:wrap;align-items:center;gap:14px 22px}
   .title-row h1{font-size:21px;letter-spacing:.2px}
   .title-row h1 .v{color:var(--main)}
-  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-  .chip{
-    display:inline-flex;align-items:center;gap:6px;
-    background:#fff;border:1px solid var(--line);border-radius:999px;
-    padding:2px 11px;font-size:12.5px;color:var(--ink2);
-  }
-  .chip b{font-weight:600;color:var(--main)}
+  .sub{margin-top:6px;font-size:13px;color:var(--ink2)}
+  .sub b{font-weight:600;color:var(--main)}
   .legend{display:flex;flex-wrap:wrap;gap:14px;margin-left:auto;font-size:12.5px;color:var(--muted)}
   .lg{display:inline-flex;align-items:center;gap:6px}
   .dot{width:12px;height:12px;border-radius:3px;display:inline-block}
   .dot.main{background:var(--main)}
-  .dot.bg{background:var(--bg-thread)}
+  .dot.bg{background:var(--bgthread)}
   .dot.disk{background:var(--disk)}
-  .dot.pending{background:#fff;border:1.5px dashed var(--pending)}
+  .dot.self{background:var(--self)}
+  .dot.probe{background:#fff;border:1.5px dashed var(--probe)}
 
   /* ---------- 区块 ---------- */
   section{margin:0 0 30px}
-  .sec-head{display:flex;align-items:baseline;gap:12px;margin:0 0 12px}
+  .sec-head{display:flex;align-items:baseline;gap:12px;margin:0 0 12px;flex-wrap:wrap}
   .sec-head h2{font-size:17px}
   .sec-head .num{
     font-family:var(--mono);font-size:12px;color:#fff;background:#8fa2bb;
@@ -95,92 +93,131 @@
   .figbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:11px 15px;border-bottom:1px solid var(--line);background:#fbfcfe;border-radius:8px 8px 0 0}
   .figbar .tip{font-size:12.5px;color:var(--ink2)}
   .figbar .tip b{color:var(--main)}
+  .figbar .key{display:flex;flex-wrap:wrap;gap:12px;margin-left:auto;font-size:12px;color:var(--muted)}
+  .flow-scroll{overflow-x:auto;overflow-y:hidden;padding:8px 8px 4px;border-radius:0 0 var(--radius) var(--radius)}
+  .flow-scroll svg{display:block;min-width:1240px;width:100%;height:auto}
+  .figfoot{padding:8px 15px 12px;font-size:12px;color:var(--muted);border-top:1px dashed var(--line)}
+  .figfoot code{font-size:11.6px}
+
+  /* SVG 基础样式 */
+  .lane-t{font-size:13px;font-weight:600}
+  .lane-s{font-size:9.8px;fill:#7b8ca3}
+  .box{fill:#fff;stroke:#bfcde0;stroke-width:1.2}
+  .strip-main{fill:var(--main)}
+  .strip-bg{fill:var(--bgthread)}
+  .strip-disk{fill:var(--disk)}
+  .strip-self{fill:var(--self)}
+  .nt{font-size:11.8px;font-weight:600;fill:#16233a}
+  .nt.mono{font-family:var(--mono);font-size:11px}
+  .ns{font-size:9.6px;fill:#63748a}
+  .ns.mono{font-family:var(--mono);font-size:8.8px}
+  .ns.self{fill:#6d28d9;font-weight:600}
+  .el{font-size:9.8px;fill:#42566e}
+  .el.mono{font-family:var(--mono);font-size:9px}
+  .el-loop{font-size:10px;fill:var(--loop);font-weight:600}
+  .el-bg{font-size:9.6px;fill:#a05a09;font-family:var(--mono)}
+  .el-disk{font-size:9.6px;fill:#1a6b38;font-family:var(--mono)}
+  .ribbon{font-size:8.8px;font-weight:600}
+  .node{cursor:pointer}
+  .node:hover .box{stroke:#7d9cc4;stroke-width:2}
+  .box-key{fill:#eef5ff;stroke:var(--main);stroke-width:1.9}
+  .box-loop{fill:#f7f9ff;stroke:var(--loop);stroke-width:1.3}
+  .box-host{fill:#fbfcfe;stroke:#a8b8cc;stroke-width:1.2}
+  .box-pend{fill:#fafbfc;stroke:var(--probe);stroke-width:1.3;stroke-dasharray:6 4}
+  .lbg{fill:#f4f8ff}
+
+  /* ---------- 模块卡 ---------- */
+  .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px}
+  .filters .lbl{font-size:12.5px;color:var(--muted);margin-right:2px}
   .btn{
     font:inherit;font-size:12.5px;color:var(--ink2);background:#fff;border:1px solid var(--line);
     border-radius:6px;padding:3px 11px;cursor:pointer;
   }
   .btn:hover{border-color:#9fb6d6;color:var(--main)}
   .btn.on{background:var(--main);border-color:var(--main);color:#fff}
-  .flow-scroll{overflow-x:auto;overflow-y:hidden;padding:8px 8px 4px;border-radius:0 0 var(--radius) var(--radius)}
-  .flow-scroll svg{display:block;min-width:1140px;width:100%;height:auto}
-  .figfoot{padding:8px 15px 12px;font-size:12px;color:var(--muted);border-top:1px dashed var(--line)}
-
-  /* SVG 基础样式 */
-  .lane-t{font-size:13px;font-weight:600}
-  .lane-s{font-size:10.5px;fill:#7b8ca3}
-  .box{fill:#fff;stroke:#bfcde0;stroke-width:1.2}
-  .strip-main{fill:var(--main)}
-  .strip-bg{fill:var(--bg-thread)}
-  .strip-disk{fill:var(--disk)}
-  .nt{font-size:12.5px;font-weight:600;fill:#16233a}
-  .nt.mono{font-family:var(--mono);font-size:12px}
-  .ns{font-size:9.8px;fill:#63748a}
-  .ns.mono{font-family:var(--mono)}
-  .el{font-size:9.6px;fill:#4b5f78;font-family:var(--sans)}
-  .el.mono{font-family:var(--mono);font-size:9.2px}
-  .el-loop{font-size:10px;fill:var(--loop);font-weight:600}
-  .el-bg{font-size:9.6px;fill:#9a5507;font-family:var(--mono)}
-  .el-p{font-size:9.6px;fill:var(--pending)}
-  .node{cursor:pointer}
-  .node:hover .box{stroke:#7d9cc4;stroke-width:2}
-  .box-key{fill:#eef5ff;stroke:var(--main);stroke-width:2}
-  .box-loop{fill:#f7f9ff}
-  .box-pending{fill:#fafbfc;stroke:var(--pending);stroke-width:1.4;stroke-dasharray:6 4}
-  .box-host{fill:#fbfcfe;stroke:#a8b8cc;stroke-width:1.2}
-
-  /* ---------- 模块卡 ---------- */
-  .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px}
-  .filters .lbl{font-size:12.5px;color:var(--muted);margin-right:2px}
   .mods{display:grid;grid-template-columns:repeat(auto-fill,minmax(322px,1fr));gap:13px}
-  .mod{padding:0;overflow:hidden;border-left:4px solid #c3cfdf;transition:box-shadow .12s,border-color .12s}
+  .mod{padding:0;overflow:hidden;border-left:4px solid #c3cfdf}
   .mod:hover{box-shadow:0 3px 14px rgba(20,40,70,.12)}
-  .mod.sel{border-left-color:var(--main);box-shadow:0 0 0 2px #b9d0f2,0 3px 14px rgba(20,40,70,.1)}
-  .mod > header{display:flex;align-items:center;gap:8px;padding:9px 13px 8px;background:#f8fafd;border-bottom:1px solid #e6ecf4}
-  .mod .idx{font-family:var(--mono);font-size:11px;color:#7b8ca3;min-width:16px}
+  .mod.sel{box-shadow:0 0 0 2px #b9d0f2,0 3px 14px rgba(20,40,70,.1)}
+  .mod > header{display:flex;align-items:center;gap:8px;padding:9px 13px 8px;background:#f8fafd;border-bottom:1px solid #e6ecf4;flex-wrap:wrap}
   .mod h3{font-size:13.5px;font-family:var(--mono);letter-spacing:-.2px;overflow-wrap:anywhere}
-  .badge{font-size:11px;border-radius:4px;padding:0 6px;line-height:17px;flex:0 0 auto;margin-left:auto}
+  .badge{font-size:11px;border-radius:4px;padding:0 6px;line-height:17px;flex:0 0 auto}
   .badge.has{background:#eaf3ec;color:#1c6b34;border:1px solid #c6e2ce}
   .badge.new{background:#eaf0fd;color:#1f4fa8;border:1px solid #c8d8f5}
-  .mod dl{margin:0;padding:9px 13px 11px;display:grid;grid-template-columns:46px 1fr;gap:5px 8px;font-size:12.4px}
+  .gt{font-size:11px;border-radius:4px;padding:0 6px;line-height:17px;margin-left:auto;flex:0 0 auto}
+  .gt-entry{background:#e8f0fd;color:#1f4fa8;border:1px solid #c8d8f5}
+  .gt-hook{background:#e4f3f3;color:#0d6d6d;border:1px solid #bfe0e0}
+  .gt-sched{background:#ecebfb;color:#4b43b8;border:1px solid #cfcbf3}
+  .gt-synth{background:#fdf0e2;color:#9a5507;border:1px solid #f0d3a4}
+  .gt-store{background:#e7f5ec;color:#166534;border:1px solid #bfe0cb}
+  .gt-ui{background:#eef1f6;color:#4a5b70;border:1px solid #d5dde8}
+  .mod.entry{border-left-color:#2563c9}
+  .mod.hook{border-left-color:#0d7d7d}
+  .mod.sched{border-left-color:#5b53c8}
+  .mod.synth{border-left-color:#b4620e}
+  .mod.store{border-left-color:#15803d}
+  .mod.ui{border-left-color:#5f7186}
+  .mod dl{margin:0;padding:9px 13px 11px;display:grid;grid-template-columns:46px 1fr;gap:5px 8px;font-size:12.3px}
   .mod dt{color:#7d8da3;font-size:11.5px;letter-spacing:.3px;padding-top:1px}
   .mod dd{margin:0;color:#2c3d54;line-height:1.55}
-  .mod dd code{font-size:11.4px;padding:0 3px}
-  .mod .no{color:#6b7b90}
+  .mod dd code{font-size:11.2px;padding:0 3px}
 
-  /* ---------- 类型表 ---------- */
+  /* ---------- 表格 ---------- */
   .tbl-wrap{overflow-x:auto}
-  table{border-collapse:collapse;width:100%;min-width:940px;font-size:12.8px}
-  th,td{text-align:left;padding:8px 12px;border-bottom:1px solid #e8edf5;vertical-align:top}
+  table{border-collapse:collapse;width:100%;min-width:1000px;font-size:12.8px}
+  th,td{text-align:left;padding:7px 11px;border-bottom:1px solid #e8edf5;vertical-align:top}
   th{background:#f6f9fd;color:#3c4f68;font-weight:600;font-size:12px;letter-spacing:.4px;white-space:nowrap}
   tbody tr:hover{background:#fafcff}
-  td:first-child{white-space:nowrap;font-family:var(--mono);font-size:12.3px;color:#1f3350;font-weight:600}
-  td.f{font-family:var(--mono);font-size:11.8px;color:#3a4d66;line-height:1.7}
-  td.f i{color:#8b9aad;font-style:normal}
-  .n-new{color:#a4570b;font-weight:600;font-size:11px}
-  .n-mod{color:#1f4fa8;font-weight:600;font-size:11px}
+  td.cls{white-space:nowrap;font-family:var(--mono);font-size:12.2px;color:#1f3350;font-weight:600}
+  td.tk{font-family:var(--mono);font-size:11.6px;color:#3a4d66;white-space:nowrap}
+  td.tk .b{color:#a4570b}
+  .ch{display:inline-block;font-size:11.5px;border-radius:999px;padding:0 9px;line-height:18px;white-space:nowrap;border:1px solid}
+  .ch-inc{background:#e8f0fd;color:#1f4fa8;border-color:#c8d8f5}
+  .ch-let{background:#eef1f6;color:#42566e;border-color:#d5dde8}
+  .ch-msg{background:#e6f4f7;color:#0d6470;border-color:#bedee6}
+  .ch-self{background:var(--self-soft);color:#6d28d9;border-color:#dcc7fb}
+  .ch-todo{background:#fafbfc;color:#6b7280;border-color:#c3c9d2;border-style:dashed}
+  .pr{display:inline-block;min-width:26px;text-align:center;font-family:var(--mono);font-size:11.6px;border-radius:4px;padding:0 5px;line-height:18px}
+  .p20{background:#fde8dc;color:#9a3412;font-weight:600}
+  .p10{background:#fdf2e4;color:#92500a}
+  .p5{background:#eef2f7;color:#3c4f68}
+  .p0{background:#f6f7f9;color:#6b7889}
+  .on{color:#166534;font-weight:600;white-space:nowrap}
+  .tbl-sum{display:flex;flex-wrap:wrap;gap:8px;padding:8px 15px 12px;font-size:12.2px;color:var(--muted);border-top:1px dashed var(--line)}
+  .tbl-sum b{color:var(--ink2);font-weight:600}
 
-  /* ---------- 待拍板 ---------- */
-  .q-list{display:grid;gap:11px}
-  .q{display:grid;grid-template-columns:64px 1fr auto;gap:14px;align-items:center;padding:13px 16px}
-  .q .id{font-family:var(--mono);font-weight:600;font-size:15px;color:var(--pending);text-align:center;background:var(--pending-soft);border-radius:6px;padding:5px 0}
-  .q .txt b{font-weight:600}
-  .q .txt .s{display:block;font-size:12.5px;color:var(--muted);margin-top:2px}
-  .st{font-size:12px;border-radius:999px;padding:2px 11px;white-space:nowrap;border:1px dashed var(--pending);color:var(--pending);background:#fff}
-  .st.wait{color:#a4570b;border-color:#d9a24a;background:#fff9ef}
-  .st.todo{color:#8a94a3;border-color:#b9c2cf;background:#f7f8fa}
+  /* ---------- 类型速览 ---------- */
+  .types{display:grid;grid-template-columns:repeat(auto-fill,minmax(430px,1fr));gap:12px}
+  .ty{padding:11px 14px 12px;border-left:4px solid #94a8c2}
+  .ty .h{display:flex;gap:9px;align-items:baseline;flex-wrap:wrap}
+  .ty .h b{font-family:var(--mono);font-size:13px;font-weight:600;color:#1f3350}
+  .ty .h .n{font-family:var(--mono);font-size:11px;color:#8b9aad}
+  .ty p{margin:5px 0 0;font-size:12.5px;color:#3d4f66}
+  .ty .f{margin-top:6px;font-family:var(--mono);font-size:11.3px;color:#5a6f88;line-height:1.7;overflow-wrap:anywhere}
+  .ty.self{border-left-color:var(--self)}
+  .ty.probe{border-left-color:#c3c9d2;border-left-style:dashed}
+
+  /* ---------- 探针 ---------- */
+  .p-list{display:grid;gap:10px}
+  .pb{display:grid;grid-template-columns:64px 1fr 1fr auto;gap:14px;align-items:start;padding:11px 15px;border-left:4px dashed var(--probe)}
+  .pb .id{font-family:var(--mono);font-weight:600;font-size:15px;color:var(--probe);text-align:center;background:var(--probe-soft);border-radius:6px;padding:3px 0}
+  .pb .q b,.pb .r b{display:block;font-size:11.5px;font-weight:600;color:#7d8da3;letter-spacing:.3px}
+  .pb .q span,.pb .r span{font-size:12.6px;color:#2c3d54}
+  .st{font-size:11.5px;border-radius:999px;padding:1px 10px;white-space:nowrap;border:1px dashed var(--probe);color:var(--probe);background:#fff}
+  .warn-pill{display:inline-block;font-size:12px;color:#96591a;background:#fff7e8;border:1px solid #f0d3a4;border-radius:6px;padding:1px 8px}
+  .warn{color:#a1621a;font-weight:600}
 
   footer{border-top:1px solid #dbe3ee;background:#fff;margin-top:10px;padding:20px 0 34px}
-  footer .in{max-width:1440px;margin:0 auto;padding:0 20px;font-size:12.6px;color:var(--muted);display:grid;gap:5px}
+  footer .in{max-width:1460px;margin:0 auto;padding:0 20px;font-size:12.6px;color:var(--muted);display:grid;gap:5px}
   footer code{font-size:11.8px}
-  .warn-pill{display:inline-block;margin-left:6px;font-size:12px;color:#96591a;background:#fff7e8;border:1px solid #f0d3a4;border-radius:6px;padding:1px 8px}
 
   @media (max-width:760px){
     body{font-size:13.5px}
     .title-row h1{font-size:18px}
     .legend{margin-left:0}
     .mod dl{grid-template-columns:42px 1fr;font-size:12px}
-    .q{grid-template-columns:52px 1fr;row-gap:8px}
-    .q .st{grid-column:1 / -1;justify-self:start}
+    .pb{grid-template-columns:52px 1fr;row-gap:8px}
+    .pb .st{grid-column:1 / -1;justify-self:start}
     .top-inner{padding:13px 14px 12px}
     .wrap{padding:0 14px 40px}
   }
@@ -194,846 +231,969 @@
       <h1>副官语音 <span class="v">v2</span> · 模块与信息流</h1>
       <div class="legend">
         <span class="lg"><i class="dot main"></i>主线程</span>
-        <span class="lg"><i class="dot bg"></i>后台线程</span>
+        <span class="lg"><i class="dot bg"></i>后台 Task</span>
         <span class="lg"><i class="dot disk"></i>磁盘</span>
-        <span class="lg"><i class="dot pending"></i>待定（未决）</span>
+        <span class="lg"><i class="dot self"></i>自算通道</span>
+        <span class="lg"><i class="dot probe"></i>探针待验</span>
       </div>
     </div>
-    <div class="meta">
-      <span class="chip">草案 v2</span>
-      <span class="chip">2026-10-17</span>
-      <span class="chip"><b>28</b> 个模块</span>
-      <span class="chip"><b>13</b> 个数据类型</span>
-      <span class="chip"><b>7</b> 个补丁点 · 5 个文件</span>
-    </div>
+    <div class="sub"><b>28</b> 模块 · <b>18</b> 组类型 · <b>8</b> 个补丁点 / 5 个文件 · <b>22</b> 类 · 2026-10-17 定稿</div>
   </div>
 </header>
 
 <div class="wrap">
 
-  <!-- ================= 1. 六条不变量 ================= -->
+  <!-- ================= 01 不变量 ================= -->
   <section id="invariants">
     <div class="sec-head">
       <span class="num">01</span>
-      <h2>六条不变量</h2>
-      <span class="note">改任何模块先对照这六条；它们就是「改一处」的支点。</span>
+      <h2>七条不变量</h2>
+      <span class="note">改任何模块先对照这七条；它们是「只改一处」的支点，也是评审时唯一要背的东西。</span>
     </div>
     <div class="inv-grid">
+
       <article class="card inv">
-        <div class="h"><span class="tag">I1</span><span class="t">只有 <code>SegmentSynthesizer</code> 跨线程：后台只拿 <code>string</code>/数值，只回 <code>byte[]</code></span></div>
-        <div class="v">违反：后台建 <code>AudioClip</code>、读 <code>Pawn</code> ⇒ 未定义行为</div>
+        <div class="h"><span class="tag">I1</span><span class="t">只有 <code>SegmentSynthesizer</code> 跨线程：后台只碰 <code>string</code> 与 <code>TtsRequestParams</code>，只回 <code>byte[]</code></span></div>
+        <div class="v"><b>违反：</b>后台建 <code>AudioClip</code>、读 <code>Pawn</code> ⇒ 未定义行为；<code>Notice</code>/<code>Utterance</code>/<code>Verse</code> 一概不出主线程</div>
       </article>
+
       <article class="card inv">
-        <div class="h"><span class="tag">I2</span><span class="t"><code>SpeechLibrary</code> 是唯一碰磁盘音频的模块，且只在主线程被访问</span></div>
-        <div class="v">违反：两处各写一半文件句柄</div>
+        <div class="h"><span class="tag">I2</span><span class="t"><code>SpeechLibrary</code> 是唯一碰磁盘的模块，且只在主线程被访问</span></div>
+        <div class="v"><b>违反：</b>两处各写一半文件句柄、孤儿文件对不上（磁盘列表也只由它交给清理器）</div>
       </article>
+
       <article class="card inv">
-        <div class="h"><span class="tag">I3</span><span class="t">只有 <code>LibraryJanitor</code> 作删除决策，别人只能 <code>ReportBroken</code> 登记</span></div>
-        <div class="v">违反：两套淘汰规则互相打脸</div>
+        <div class="h"><span class="tag">I3</span><span class="t">删除决策只在 <code>LibraryJanitor</code>；库的 <code>Put</code> 只回「当前占用」，不认识上限</span></div>
+        <div class="v"><b>违反：</b>两套淘汰规则互相打脸；别人想删只能 <code>ReportBroken</code> 登记</div>
       </article>
+
       <article class="card inv">
-        <div class="h"><span class="tag">I4</span><span class="t">只有 <code>Announcer</code> 调 <code>Switchboard</code>；只有 <code>TtsClient</code> 判「配置是否可用」</span></div>
-        <div class="v">违反：到处 <code>if</code>，加一类要改 N 处</div>
+        <div class="h"><span class="tag">I4</span><span class="t">开关闸只有 <code>Announcer</code> 调 <code>Switchboard</code>；配置闸只有 <code>TtsClient</code> 判</span></div>
+        <div class="v"><b>违反：</b>到处 <code>if</code>；「未配置」出现两处判断，说法会分叉（UI 只读 <code>LastError</code>）</div>
       </article>
+
       <article class="card inv">
-        <div class="h"><span class="tag">I5</span><span class="t">文案只有一份：中文与分段规则都在 <code>SpeechCatalog</code> 的数据表里</span></div>
-        <div class="v">违反：同一个词两种念法</div>
+        <div class="h"><span class="tag">I5</span><span class="t">中文文案只有一份（<code>SpeechCatalog.Phrases</code>）；念法规则只有一份（<code>SegmentPlanner</code>）</span></div>
+        <div class="v"><b>违反：</b>同一个词两种念法；<code>鼠条.18</code> 一处清一处不清</div>
       </article>
+
       <article class="card inv">
-        <div class="h"><span class="tag">I6</span><span class="t">音频唯一样子是磁盘文件 + <code>AudioClip</code>；无池、无 PCM 常驻</span></div>
-        <div class="v">违反：3000 条 × 2 s ≈ 288 MB 常驻内存</div>
+        <div class="h"><span class="tag">I6</span><span class="t">音频唯一样子 = 磁盘文件 + 按需建 <code>AudioClip</code>：没有 clip 池、没有 PCM 常驻</span></div>
+        <div class="v"><b>违反：</b>3000 条 × 2 s ≈ <b>288 MB</b> 常驻（24 kHz / 16 bit / 单声道 = 48 KB/s）</div>
       </article>
+
+      <article class="card inv">
+        <div class="h"><span class="tag">I7</span><span class="t">启动顺序固定：<code>SpeechCatalog</code> → <code>VoiceDeputySettings</code> → <code>DeputyGameComponent</code>（框架自动创建）</span></div>
+        <div class="v"><b>违反：</b>目录表未就绪就构造 Settings ⇒ 全部开关落默认或抛（<code>Entries</code> 遍历空）</div>
+      </article>
+
     </div>
   </section>
 
-  <!-- ================= 2. 信息流图 ================= -->
+  <!-- ================= 02 信息流图 ================= -->
   <section id="flow">
     <div class="sec-head">
       <span class="num">02</span>
-      <h2>信息流图：一条数据从游戏事件走到扬声器</h2>
-      <span class="note">蓝=主线程 · 橙=跨线程 · 绿=磁盘 · 灰虚线=待定（Q17）</span>
+      <h2>信息流图：一条播报从游戏事件走到扬声器</h2>
+      <span class="note">三条泳道 · 主链 10 步 · 3 条旁路 · 每条箭头标了传什么</span>
     </div>
 
     <div class="card">
       <div class="figbar">
-        <span class="tip">主链 <b>①→⑨</b>；未命中走 <b>橙色后台</b>合成，回填磁盘后<b>再 Plan</b>（★ 回路）。</span>
-        <button class="btn" id="btn-loop" type="button">高亮回填回路</button>
-        <button class="btn on" id="btn-label" type="button">显示数据标签</button>
+        <span class="tip">命中 ⇒ 直接入队；<b>未命中</b>走橙色后台合成，回填磁盘后<b>再 Plan 一次</b>（<b>★ 回路</b>）。</span>
+        <span class="key">
+          <span class="lg"><i class="dot main"></i>主线程</span>
+          <span class="lg"><i class="dot bg"></i>跨线程</span>
+          <span class="lg"><i class="dot disk"></i>磁盘</span>
+        </span>
       </div>
 
       <div class="flow-scroll">
-      <svg id="svg-flow" viewBox="0 0 1480 1010" preserveAspectRatio="xMidYMid meet" role="img"
-           aria-label="副官语音模块信息流图：主线程、后台 Task、磁盘三条泳道">
+      <svg id="svg-flow" viewBox="0 0 1520 960" preserveAspectRatio="xMidYMid meet" role="img"
+           aria-label="副官语音信息流图：主线程、后台 Task、磁盘三条泳道，主链从游戏事件经 5 个钩子文件到达扬声器，未命中片段时经后台合成回填磁盘后再 Plan 一次">
         <defs>
           <marker id="ar-main" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M0 0 L10 5 L0 10 z" fill="#2563c9"/></marker>
           <marker id="ar-loop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
             <path d="M0 0 L10 5 L0 10 z" fill="#1743b8"/></marker>
-          <marker id="ar-bg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <marker id="ar-bg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
             <path d="M0 0 L10 5 L0 10 z" fill="#c2690a"/></marker>
           <marker id="ar-disk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M0 0 L10 5 L0 10 z" fill="#15803d"/></marker>
-          <marker id="ar-p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0 0 L10 5 L0 10 z" fill="#6b7280"/></marker>
         </defs>
 
         <!-- ===== 泳道 ===== -->
         <g id="lanes">
-          <rect x="56" y="60" width="1368" height="640" rx="10" fill="#f4f8ff" stroke="#a9c2e6" stroke-width="1.3"/>
-          <rect x="56" y="60" width="5" height="640" rx="2.5" fill="#2563c9"/>
-          <text x="74" y="84" class="lane-t" fill="#1c4b9c">主线程</text>
-          <text x="130" y="84" class="lane-s">唯一的策略层：钩子 → 开关 → 聚合 → 规划 → 查库 → 排队 → 播放</text>
+          <rect x="24" y="52" width="1472" height="568" rx="10" fill="#f4f8ff" stroke="#a9c2e6" stroke-width="1.3"/>
+          <rect x="24" y="52" width="5" height="568" rx="2.5" fill="#2563c9"/>
+          <text x="40" y="80" class="lane-t" fill="#1c4b9c">主线程</text>
+          <text x="98" y="80" class="lane-s">唯一的策略层 · DeputyGameComponent.Update 每帧：Drain → Plan → Enqueue → 播放</text>
 
-          <rect x="56" y="716" width="1368" height="120" rx="10" fill="#fdf6ec" stroke="#eec08a" stroke-width="1.3"/>
-          <rect x="56" y="716" width="5" height="120" rx="2.5" fill="#c2690a"/>
-          <text x="74" y="740" class="lane-t" fill="#9c550a">后台 Task</text>
-          <text x="152" y="740" class="lane-s">只有 HTTP 合成；只看得见 <tspan font-family="monospace">string</tspan> / 数值，只回 <tspan font-family="monospace">byte[]</tspan></text>
+          <rect x="24" y="640" width="1472" height="140" rx="10" fill="#fdf6ec" stroke="#eec08a" stroke-width="1.3"/>
+          <rect x="24" y="640" width="5" height="140" rx="2.5" fill="#c2690a"/>
+          <text x="40" y="672" class="lane-t" fill="#9c550a">后台 Task</text>
+          <text x="128" y="672" class="lane-s">只有 HTTP 合成：只见 string / TtsRequestParams，只回 byte[]</text>
 
-          <rect x="56" y="852" width="1368" height="120" rx="10" fill="#f2fbf5" stroke="#a9d8ba" stroke-width="1.3"/>
-          <rect x="56" y="852" width="5" height="120" rx="2.5" fill="#15803d"/>
-          <text x="74" y="876" class="lane-t" fill="#12652f">磁盘</text>
-          <text x="122" y="876" class="lane-s"><tspan font-family="monospace">Cache/Voice/&lt;key&gt;.wav</tspan> + <tspan font-family="monospace">index.json</tspan>；音频唯一样子</text>
+          <rect x="24" y="800" width="1472" height="130" rx="10" fill="#f2fbf5" stroke="#a9d8ba" stroke-width="1.3"/>
+          <rect x="24" y="800" width="5" height="130" rx="2.5" fill="#15803d"/>
+          <text x="40" y="832" class="lane-t" fill="#12652f">磁盘</text>
+          <text x="86" y="832" class="lane-s">Cache/Voice/&lt;value&gt;.wav + index.json · 音频唯一样子</text>
         </g>
 
-        <!-- ===== 边（先画线，后画节点） ===== -->
+        <!-- ===== 边（先线，后节点） ===== -->
         <g id="edges" fill="none" stroke-linejoin="round">
 
           <!-- 主链 -->
-          <path d="M180 140 H244" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
-          <path d="M370 140 H430" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
-          <path d="M530 140 H590" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
-          <path d="M738 140 H798" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
-          <path d="M950 140 H1010" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
-          <path d="M1084 172 V248" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
-          <path d="M1210 288 H1250" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
-          <path d="M1337 320 V378" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
-          <path d="M1337 446 V492" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
+          <path d="M123 210 H156" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
+          <path d="M280 210 H313" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
+          <path d="M379 210 H412" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
+          <path d="M538 210 H571" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
+          <path d="M711 210 H744" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
+          <path d="M870 210 H903" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
+          <path d="M1071 210 H1127" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
+          <path d="M1237 210 H1267" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
+          <path d="M1373 210 H1403" stroke="#2563c9" stroke-width="1.9" marker-end="url(#ar-main)"/>
 
-          <!-- ★ 回填回路（高亮） -->
-          <g id="loop-edges">
-            <path d="M1084 328 V400" stroke="#1743b8" stroke-width="2.6" marker-end="url(#ar-loop)"/>
-            <path d="M1040 468 V744" stroke="#c2690a" stroke-width="2.4" marker-end="url(#ar-bg)"/>
-            <path d="M1150 744 V468" stroke="#c2690a" stroke-width="2.4" marker-end="url(#ar-bg)"/>
-            <path d="M1210 434 H1240 V902 H764" stroke="#1743b8" stroke-width="2.6" marker-end="url(#ar-loop)"/>
-            <path d="M520 902 H120 V216 H1040 V248" stroke="#1743b8" stroke-width="2.8" marker-end="url(#ar-loop)"/>
-          </g>
+          <!-- ★ 回路：未命中 → 后台合成 → 回填 → 再 Plan（高亮） -->
+          <path d="M945 252 V320" stroke="#1743b8" stroke-width="2.4" marker-end="url(#ar-loop)"/>
+          <path d="M1010 320 V252" stroke="#1743b8" stroke-width="2.4" marker-end="url(#ar-loop)"/>
+          <path d="M945 424 V680" stroke="#c2690a" stroke-width="2.4" marker-end="url(#ar-bg)"/>
+          <path d="M1010 680 V424" stroke="#c2690a" stroke-width="2.4" marker-end="url(#ar-bg)"/>
+          <path d="M1071 400 H1095 V875 H1071" stroke="#15803d" stroke-width="2" marker-end="url(#ar-disk)"/>
+          <path d="M1071 900 H1110 V150 H990 V168" stroke="#15803d" stroke-width="2" marker-end="url(#ar-disk)"/>
 
-          <!-- 旁路 -->
-          <path d="M1290 378 V350 H560" stroke="#2563c9" stroke-width="1.7" marker-end="none"/>
-          <path d="M560 350 V386" stroke="#2563c9" stroke-width="1.7" marker-end="url(#ar-main)"/>
-          <path d="M1084 350 A9 9 0 0 1 1066 350" stroke="#f4f8ff" stroke-width="4"/>
+          <!-- 旁路：BatchKey=null 直接 Plan（不聚合） -->
+          <path d="M475 252 Q475 296 519 296 H763 Q807 296 807 252" stroke="#2563c9" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#ar-main)"/>
 
-          <path d="M610 420 H1010" stroke="#2563c9" stroke-width="1.7" marker-end="url(#ar-main)"/>
-          <path d="M480 520 V456" stroke="#2563c9" stroke-width="1.7" marker-end="url(#ar-main)"/>
-          <path d="M560 596 V868" stroke="#15803d" stroke-width="1.7" marker-end="url(#ar-disk)"/>
-          <path d="M1010 312 H340 V558 H360" stroke="#2563c9" stroke-width="1.6" marker-end="url(#ar-main)"/>
+          <!-- 旁路 2：整句缓存（播完把整句补合成） -->
+          <path d="M1320 168 V100 H555 V320" stroke="#1743b8" stroke-width="1.9" marker-end="url(#ar-loop)"/>
+
+          <!-- 旁路 1：预热 -->
+          <path d="M680 350 H903" stroke="#2563c9" stroke-width="1.7" marker-end="url(#ar-main)"/>
+          <path d="M680 400 H710 V860 H903" stroke="#2563c9" stroke-width="1.7" marker-end="url(#ar-main)"/>
+
+          <!-- 旁路 3：清理 -->
+          <path d="M500 600 V890 H903" stroke="#2563c9" stroke-width="1.7" marker-end="url(#ar-main)"/>
+          <path d="M500 470 V440" stroke="#2563c9" stroke-width="1.7" marker-end="url(#ar-main)"/>
         </g>
 
         <!-- ===== 数据标签 ===== -->
         <g id="labels">
-          <text x="212" y="100" class="el" text-anchor="middle">Verse 对象</text>
-          <text x="400" y="86" class="el" text-anchor="middle">拍平成 Notice</text>
-          <text x="560" y="100" class="el mono" text-anchor="middle">Notice</text>
-          <text x="768" y="86" class="el" text-anchor="middle">过闸 + 去重后</text>
-          <text x="980" y="100" class="el mono" text-anchor="middle">BatchSummary</text>
-          <text x="1094" y="212" class="el mono">Utterance</text>
-          <text x="1230" y="240" class="el" text-anchor="middle">命中</text>
-          <text x="1327" y="352" class="el mono" text-anchor="end">PlayableUtterance</text>
-          <text x="1327" y="480" class="el mono" text-anchor="end">AudioSource.PlayScheduled</text>
+          <text x="139" y="124" class="el" text-anchor="middle">仍是 Verse 对象</text>
+          <text x="296" y="142" class="el" text-anchor="middle">拍平成 Notice</text>
+          <text x="395" y="124" class="el mono" text-anchor="middle">Notice（enum+string）</text>
+          <text x="530" y="142" class="el" text-anchor="end">开关 + 去重之后</text>
+          <text x="727" y="124" class="el mono" text-anchor="middle">BatchSummary / 单事件</text>
+          <text x="886" y="142" class="el mono" text-anchor="middle">Utterance（Segment[]）</text>
+          <text x="1099" y="124" class="el" text-anchor="middle">命中 ⇒ 入队</text>
+          <text x="1252" y="142" class="el mono" text-anchor="middle">TryTake</text>
+          <text x="1388" y="124" class="el mono" text-anchor="middle">PlayScheduled（出声）</text>
 
-          <text x="1094" y="372" class="el mono">Missing(Segment[])</text>
-          <text x="1030" y="592" class="el-bg" text-anchor="end">只传 string + 数值</text>
-          <text x="1030" y="608" class="el-bg" text-anchor="end">TtsRequest{Text,Params}</text>
-          <text x="1160" y="592" class="el-bg">只回 byte[]</text>
-          <text x="1160" y="608" class="el-bg">SynthesisResult（单条）</text>
-          <text x="1250" y="690" class="el mono">Put(LibraryKey, byte[])</text>
-          <text x="140" y="202" class="el-loop">★ 回填后回 ClipAssembler 再 Plan（命中即 1 个 clip）</text>
+          <text x="935" y="290" class="el mono" text-anchor="end">Missing(Segment[])</text>
+          <text x="1022" y="296" class="el-loop">CompletedJob ⇒ 再 Plan 一次</text>
 
-          <text x="800" y="342" class="el" text-anchor="middle">播完 → EnqueueSentence(FullText)（先查库，命中不排）</text>
-          <text x="760" y="410" class="el" text-anchor="middle">只发缺的 WarmupJob</text>
-          <text x="492" y="492" class="el mono">RosterDelta</text>
-          <text x="572" y="616" class="el mono">Remove(key)</text>
-          <text x="660" y="304" class="el" text-anchor="middle">ReportBroken(key)（只登记，不删）</text>
+          <text x="935" y="540" class="el-bg" text-anchor="end">只传 string</text>
+          <text x="935" y="556" class="el-bg" text-anchor="end">TtsRequestParams 快照</text>
+          <text x="1022" y="540" class="el-bg">只回 byte[]</text>
+          <text x="1022" y="556" class="el-bg">SynthesisResult（单条）</text>
+
+          <text x="1125" y="460" class="el-disk">Put：byte[] 落盘 + 索引</text>
+          <text x="1125" y="600" class="el-disk">TryRead：命中即刷 LastUsedTick</text>
+
+          <text x="790" y="340" class="el mono" text-anchor="middle">RequestWarmup</text>
+          <text x="720" y="500" class="el">Contains（命中即出队）</text>
+          <text x="520" y="880" class="el mono">Remove* / SaveIndex</text>
+          <text x="512" y="460" class="el mono">RosterDelta{NewNames}</text>
         </g>
+
+        <!-- 线上文字：白底压线 -->
+        <rect class="lbg" x="566" y="288" width="150" height="16" rx="3"/>
+        <text x="641" y="300" class="el" text-anchor="middle">BatchKey=null ⇒ 直接 Plan</text>
+        <rect class="lbg" x="716" y="92" width="196" height="16" rx="3"/>
+        <text x="814" y="104" class="el-loop" text-anchor="middle">旁路 2 · 整句缓存：播完补合成</text>
 
         <!-- ===== 节点 ===== -->
         <g id="nodes">
 
           <!-- ① 游戏事件 -->
           <g class="node">
-            <rect x="84" y="108" width="96" height="64" rx="8" class="box"/>
-            <rect x="84" y="108" width="5" height="64" rx="2.5" class="strip-main"/>
-            <text x="100" y="134" class="nt">① 游戏事件</text>
-            <text x="100" y="153" class="ns">5 类通道</text>
+            <rect x="31" y="168" width="92" height="84" rx="8" class="box"/>
+            <rect x="31" y="168" width="5" height="84" rx="2.5" class="strip-main"/>
+            <text x="45" y="192" class="nt">游戏事件</text>
+            <text x="45" y="212" class="ns">5 类通道</text>
+            <text x="45" y="228" class="ns">Verse 对象仍在</text>
           </g>
 
-          <!-- ② 钩子 -->
-          <g class="node" data-mod="NotifyHooks">
-            <rect x="244" y="108" width="126" height="64" rx="8" class="box"/>
-            <rect x="244" y="108" width="5" height="64" rx="2.5" class="strip-main"/>
-            <text x="260" y="134" class="nt">② 5 个钩子文件</text>
-            <text x="260" y="153" class="ns">5 文件 · 7 补丁点</text>
-            <text x="260" y="166" class="ns">含死亡两个总闸</text>
+          <!-- ② 5 个钩子文件 -->
+          <g class="node">
+            <rect x="156" y="168" width="124" height="84" rx="8" class="box"/>
+            <rect x="156" y="168" width="5" height="84" rx="2.5" class="strip-main"/>
+            <text x="168" y="190" class="nt">5 个钩子文件</text>
+            <text x="168" y="208" class="ns">8 个补丁点 ①–⑧</text>
+            <text x="168" y="224" class="ns">Postfix + try/catch</text>
+            <text x="168" y="240" class="ns self">自算 ④⑤⑥⑦⑧</text>
           </g>
 
           <!-- ③ Notice -->
           <g class="node">
-            <rect x="430" y="108" width="100" height="64" rx="8" class="box"/>
-            <rect x="430" y="108" width="5" height="64" rx="2.5" class="strip-main"/>
-            <text x="446" y="134" class="nt mono">③ Notice</text>
-            <text x="446" y="153" class="ns">模板 + 参数</text>
-            <text x="446" y="166" class="ns">含 Count/Names</text>
+            <rect x="313" y="168" width="66" height="84" rx="8" class="box"/>
+            <rect x="313" y="168" width="5" height="84" rx="2.5" class="strip-main"/>
+            <text x="323" y="192" class="nt mono">Notice</text>
+            <text x="323" y="212" class="ns">拍平后</text>
+            <text x="323" y="228" class="ns">全链纯数据</text>
           </g>
 
           <!-- ④ Announcer -->
           <g class="node" data-mod="Announcer">
-            <rect x="590" y="108" width="148" height="64" rx="8" class="box"/>
-            <rect x="590" y="108" width="5" height="64" rx="2.5" class="strip-main"/>
-            <text x="606" y="132" class="nt mono">④ Announcer</text>
-            <text x="606" y="150" class="ns">唯一开关闸 + 去重</text>
-            <text x="606" y="164" class="ns">去重键 = 事件身份</text>
-          </g>
-
-          <!-- Q17 待定徽章 -->
-          <g id="q17">
-            <rect x="592" y="178" width="144" height="20" rx="6" fill="#fbfbfd" stroke="#6b7280" stroke-width="1.2" stroke-dasharray="5 3"/>
-            <text x="664" y="192" class="el-p" text-anchor="middle">⚠ Q17 去重口径待定</text>
+            <rect x="412" y="168" width="126" height="84" rx="8" class="box"/>
+            <rect x="412" y="168" width="5" height="84" rx="2.5" class="strip-main"/>
+            <text x="424" y="190" class="nt mono">Announcer</text>
+            <text x="424" y="208" class="ns">唯一开关闸</text>
+            <text x="424" y="224" class="ns">去重 2000 ms</text>
+            <text x="424" y="240" class="ns">BatchKey≠null 才聚合</text>
           </g>
 
           <!-- ⑤ BatchAggregator -->
           <g class="node" data-mod="BatchAggregator">
-            <rect x="798" y="108" width="152" height="64" rx="8" class="box"/>
-            <rect x="798" y="108" width="5" height="64" rx="2.5" class="strip-main"/>
-            <text x="814" y="132" class="nt mono">⑤ BatchAggregator</text>
-            <text x="814" y="150" class="ns">同 tick 合并 → 出句</text>
-            <text x="814" y="164" class="ns">无时间窗</text>
+            <rect x="571" y="168" width="140" height="84" rx="8" class="box"/>
+            <rect x="571" y="168" width="5" height="84" rx="2.5" class="strip-main"/>
+            <text x="581" y="190" class="nt mono">BatchAggregator</text>
+            <text x="581" y="208" class="ns">同 tick 合并（无窗口）</text>
+            <text x="581" y="224" class="ns">Count&gt;1 才聚合</text>
+            <text x="581" y="240" class="ns">==1 走单事件模板</text>
           </g>
 
           <!-- ⑥ SegmentPlanner -->
           <g class="node" data-mod="SegmentPlanner">
-            <rect x="1010" y="108" width="148" height="64" rx="8" class="box"/>
-            <rect x="1010" y="108" width="5" height="64" rx="2.5" class="strip-main"/>
-            <text x="1026" y="132" class="nt mono">⑥ SegmentPlanner</text>
-            <text x="1026" y="150" class="ns">模板 + 参数 → Segment[]</text>
-            <text x="1026" y="164" class="ns">名字清洗只在这里</text>
+            <rect x="744" y="168" width="126" height="84" rx="8" class="box"/>
+            <rect x="744" y="168" width="5" height="84" rx="2.5" class="strip-main"/>
+            <text x="754" y="190" class="nt mono">SegmentPlanner</text>
+            <text x="754" y="208" class="ns">模板 → Segment[]</text>
+            <text x="754" y="224" class="ns">清洗 / 切分 / 点名</text>
+            <text x="754" y="240" class="ns">只在这一处</text>
           </g>
 
           <!-- ⑦ ClipAssembler.Plan -->
           <g class="node" data-mod="ClipAssembler">
-            <rect x="1010" y="248" width="200" height="80" rx="8" class="box-key"/>
-            <rect x="1010" y="248" width="5" height="80" rx="2.5" class="strip-main"/>
-            <text x="1026" y="274" class="nt mono">⑦ ClipAssembler.Plan</text>
-            <text x="1026" y="294" class="ns">查库：整句键 → 片段逐个</text>
-            <text x="1026" y="308" class="ns">返回 Ready(可播) 或 Missing(缺片段)</text>
-            <text x="1026" y="321" class="ns">「缺哪些」由它判</text>
+            <rect x="903" y="168" width="168" height="84" rx="8" class="box-key"/>
+            <rect x="903" y="168" width="5" height="84" rx="2.5" class="strip-main"/>
+            <text x="915" y="190" class="nt mono">ClipAssembler.Plan</text>
+            <text x="915" y="208" class="ns">无状态；先查整句键，再逐片段</text>
+            <text x="915" y="224" class="ns">判「缺哪些片段」只有这里</text>
+            <text x="915" y="240" class="ns mono">Ready / Missing / Nothing</text>
           </g>
 
           <!-- ⑧ SpeechQueue -->
           <g class="node" data-mod="SpeechQueue">
-            <rect x="1250" y="256" width="174" height="64" rx="8" class="box"/>
-            <rect x="1250" y="256" width="5" height="64" rx="2.5" class="strip-main"/>
-            <text x="1266" y="282" class="nt mono">⑧ SpeechQueue</text>
-            <text x="1266" y="300" class="ns">只存未开始播的</text>
-            <text x="1266" y="314" class="ns">优先级插队·上限 6</text>
+            <rect x="1127" y="168" width="110" height="84" rx="8" class="box"/>
+            <rect x="1127" y="168" width="5" height="84" rx="2.5" class="strip-main"/>
+            <text x="1137" y="190" class="nt mono">SpeechQueue</text>
+            <text x="1137" y="208" class="ns">只放未开始播的</text>
+            <text x="1137" y="224" class="ns">优先级插队</text>
+            <text x="1137" y="240" class="ns">超限丢最低最旧</text>
           </g>
 
           <!-- ⑨ VoicePlayer -->
           <g class="node" data-mod="VoicePlayer">
-            <rect x="1250" y="378" width="174" height="68" rx="8" class="box"/>
-            <rect x="1250" y="378" width="5" height="68" rx="2.5" class="strip-main"/>
-            <text x="1266" y="404" class="nt mono">⑨ VoicePlayer</text>
-            <text x="1266" y="422" class="ns">当前句 + clip 游标在这</text>
-            <text x="1266" y="436" class="ns">音量 / GapMs 每帧现读</text>
+            <rect x="1267" y="168" width="106" height="84" rx="8" class="box"/>
+            <rect x="1267" y="168" width="5" height="84" rx="2.5" class="strip-main"/>
+            <text x="1277" y="190" class="nt mono">VoicePlayer</text>
+            <text x="1277" y="208" class="ns">当前句 + clip 游标</text>
+            <text x="1277" y="224" class="ns">dspTime 连播</text>
+            <text x="1277" y="240" class="ns">音量 / GapMs 现读</text>
           </g>
 
-          <!-- 扬声器 -->
+          <!-- ⑩ 扬声器 -->
           <g class="node">
-            <rect x="1274" y="492" width="126" height="48" rx="8" fill="#eef5ff" stroke="#2563c9" stroke-width="1.6"/>
-            <g transform="translate(1296,516)" stroke="#1c4b9c" stroke-width="1.6" fill="none">
-              <path d="M0 -4 L6 -4 L13 -11 L13 11 L6 4 L0 4 Z" fill="#1c4b9c" stroke="none"/>
-              <path d="M17 -6 A8 8 0 0 1 17 6"/>
-              <path d="M21 -10 A13 13 0 0 1 21 10"/>
+            <rect x="1403" y="168" width="80" height="84" rx="8" fill="#eef5ff" stroke="#2563c9" stroke-width="1.7"/>
+            <g transform="translate(1412,196)" stroke="#1c4b9c" stroke-width="1.5" fill="none">
+              <path d="M0 -3 L4 -3 L9 -8 L9 8 L4 3 L0 3 Z" fill="#1c4b9c" stroke="none"/>
+              <path d="M12 -5 A6 6 0 0 1 12 5"/>
+              <path d="M16 -8 A10 10 0 0 1 16 8"/>
             </g>
-            <text x="1320" y="521" class="nt">扬声器</text>
+            <text x="1442" y="196" class="nt">扬声器</text>
+            <text x="1413" y="222" class="ns mono">AudioSource</text>
+            <text x="1413" y="238" class="ns">PlayScheduled</text>
+          </g>
+
+          <!-- 旁路 1：WarmupScheduler -->
+          <g class="node" data-mod="WarmupScheduler">
+            <rect x="440" y="320" width="240" height="120" rx="8" class="box"/>
+            <rect x="440" y="320" width="5" height="120" rx="2.5" class="strip-main"/>
+            <rect x="452" y="326" width="86" height="16" rx="4" fill="#e8f0fd" stroke="#b9cdf0" stroke-width="1"/>
+            <text x="495" y="338" class="ribbon" fill="#1f4fa8" text-anchor="middle">旁路 1 · 预热</text>
+            <text x="452" y="362" class="nt mono">WarmupScheduler</text>
+            <text x="452" y="382" class="ns">先 Contains(Key)：命中即出队</text>
+            <text x="452" y="398" class="ns">两个 FIFO：片段 / 整句</text>
+            <text x="452" y="414" class="ns">每 2 s Tick · 节流可调</text>
+            <text x="452" y="430" class="ns">作业失败即丢，不重排</text>
+          </g>
+
+          <!-- 旁路 3：LibraryJanitor -->
+          <g class="node" data-mod="LibraryJanitor">
+            <rect x="440" y="470" width="240" height="130" rx="8" class="box"/>
+            <rect x="440" y="470" width="5" height="130" rx="2.5" class="strip-main"/>
+            <rect x="452" y="476" width="86" height="16" rx="4" fill="#e8f0fd" stroke="#b9cdf0" stroke-width="1"/>
+            <text x="495" y="488" class="ribbon" fill="#1f4fa8" text-anchor="middle">旁路 3 · 清理</text>
+            <text x="452" y="512" class="nt mono">LibraryJanitor</text>
+            <text x="452" y="532" class="ns">四步：对账 → 两阶段名单</text>
+            <text x="452" y="548" class="ns">→ 超限淘汰 → SaveIndex</text>
+            <text x="452" y="564" class="ns">唯一删除者；L1/L2/L3 每轮现算</text>
+            <text x="452" y="580" class="ns">坏文件只登记 ReportBroken</text>
           </g>
 
           <!-- SegmentSynthesizer -->
           <g class="node" data-mod="SegmentSynthesizer">
-            <rect x="1010" y="400" width="200" height="68" rx="8" class="box-loop"/>
-            <rect x="1010" y="400" width="5" height="68" rx="2.5" class="strip-main"/>
-            <text x="1026" y="424" class="nt mono">SegmentSynthesizer</text>
-            <text x="1026" y="442" class="ns">★ 唯一跨线程层</text>
-            <text x="1026" y="456" class="ns">作业表 Total/Arrived/Failed</text>
+            <rect x="903" y="320" width="168" height="104" rx="8" class="box-loop"/>
+            <rect x="903" y="320" width="5" height="104" rx="2.5" class="strip-main"/>
+            <text x="915" y="344" class="nt mono">SegmentSynthesizer</text>
+            <text x="915" y="366" class="ns" fill="#1743b8" font-weight="600">★ 唯一跨线程层</text>
+            <text x="915" y="384" class="ns mono">作业表 Total/Arrived/Failed</text>
+            <text x="915" y="404" class="ns">Drain：落库 + 交回作业</text>
           </g>
 
-          <!-- TtsClient -->
+          <!-- TtsClient（后台） -->
           <g class="node" data-mod="TtsClient">
-            <rect x="1010" y="744" width="200" height="68" rx="8" fill="#fff" stroke="#c2690a" stroke-width="1.8"/>
-            <rect x="1010" y="744" width="5" height="68" rx="2.5" class="strip-bg"/>
-            <text x="1026" y="768" class="nt mono">TtsClient</text>
-            <text x="1026" y="786" class="ns" fill="#8a5209">文本 → WAV 字节（HTTP）</text>
-            <text x="1026" y="800" class="ns" fill="#8a5209">配置闸 + LastError 快照</text>
+            <rect x="903" y="680" width="168" height="90" rx="8" fill="#fff" stroke="#c2690a" stroke-width="1.8"/>
+            <rect x="903" y="680" width="5" height="90" rx="2.5" class="strip-bg"/>
+            <text x="915" y="704" class="nt mono" fill="#8a5209">TtsClient</text>
+            <text x="915" y="724" class="ns" fill="#8a5209">HTTP POST → WAV 字节</text>
+            <text x="915" y="740" class="ns" fill="#8a5209">配置闸（全 mod 唯一）</text>
+            <text x="915" y="756" class="ns" fill="#8a5209">LastError 快照</text>
           </g>
 
-          <!-- SpeechLibrary -->
+          <!-- SpeechLibrary（磁盘） -->
           <g class="node" data-mod="SpeechLibrary">
-            <rect x="520" y="868" width="244" height="76" rx="8" fill="#fff" stroke="#15803d" stroke-width="1.8"/>
-            <rect x="520" y="868" width="5" height="76" rx="2.5" class="strip-disk"/>
-            <text x="536" y="892" class="nt mono">SpeechLibrary</text>
-            <text x="536" y="910" class="ns" fill="#166534">唯一碰磁盘的音频库（仅主线程）</text>
-            <text x="536" y="924" class="ns" fill="#166534">Put / TryRead / ListFiles / Snapshot</text>
-            <text x="536" y="938" class="ns" fill="#166534">索引每轮由 Janitor 落盘</text>
+            <rect x="903" y="830" width="168" height="90" rx="8" fill="#fff" stroke="#15803d" stroke-width="1.8"/>
+            <rect x="903" y="830" width="5" height="90" rx="2.5" class="strip-disk"/>
+            <text x="915" y="854" class="nt mono" fill="#166534">SpeechLibrary</text>
+            <text x="915" y="872" class="ns" fill="#166534">唯一碰磁盘 · 仅主线程</text>
+            <text x="915" y="888" class="ns mono" fill="#166534">Put / TryRead / Contains</text>
+            <text x="915" y="904" class="ns mono" fill="#166534">Cache/Voice/ + index.json</text>
           </g>
 
-          <!-- WarmupScheduler -->
-          <g class="node" data-mod="WarmupScheduler">
-            <rect x="360" y="386" width="250" height="70" rx="8" class="box"/>
-            <rect x="360" y="386" width="5" height="70" rx="2.5" class="strip-main"/>
-            <text x="376" y="410" class="nt mono">WarmupScheduler</text>
-            <text x="376" y="428" class="ns">① 先查库（输入含 SpeechLibrary）</text>
-            <text x="376" y="442" class="ns">② 命中就跳 ③ 只排缺的片段/整句</text>
+          <!-- PawnDied 单点标注 -->
+          <g class="node">
+            <line x1="218" y1="252" x2="218" y2="266" stroke="#9fb0c6" stroke-width="1.2" stroke-dasharray="3 3"/>
+            <rect x="120" y="266" width="220" height="54" rx="6" fill="#fbfcfe" stroke="#b9c6d8" stroke-width="1.1"/>
+            <text x="130" y="286" class="nt" font-size="10.4">⑦ PawnDied 单点</text>
+            <text x="130" y="302" class="ns mono">NotifyPlayerOfKilled</text>
+            <text x="130" y="316" class="ns">两支互斥：Death 信 / PawnDeath 消息</text>
           </g>
 
-          <!-- LibraryJanitor -->
-          <g class="node" data-mod="LibraryJanitor">
-            <rect x="360" y="520" width="250" height="76" rx="8" class="box"/>
-            <rect x="360" y="520" width="5" height="76" rx="2.5" class="strip-main"/>
-            <text x="376" y="544" class="nt mono">LibraryJanitor</text>
-            <text x="376" y="562" class="ns">唯一删除决策者（等级 L1/L2/L3）</text>
-            <text x="376" y="576" class="ns">每轮：对账 → 两阶段名单 → 超限</text>
-            <text x="376" y="590" class="ns">→ 落索引 + RosterDelta</text>
+          <!-- 读图顺序（不是模块，是阅读提示） -->
+          <g id="readguide">
+            <line x1="56" y1="384" x2="56" y2="458" stroke="#b8c6d8" stroke-width="1.2" stroke-dasharray="4 3"/>
+            <text x="66" y="396" class="nt" font-size="10.4" fill="#5a6f88">读图顺序</text>
+            <text x="66" y="416" class="el">① 钩子拍平 → 过闸 → 聚合 → 成句</text>
+            <text x="66" y="434" class="el">② Plan 先查库：命中即播，缺才出境</text>
+            <text x="66" y="452" class="el">③ 合成回来落盘 → 再 Plan 一次</text>
           </g>
 
-          <!-- DeputyGameComponent -->
-          <text x="84" y="502" class="lane-s">入口与宿主：只提供时机，不在数据流上</text>
-          <g class="node" data-mod="DeputyGameComponent">
-            <rect x="84" y="512" width="236" height="92" rx="8" class="box-host"/>
-            <rect x="84" y="512" width="5" height="92" rx="2.5" fill="#7f8ea3"/>
-            <text x="100" y="536" class="nt mono">DeputyGameComponent</text>
-            <text x="100" y="554" class="ns">框架自动创建：带 (Game game) 构造</text>
-            <text x="100" y="568" class="ns">每帧：Drain → Plan → Enqueue</text>
-            <text x="100" y="582" class="ns">每 2s 预热 ｜ 每 300s 清理</text>
-            <text x="100" y="596" class="ns">Put 后 CheckLimit() ｜ 持存档指纹</text>
-          </g>
-
-          <!-- VoiceDeputyMod -->
-          <g class="node" data-mod="VoiceDeputyMod">
-            <rect x="84" y="626" width="236" height="52" rx="8" class="box-host"/>
-            <rect x="84" y="626" width="5" height="52" rx="2.5" fill="#7f8ea3"/>
-            <text x="100" y="648" class="nt mono">VoiceDeputyMod</text>
-            <text x="100" y="666" class="ns">构造 Settings；不 Add 组件（框架收养）</text>
+          <!-- 回路批注 -->
+          <g>
+            <rect x="1150" y="336" width="300" height="32" rx="6" fill="#eef2ff" stroke="#96a8e8" stroke-width="1.2"/>
+            <text x="1162" y="356" class="el-loop" font-size="9.8">★ 每句最多一轮合成；仍缺 ⇒ 丢句 + Trace 5.3</text>
           </g>
 
         </g>
       </svg>
       </div>
+
       <div class="figfoot">
-        17 个节点 / 19 条有向边。跨线程的边（橙）只有两条：<code>TtsRequest</code> 出境、<code>SynthesisResult</code> 回来。
-        灰虚线只有一处：<code>Announcer</code> 的去重口径（Q17 未定）。点节点可跳到对应模块卡片。
+        16 个节点 / 21 条有向边（主链 9 · 回路 6 · 旁路 5 · 直通 1）。跨线程的边（橙）只有两条：<code>TtsRequest</code> 出境、<code>SynthesisResult</code> 回主线程；
+        绿色两条：<code>Put</code> 写库、<code>TryRead</code> 读库。点节点可跳到对应模块卡片。
       </div>
     </div>
   </section>
 
-  <!-- ================= 3. 模块卡片 ================= -->
+  <!-- ================= 03 模块卡片 ================= -->
   <section id="modules">
     <div class="sec-head">
       <span class="num">03</span>
       <h2>28 个模块</h2>
-      <span class="note">每卡四行：输入 / 输出 / 持有状态 / 不负责。类型名保留，话压到一行。</span>
+      <span class="note">每卡四行：输入 / 输出 / 持有状态 / 负责边界。按 01 §5 的分组分色。</span>
     </div>
 
     <div class="filters">
       <span class="lbl">筛选：</span>
       <button class="btn on" data-filter="all" type="button">全部 28</button>
-      <button class="btn" data-filter="has" type="button">已有 9</button>
-      <button class="btn" data-filter="new" type="button">新增 19</button>
+      <button class="btn" data-filter="entry" type="button">入口 7</button>
+      <button class="btn" data-filter="hook" type="button">钩子 5</button>
+      <button class="btn" data-filter="sched" type="button">调度 5</button>
+      <button class="btn" data-filter="synth" type="button">合成 6</button>
+      <button class="btn" data-filter="store" type="button">存储 2</button>
+      <button class="btn" data-filter="ui" type="button">UI 3</button>
     </div>
 
     <div class="mods" id="mods">
 
-      <!-- 1 -->
-      <article class="card mod" id="m-VoiceDeputyMod" data-kind="has">
-        <header><span class="idx">01</span><h3>VoiceDeputyMod</h3><span class="badge has">已有</span></header>
+      <!-- ===== 入口 7 ===== -->
+      <article class="card mod entry" id="m-VoiceDeputyMod" data-grp="entry">
+        <header><h3>VoiceDeputyMod</h3><span class="badge has">已有</span><span class="gt gt-entry">入口</span></header>
         <dl>
-          <dt>输入</dt><dd><code>ModContentPack</code>（主线程，一次性）</dd>
-          <dt>输出</dt><dd>静态 <code>VoiceDeputyMod.Settings</code>；设置页 → 打开设置窗口</dd>
-          <dt>持有</dt><dd>只持 <code>Settings</code> 引用，无业务状态</dd>
-          <dt class="no">不负责</dt><dd class="no">不 tick、不初始化缓存目录、不读磁盘、不 Add 组件（框架自动收养）</dd>
+          <dt>输入</dt><dd><code>ModContentPack</code>（主线程，一次性）；玩家点设置页按钮</dd>
+          <dt>输出</dt><dd>静态 <code>Settings</code>；<code>PatchAll</code> 装 8 个补丁点；弹出设置窗</dd>
+          <dt>持有</dt><dd>只持 <code>Settings</code> 引用</dd>
+          <dt>边界</dt><dd>不 tick、不建缓存目录；组件生命周期归框架自动收养</dd>
         </dl>
       </article>
 
-      <!-- 2 -->
-      <article class="card mod" id="m-DeputyGameComponent" data-kind="new">
-        <header><span class="idx">02</span><h3>DeputyGameComponent</h3><span class="badge new">新增</span></header>
+      <article class="card mod entry" id="m-DeputyGameComponent" data-grp="entry">
+        <header><h3>DeputyGameComponent</h3><span class="badge new">新增</span><span class="gt gt-entry">入口</span></header>
         <dl>
-          <dt>输入</dt><dd>每帧 <code>Update()</code>；<code>LoadedGame</code>/<code>StartedNewGame</code>；<code>ExposeData</code></dd>
-          <dt>输出</dt><dd><code>Drain</code> → <code>ClipAssembler.Plan</code> → <code>Enqueue</code>；<code>Tick()</code>；每 2s 预热、每 300s 清理；<code>Put</code> 后 <code>CheckLimit()</code></dd>
-          <dt>持有</dt><dd><code>SaveFingerprint</code>（存档 GUID）；三个计时器；由框架自动创建（<code>public (Game game)</code> 构造）</dd>
-          <dt class="no">不负责</dt><dd class="no">不含策略：不判开关/优先级/等级，不切文本，不删东西</dd>
+          <dt>输入</dt><dd>每帧 <code>Update()</code>；<code>Drain</code> / <code>Tick</code> / <code>Plan</code> 的返回</dd>
+          <dt>输出</dt><dd>每帧固定顺序：<code>Drain</code>→<code>Plan</code>→<code>Enqueue</code>→播放</dd>
+          <dt>持有</dt><dd><code>SaveFingerprint</code>；2 s 与 <code>JanitorInterval</code> 两个计时器</dd>
+          <dt>边界</dt><dd>只排调用顺序；开关/优先级/等级/删除全部外置</dd>
         </dl>
       </article>
 
-      <!-- 3 -->
-      <article class="card mod" id="m-VoiceDeputySettings" data-kind="has">
-        <header><span class="idx">03</span><h3>VoiceDeputySettings</h3><span class="badge has">已有</span></header>
+      <article class="card mod entry" id="m-VoiceDeputySettings" data-grp="entry">
+        <header><h3>VoiceDeputySettings</h3><span class="badge has">已有</span><span class="gt gt-entry">入口</span></header>
         <dl>
-          <dt>输入</dt><dd>UI 写入（<code>SetIfChanged</code>/<code>SetCategoryEnabled</code>）；读档 <code>ExposeData</code></dd>
-          <dt>输出</dt><dd>字段读取（各模块每帧现读）；<code>MarkDirty</code>/<code>FlushIfDirty</code></dd>
+          <dt>输入</dt><dd>UI 写入（<code>SetIfChanged</code>）；读档 <code>ExposeData</code> 遍历 <code>Entries</code></dd>
+          <dt>输出</dt><dd>字段读取；<code>MarkDirty</code> / <code>FlushIfDirty</code></dd>
           <dt>持有</dt><dd>全部用户可调值（唯一存盘格式定义）</dd>
-          <dt class="no">不负责</dt><dd class="no">不校验语义、不通知「值变了」、不认识等级</dd>
+          <dt>边界</dt><dd>不校验范围、不广播变化；各模块每帧现读</dd>
         </dl>
       </article>
 
-      <!-- 4 -->
-      <article class="card mod" id="m-SpokenCategory" data-kind="has">
-        <header><span class="idx">04</span><h3>SpokenCategory</h3><span class="badge has">已有</span></header>
+      <article class="card mod entry" id="m-SpokenCategory" data-grp="entry">
+        <header><h3>SpokenCategory</h3><span class="badge has">已有</span><span class="gt gt-entry">入口</span></header>
         <dl>
-          <dt>输入</dt><dd>无（编译期数据）</dd>
-          <dt>输出</dt><dd>22 个 enum 值，全链的类别标识</dd>
+          <dt>输入</dt><dd>无（编译期 enum）</dd>
+          <dt>输出</dt><dd>22 个 enum 值，顺序即 <code>Entries</code> 顺序</dd>
           <dt>持有</dt><dd>无</dd>
-          <dt class="no">不负责</dt><dd class="no">不带行为 / 文本 / 优先级（都在 <code>SpeechCatalog</code>）</dd>
+          <dt>边界</dt><dd>无行为/文本/优先级；越界值 <code>throw</code></dd>
         </dl>
       </article>
 
-      <!-- 5 -->
-      <article class="card mod" id="m-SpeechCatalog" data-kind="has">
-        <header><span class="idx">05</span><h3>SpeechCatalog</h3><span class="badge has">已有</span></header>
+      <article class="card mod entry" id="m-SpeechCatalog" data-grp="entry">
+        <header><h3>SpeechCatalog</h3><span class="badge has">已有</span><span class="gt gt-entry">入口</span></header>
         <dl>
-          <dt>输入</dt><dd>静态只读表，只有查询：<code>Of</code>/<code>ForDefName</code>/<code>PriorityOf</code></dd>
-          <dt>输出</dt><dd><code>CategoryEntry[]</code>（含 <code>Priority</code>）；<code>PhraseEntry[]</code>（模板 + <code>ArgKinds</code>）；<code>defName → SpeechPhrase</code></dd>
-          <dt>持有</dt><dd>三张编译期常量表，运行时只读</dd>
-          <dt class="no">不负责</dt><dd class="no">不判开关、不判等级、不拼字符串、不认识缓存；消费者含 <code>VoiceDeputySettings</code> 构造与 <code>ExposeData</code></dd>
+          <dt>输入</dt><dd>无（编译期只读表）；<code>For*</code> / <code>PriorityOf</code> 查询</dd>
+          <dt>输出</dt><dd>类别元数据、28 条模板、绑定表、<code>ConstantTexts()</code></dd>
+          <dt>持有</dt><dd>四张编译期常量表，运行时只读</dd>
+          <dt>边界</dt><dd>不判开关/等级、不拼串、不碰缓存；只收 <code>string</code></dd>
         </dl>
       </article>
 
-      <!-- 6 -->
-      <article class="card mod" id="m-Switchboard" data-kind="has">
-        <header><span class="idx">06</span><h3>Switchboard</h3><span class="badge has">已有</span></header>
+      <article class="card mod entry" id="m-Switchboard" data-grp="entry">
+        <header><h3>Switchboard</h3><span class="badge has">已有</span><span class="gt gt-entry">入口</span></header>
         <dl>
           <dt>输入</dt><dd><code>SpokenCategory</code>（来自 <code>Announcer</code>，主线程）</dd>
           <dt>输出</dt><dd><code>bool</code></dd>
           <dt>持有</dt><dd>无</dd>
-          <dt class="no">不负责</dt><dd class="no">不判「配置可用」（<code>TtsClient</code> 的闸）、不管队列、不写日志</dd>
+          <dt>边界</dt><dd>不判「配置可用」、不管队列；<code>Settings</code> 空则放行</dd>
         </dl>
       </article>
 
-      <!-- 7 -->
-      <article class="card mod" id="m-NotifyHooks" data-kind="new">
-        <header><span class="idx">07</span><h3>NotifyHooks</h3><span class="badge new">新增</span></header>
+      <article class="card mod entry" id="m-Trace" data-grp="entry">
+        <header><h3>Trace</h3><span class="badge new">新增</span><span class="gt gt-entry">入口</span></header>
         <dl>
-          <dt>输入</dt><dd><code>Message</code>：<code>text</code>/<code>def.defName</code>/<code>startingTick</code>/<code>lookTargets</code></dd>
-          <dt>输出</dt><dd><code>Notice</code> → <code>Announcer</code>；<code>PawnDeath</code> ⇒ <code>PawnDied</code></dd>
+          <dt>输入</dt><dd><code>Step(id, msg)</code>（仅主线程）</dd>
+          <dt>输出</dt><dd><code>Player.log</code> 一行 <code>[VD] &lt;id&gt; &lt;msg&gt;</code></dd>
+          <dt>持有</dt><dd>无（<code>Settings</code> 现读）</dd>
+          <dt>边界</dt><dd>埋点异常直接吞；不做统计、不当 UI 数据源</dd>
+        </dl>
+      </article>
+
+      <!-- ===== 钩子 5 ===== -->
+      <article class="card mod hook" id="m-NotifyHooks" data-grp="hook">
+        <header><h3>NotifyHooks</h3><span class="badge new">新增</span><span class="gt gt-hook">钩子</span></header>
+        <dl>
+          <dt>输入</dt><dd>① <code>Verse.Message</code>：<code>text</code> / <code>def.defName</code> / <code>lookTargets</code></dd>
+          <dt>输出</dt><dd><code>Notice</code> → <code>Announcer</code>；命中丢弃表 ⇒ 不产出</dd>
           <dt>持有</dt><dd>无</dd>
-          <dt class="no">不负责</dt><dd class="no">不判开关/去重、不拼中文、不清洗名字（出 <code>LabelShortCap</code> 原文）</dd>
+          <dt>边界</dt><dd>只取事实填参数；不判开关/去重、不清洗名字</dd>
         </dl>
       </article>
 
-      <!-- 8 -->
-      <article class="card mod" id="m-LetterHooks" data-kind="new">
-        <header><span class="idx">08</span><h3>LetterHooks</h3><span class="badge new">新增</span></header>
+      <article class="card mod hook" id="m-LetterHooks" data-grp="hook">
+        <header><h3>LetterHooks</h3><span class="badge new">新增</span><span class="gt gt-hook">钩子</span></header>
         <dl>
-          <dt>输入</dt><dd><code>Letter</code>：<code>def.defName</code>/<code>Label</code>/<code>relatedFaction</code>/<code>lookTargets</code>/<code>Text</code></dd>
-          <dt>输出</dt><dd><code>Notice</code> → <code>Announcer</code>；<code>Death</code> ⇒ <code>PawnDied</code>（死因取正文首句）</dd>
+          <dt>输入</dt><dd>② <code>Verse.Letter</code>：<code>def.defName</code> / <code>Label</code></dd>
+          <dt>输出</dt><dd><code>Notice</code>；<code>Death</code>/<code>BabyBirth</code>/<code>Threat*</code> 等进丢弃表</dd>
           <dt>持有</dt><dd>无</dd>
-          <dt class="no">不负责</dt><dd class="no">不判「玩家看过没」、不管 <code>delayTicks</code>、不做去重</dd>
+          <dt>边界</dt><dd>不管 <code>delayTicks</code> 与「已读」；切分归 <code>SegmentPlanner</code></dd>
         </dl>
       </article>
 
-      <!-- 9 -->
-      <article class="card mod" id="m-IncidentHooks" data-kind="new">
-        <header><span class="idx">09</span><h3>IncidentHooks</h3><span class="badge new">新增</span></header>
+      <article class="card mod hook" id="m-IncidentHooks" data-grp="hook">
+        <header><h3>IncidentHooks</h3><span class="badge new">新增</span><span class="gt gt-hook">钩子</span></header>
         <dl>
-          <dt>输入</dt><dd><code>IncidentParms parms</code> + <code>__result</code>（Postfix，主线程）</dd>
-          <dt>输出</dt><dd><code>Notice</code>（<code>__result == true</code> 才产出）</dd>
+          <dt>输入</dt><dd>③ <code>IncidentParms</code> + <code>__result</code>：def/category/strategy/pawns</dd>
+          <dt>输出</dt><dd><code>Notice</code>（<code>__result == true</code> 才产出）；群体只给 <code>Count</code></dd>
           <dt>持有</dt><dd>无</dd>
-          <dt class="no">不负责</dt><dd class="no">不扫地图、不抓名单：拿不到名单就留空，只念 <code>Count</code>（如「8 人感染」）</dd>
+          <dt>边界</dt><dd>不扫地图、不从 <code>lookTargets</code> 补名单</dd>
         </dl>
       </article>
 
-      <!-- 10 -->
-      <article class="card mod" id="m-PawnHooks" data-kind="new">
-        <header><span class="idx">10</span><h3>PawnHooks</h3><span class="badge new">新增</span></header>
+      <article class="card mod hook" id="m-PawnHooks" data-grp="hook">
+        <header><h3>PawnHooks</h3><span class="badge new">新增</span><span class="gt gt-hook">钩子</span></header>
         <dl>
-          <dt>输入</dt><dd>倒地 / 崩溃 / 分娩三点的 <code>Pawn</code> 与 <code>MentalStateDef</code>（主线程）</dd>
-          <dt>输出</dt><dd><code>Notice</code> → <code>Announcer</code></dd>
+          <dt>输入</dt><dd>④ stateDef+pawn ⑤ 孕妇 ⑥ 倒地 ⑦ 死亡 + 死因</dd>
+          <dt>输出</dt><dd><code>Notice{Names=[LabelShortCap 原文], Count=1}</code></dd>
           <dt>持有</dt><dd>无</dd>
-          <dt class="no">不负责</dt><dd class="no">死亡（走 ①② 两个总闸）、不清洗名字、不做合并（一 pawn 一条）</dd>
+          <dt>边界</dt><dd>⑦ 单点收齐死亡两支；名字清洗归 <code>SegmentPlanner</code></dd>
         </dl>
       </article>
 
-      <!-- 11 -->
-      <article class="card mod" id="m-BlueprintHooks" data-kind="new">
-        <header><span class="idx">11</span><h3>BlueprintHooks</h3><span class="badge new">新增</span></header>
+      <article class="card mod hook" id="m-BlueprintHooks" data-grp="hook">
+        <header><h3>BlueprintHooks</h3><span class="badge new">新增</span><span class="gt gt-hook">钩子</span></header>
         <dl>
-          <dt>输入</dt><dd><code>Blueprint_Build</code> + <code>Map</code>：<code>CostListAdjusted</code> 与 <code>ResourceCounter.GetCount</code></dd>
-          <dt>输出</dt><dd>有缺口才出 <code>Notice{BuildMissingMaterials, Args=[数量, 材料名]}</code></dd>
-          <dt>持有</dt><dd>无</dd>
-          <dt class="no">不负责</dt><dd class="no">只在玩家手动放置时播（自动重建/样板不播）、不遍历地图、不算在途/已预定</dd>
+          <dt>输入</dt><dd>⑧ <code>Blueprint_Build</code> + <code>Map</code>：造价 vs 库存</dd>
+          <dt>输出</dt><dd>有缺口才出 <code>Notice{缺口数, 材料名}</code></dd>
+          <dt>持有</dt><dd>静态 <code>manualPlacementDepth</code>（+1 / −1）</dd>
+          <dt>边界</dt><dd>只在玩家手动放置时播；不算在途/预定材料</dd>
         </dl>
       </article>
 
-      <!-- 12 -->
-      <article class="card mod" id="m-Announcer" data-kind="new">
-        <header><span class="idx">12</span><h3>Announcer</h3><span class="badge new">新增</span></header>
+      <!-- ===== 调度 5 ===== -->
+      <article class="card mod sched" id="m-Announcer" data-grp="sched">
+        <header><h3>Announcer</h3><span class="badge new">新增</span><span class="gt gt-sched">调度</span></header>
         <dl>
-          <dt>输入</dt><dd><code>Notice</code>（5 个钩子）；每帧 <code>Tick()</code>；<code>SpeakDirect(string)</code></dd>
-          <dt>输出</dt><dd><code>Utterance</code> → 交 <code>ClipAssembler.Plan</code>；<code>Trace("2")</code></dd>
-          <dt>持有</dt><dd>去重表：键 = 事件身份（类别 + <code>defName</code> + 目标），窗口 1.5 s ⚠ Q17</dd>
-          <dt class="no">不负责</dt><dd class="no">不切分、不合成、不排队；<code>SpeakDirect</code> 不查开关</dd>
+          <dt>输入</dt><dd><code>Notice</code>（5 个钩子）；每帧 <code>Tick()</code>；<code>SpeakDirect</code></dd>
+          <dt>输出</dt><dd><code>Utterance[]</code>（含聚合批出句、试听句）</dd>
+          <dt>持有</dt><dd>去重表（类别+文案+Args+Count，2000 ms）</dd>
+          <dt>边界</dt><dd>唯一开关检查点；不切分、不合成、不排队</dd>
         </dl>
       </article>
 
-      <!-- 13 -->
-      <article class="card mod" id="m-BatchAggregator" data-kind="new">
-        <header><span class="idx">13</span><h3>BatchAggregator</h3><span class="badge new">新增</span></header>
+      <article class="card mod sched" id="m-BatchAggregator" data-grp="sched">
+        <header><h3>BatchAggregator</h3><span class="badge new">新增</span><span class="gt gt-sched">调度</span></header>
         <dl>
-          <dt>输入</dt><dd><code>Notice</code>（<code>BatchKey</code> 非空）：一条带名单，或同 tick 多条同类</dd>
-          <dt>输出</dt><dd><code>BatchSummary[]</code>（tick 一变就出句，名单取并集）</dd>
-          <dt>持有</dt><dd>当前批 <code>{BatchTick, BatchKey, Category, 名单, Count}</code></dd>
-          <dt class="no">不负责</dt><dd class="no">不扫地图找人、不拼句、不判开关/优先级、无可调窗口</dd>
+          <dt>输入</dt><dd><code>Notice</code>（<code>BatchKey≠null</code> 才进）；每帧 <code>Flush()</code></dd>
+          <dt>输出</dt><dd><code>BatchSummary[]</code>（tick 一变就出句）</dd>
+          <dt>持有</dt><dd>当前批 <code>{BatchTick, Category, BatchKey, 成员, Total}</code></dd>
+          <dt>边界</dt><dd>只管同 tick 合并；合计 <code>Count==1</code> 交回 <code>Single</code></dd>
         </dl>
       </article>
 
-      <!-- 14 -->
-      <article class="card mod" id="m-SegmentPlanner" data-kind="new">
-        <header><span class="idx">14</span><h3>SegmentPlanner</h3><span class="badge new">新增</span></header>
+      <article class="card mod sched" id="m-SegmentPlanner" data-grp="sched">
+        <header><h3>SegmentPlanner</h3><span class="badge new">新增</span><span class="gt gt-sched">调度</span></header>
         <dl>
-          <dt>输入</dt><dd><code>Notice</code> / <code>BatchSummary</code> / <code>string</code>；<code>SpeechCatalog</code> 模板；<code>MaxNamedInBatch</code></dd>
-          <dt>输出</dt><dd><code>Utterance{Segments, Category}</code>（<code>FullText</code> 是计算属性）</dd>
-          <dt>持有</dt><dd>无（纯函数）</dd>
-          <dt class="no">不负责</dt><dd class="no">不查开关/缓存、不做 TTS、不判等级、不管线程；名字清洗只在这里</dd>
+          <dt>输入</dt><dd><code>Plan(Notice)</code> / <code>Plan(BatchSummary)</code> / <code>PlanRaw</code></dd>
+          <dt>输出</dt><dd><code>Utterance</code>（<code>Segment[]</code>；<code>FullText</code> 是计算属性）</dd>
+          <dt>持有</dt><dd>无；每次 <code>Plan</code> 现读一次 <code>Settings</code></dd>
+          <dt>边界</dt><dd>唯一切分与名字清洗处；模板不符 ⇒ <code>null</code></dd>
         </dl>
       </article>
 
-      <!-- 15 -->
-      <article class="card mod" id="m-SegmentSynthesizer" data-kind="new">
-        <header><span class="idx">15</span><h3>SegmentSynthesizer</h3><span class="badge new">新增</span></header>
+      <article class="card mod sched" id="m-SpeechQueue" data-grp="sched">
+        <header><h3>SpeechQueue</h3><span class="badge new">新增</span><span class="gt gt-sched">调度</span></header>
         <dl>
-          <dt>输入</dt><dd>缺片段清单（来自 <code>ClipAssembler.Missing</code>）；<code>WarmupJob</code>；每帧 <code>Drain()</code></dd>
-          <dt>输出</dt><dd><code>Put</code> 写库后，把回填完的句子交回 <code>ClipAssembler.Plan</code>；<code>Trace("5.x")</code></dd>
-          <dt>持有</dt><dd>作业表 <code>Dictionary&lt;long, Job&gt;</code>（<code>Total/Arrived/Failed</code>）；<code>ConcurrentQueue&lt;SynthesisResult&gt;</code></dd>
-          <dt class="no">不负责</dt><dd class="no">不判缺哪段（归 <code>ClipAssembler</code>）、不管开关/等级、不建 <code>AudioClip</code>、不重试</dd>
+          <dt>输入</dt><dd><code>PlayableUtterance</code>；<code>PriorityOf(Category)</code>；<code>QueueLimit</code></dd>
+          <dt>输出</dt><dd><code>TryTake(out u)</code> / <code>Count</code></dd>
+          <dt>持有</dt><dd>只放未开始播的句子 + <code>QueuedTick</code></dd>
+          <dt>边界</dt><dd>不持正在播的那句；超限丢最低最旧</dd>
         </dl>
       </article>
 
-      <!-- 16 -->
-      <article class="card mod" id="m-ClipAssembler" data-kind="new">
-        <header><span class="idx">16</span><h3>ClipAssembler</h3><span class="badge new">新增</span></header>
+      <article class="card mod sched" id="m-WarmupScheduler" data-grp="sched">
+        <header><h3>WarmupScheduler</h3><span class="badge new">新增</span><span class="gt gt-sched">调度</span></header>
         <dl>
-          <dt>输入</dt><dd><code>Utterance</code>；<code>SpeechLibrary.TryRead</code>；<code>WavReader</code>；<code>LoudnessNormalizer</code></dd>
-          <dt>输出</dt><dd><code>Ready(PlayableUtterance)</code> 或 <code>Missing(Segment[])</code>；「缺哪些片段」由它判</dd>
-          <dt>持有</dt><dd>无。一条都不许有</dd>
-          <dt class="no">不负责</dt><dd class="no">不发 TTS、不写库、不判等级/不删、不管音量/停顿</dd>
+          <dt>输入</dt><dd><code>RosterDelta</code>；<code>EnqueueSentence(u)</code>；每 2 s <code>Tick()</code></dd>
+          <dt>输出</dt><dd><code>WarmupJob</code> → <code>SegmentSynthesizer.RequestWarmup</code></dd>
+          <dt>持有</dt><dd>两个 FIFO（片段/整句）；本分钟已发计数</dd>
+          <dt>边界</dt><dd>出队前先 <code>Contains</code> 查库；不入队、不出声</dd>
         </dl>
       </article>
 
-      <!-- 17 -->
-      <article class="card mod" id="m-SpeechQueue" data-kind="new">
-        <header><span class="idx">17</span><h3>SpeechQueue</h3><span class="badge new">新增</span></header>
+      <!-- ===== 合成 6 ===== -->
+      <article class="card mod synth" id="m-SegmentSynthesizer" data-grp="synth">
+        <header><h3>SegmentSynthesizer</h3><span class="badge new">新增</span><span class="gt gt-synth">合成</span></header>
         <dl>
-          <dt>输入</dt><dd><code>PlayableUtterance</code>；<code>PriorityOf(Category)</code>；<code>QueueLimit</code>/<code>ThreatInterrupts</code></dd>
-          <dt>输出</dt><dd><code>Peek()</code> + <code>MarkDone()</code>（或 <code>TryDequeue</code>，二者选一并写明）</dd>
-          <dt>持有</dt><dd>只存未开始播的句子 + <code>QueuedTick</code></dd>
-          <dt class="no">不负责</dt><dd class="no">不持「正在播的那句」（归 <code>VoicePlayer</code>）、不建 clip、不读文本；插队插到队首</dd>
+          <dt>输入</dt><dd><code>RequestMissing</code> / <code>RequestWarmup</code>；每帧 <code>Drain()</code></dd>
+          <dt>输出</dt><dd><code>CompletedJob[]</code>（Playback/DeadTexts）＋落库</dd>
+          <dt>持有</dt><dd>作业表 <code>Job{Total/Arrived/Failed}</code>；结果队列</dd>
+          <dt>边界</dt><dd>唯一跨线程层；不判缺哪段、不建 clip、不重试</dd>
         </dl>
       </article>
 
-      <!-- 18 -->
-      <article class="card mod" id="m-VoicePlayer" data-kind="new">
-        <header><span class="idx">18</span><h3>VoicePlayer</h3><span class="badge new">新增</span></header>
+      <article class="card mod synth" id="m-ClipAssembler" data-grp="synth">
+        <header><h3>ClipAssembler</h3><span class="badge new">新增</span><span class="gt gt-synth">合成</span></header>
         <dl>
-          <dt>输入</dt><dd><code>SpeechQueue.Peek/MarkDone</code>；每帧 <code>Tick()</code>；音量 / <code>GapMs</code> 现读</dd>
-          <dt>输出</dt><dd><code>PlayScheduled</code> 出声；播完 <code>WarmupScheduler.EnqueueSentence(FullText)</code>；<code>RecentSnapshot()</code></dd>
-          <dt>持有</dt><dd><code>AudioSource</code> + <code>dspTime</code> 游标 + 当前句与 clip 游标 + 最近 20 条</dd>
-          <dt class="no">不负责</dt><dd class="no">不合成、不查开关、不判优先级、不认识缓存键、不删东西</dd>
+          <dt>输入</dt><dd><code>Utterance</code> + <code>deadTexts</code>；<code>SpeechLibrary.TryRead</code></dd>
+          <dt>输出</dt><dd><code>Ready</code> / <code>Missing</code> / <code>Nothing</code>（三态互斥）</dd>
+          <dt>持有</dt><dd>无（有字段就等于复活 clip 池）</dd>
+          <dt>边界</dt><dd>唯一判「缺哪些片段」；不合成、不写库、不删</dd>
         </dl>
       </article>
 
-      <!-- 19 -->
-      <article class="card mod" id="m-TtsClient" data-kind="new">
-        <header><span class="idx">19</span><h3>TtsClient</h3><span class="badge new">新增</span></header>
+      <article class="card mod synth" id="m-VoicePlayer" data-grp="synth">
+        <header><h3>VoicePlayer</h3><span class="badge new">新增</span><span class="gt gt-synth">合成</span></header>
         <dl>
-          <dt>输入</dt><dd><code>TtsRequest{Text, Params}</code>（后台线程调用）</dd>
-          <dt>输出</dt><dd>单条 <code>SynthesisResult{JobId, Text, WavBytes?, Error?}</code>；<code>LastError</code> 快照给 UI</dd>
-          <dt>持有</dt><dd>静态 <code>HttpClient</code>；<code>LastError</code>（状态码 + 响应体前 200 字）</dd>
-          <dt class="no">不负责</dt><dd class="no">不重试、不判缓存、不管响度、不认识 <code>Settings</code> 对象</dd>
+          <dt>输入</dt><dd><code>SpeechQueue.TryTake</code>；每帧 <code>Tick</code>；音量/GapMs 现读</dd>
+          <dt>输出</dt><dd><code>PlayScheduled</code> 出声；播完交 <code>WarmupScheduler</code></dd>
+          <dt>持有</dt><dd>当前句 + clipIndex + nextDspTime + 最近 20 条</dd>
+          <dt>边界</dt><dd>不合成、不查开关、不判优先级；clip 交给 GC</dd>
         </dl>
       </article>
 
-      <!-- 20 -->
-      <article class="card mod" id="m-WavReader" data-kind="new">
-        <header><span class="idx">20</span><h3>WavReader</h3><span class="badge new">新增</span></header>
+      <article class="card mod synth" id="m-TtsClient" data-grp="synth">
+        <header><h3>TtsClient</h3><span class="badge new">新增</span><span class="gt gt-synth">合成</span></header>
         <dl>
-          <dt>输入</dt><dd><code>byte[] wav</code>（来自 <code>TryRead</code>，主线程）</dd>
+          <dt>输入</dt><dd><code>TtsRequest{Text, Params}</code>（后台线程）</dd>
+          <dt>输出</dt><dd><code>SynthesisResult{JobId, Text, WavBytes?, Error?}</code></dd>
+          <dt>持有</dt><dd>静态 <code>HttpClient</code>；<code>LastError</code> 快照</dd>
+          <dt>边界</dt><dd>全 mod 唯一配置闸；不重试、不向调用方抛</dd>
+        </dl>
+      </article>
+
+      <article class="card mod synth" id="m-WavReader" data-grp="synth">
+        <header><h3>WavReader</h3><span class="badge new">新增</span><span class="gt gt-synth">合成</span></header>
+        <dl>
+          <dt>输入</dt><dd><code>byte[] wav</code>（主线程，来自 <code>TryRead</code>）</dd>
           <dt>输出</dt><dd><code>PcmData{Samples, SampleRate, Channels}</code> 或 <code>null</code></dd>
           <dt>持有</dt><dd>无</dd>
-          <dt class="no">不负责</dt><dd class="no">不重采样、不改声道、不建 <code>AudioClip</code>、不归一（不信 header 长度）</dd>
+          <dt>边界</dt><dd>不信 header 长度，按实际字节重算；fmt 缺失 ⇒ <code>null</code></dd>
         </dl>
       </article>
 
-      <!-- 21 -->
-      <article class="card mod" id="m-LoudnessNormalizer" data-kind="new">
-        <header><span class="idx">21</span><h3>LoudnessNormalizer</h3><span class="badge new">新增</span></header>
+      <article class="card mod synth" id="m-LoudnessNormalizer" data-grp="synth">
+        <header><h3>LoudnessNormalizer</h3><span class="badge new">新增</span><span class="gt gt-synth">合成</span></header>
         <dl>
           <dt>输入</dt><dd><code>float[] samples</code>；目标峰值 −3 dBFS</dd>
-          <dt>输出</dt><dd>归一后的 <code>float[]</code> + 峰值 <code>float</code>（供 <code>Trace</code>）</dd>
-          <dt>持有</dt><dd>无（不缓存结果，缓存即内存层）</dd>
-          <dt class="no">不负责</dt><dd class="no">不碰音量设置、不动采样率、不写库</dd>
+          <dt>输出</dt><dd>归一后的 <code>float[]</code> + 峰值</dd>
+          <dt>持有</dt><dd>无（不缓存）</dd>
+          <dt>边界</dt><dd>不动音量设置、不改采样率、不写库</dd>
         </dl>
       </article>
 
-      <!-- 22 -->
-      <article class="card mod" id="m-SpeechLibrary" data-kind="has">
-        <header><span class="idx">22</span><h3>SpeechLibrary</h3><span class="badge has">已有</span></header>
+      <!-- ===== 存储 2 ===== -->
+      <article class="card mod store" id="m-SpeechLibrary" data-grp="store">
+        <header><h3>SpeechLibrary</h3><span class="badge has">已有</span><span class="gt gt-store">存储</span></header>
         <dl>
-          <dt>输入</dt><dd><code>Put(LibraryKey, byte[])</code> / <code>TryRead(LibraryKey, out byte[])</code> / <code>ListFiles()</code> / <code>Snapshot()</code></dd>
-          <dt>输出</dt><dd><code>byte[]</code>；<code>LibraryUsage{Entries, Bytes}</code>；<code>LibraryEntry[]</code>；<code>SaveFingerprint</code> 由组件注入</dd>
-          <dt>持有</dt><dd>内存索引（键对象 + 元数据）；<code>index.json</code></dd>
-          <dt class="no">不负责</dt><dd class="no">不认识等级、不知道上限、不判该不该删、不合成</dd>
+          <dt>输入</dt><dd><code>Key</code> / <code>TryRead</code> / <code>Put</code> / <code>Contains</code> / <code>ListFiles</code></dd>
+          <dt>输出</dt><dd><code>byte[]</code>；<code>LibraryUsage</code>；条目与磁盘文件快照</dd>
+          <dt>持有</dt><dd>内存索引；<code>SaveFingerprint</code>；<code>VoiceFingerprint</code></dd>
+          <dt>边界</dt><dd>唯一碰磁盘；不认识上限、不判等级、不删</dd>
         </dl>
       </article>
 
-      <!-- 23 -->
-      <article class="card mod" id="m-LibraryJanitor" data-kind="new">
-        <header><span class="idx">23</span><h3>LibraryJanitor</h3><span class="badge new">新增</span></header>
+      <article class="card mod store" id="m-LibraryJanitor" data-grp="store">
+        <header><h3>LibraryJanitor</h3><span class="badge new">新增</span><span class="gt gt-store">存储</span></header>
         <dl>
-          <dt>输入</dt><dd><code>Snapshot()</code> + <code>ListFiles()</code>；存活名单 / 派系名单（自己扫）；<code>LibraryLimit</code>；<code>CheckLimit()</code></dd>
-          <dt>输出</dt><dd><code>Remove(key)</code> / <code>RemoveOrphanFiles()</code>（全 mod 唯一删除入口）；<code>RosterDelta</code> → <code>WarmupScheduler</code></dd>
-          <dt>持有</dt><dd>上轮名单快照（两阶段）、坏键待删名单、<code>L1SoftLimit = 500</code></dd>
-          <dt class="no">不负责</dt><dd class="no">不合成、不读音频字节、不调度预热、不判开关</dd>
+          <dt>输入</dt><dd><code>Snapshot()+ListFiles()</code>；存活名单；<code>LibraryLimit</code></dd>
+          <dt>输出</dt><dd><code>RemoveEntry</code>/<code>RemoveFile</code>/<code>SaveIndex</code>；<code>RosterDelta</code></dd>
+          <dt>持有</dt><dd>上轮名单（两阶段）；坏文件名单；<code>L1SoftLimit=500</code></dd>
+          <dt>边界</dt><dd>全 mod 唯一删除者；只按 <code>Value</code> 操作</dd>
         </dl>
       </article>
 
-      <!-- 24 -->
-      <article class="card mod" id="m-WarmupScheduler" data-kind="new">
-        <header><span class="idx">24</span><h3>WarmupScheduler</h3><span class="badge new">新增</span></header>
+      <!-- ===== UI 3 ===== -->
+      <article class="card mod ui" id="m-UI-Dialog" data-grp="ui">
+        <header><h3>UI/Dialog_VoiceSettings</h3><span class="badge has">已有</span><span class="gt gt-ui">UI</span></header>
         <dl>
-          <dt>输入</dt><dd><code>SpeechLibrary</code>（先查库）；<code>RosterDelta</code>；<code>EnqueueSentence(FullText)</code>；每 2 s <code>Tick()</code></dd>
-          <dt>输出</dt><dd><code>WarmupJob{Kind, Text, SegmentKind}</code> → 同一个合成入口（只补缺的）</dd>
-          <dt>持有</dt><dd>两个 FIFO（短语 / 整句）；本分钟已发计数</dd>
-          <dt class="no">不负责</dt><dd class="no">不合成、不写库、不判开关/优先级/等级；不决定「该不该被缓存」</dd>
-        </dl>
-      </article>
-
-      <!-- 25 -->
-      <article class="card mod" id="m-Trace" data-kind="new">
-        <header><span class="idx">25</span><h3>Trace</h3><span class="badge new">新增</span></header>
-        <dl>
-          <dt>输入</dt><dd><code>Step(id, msg)</code>（任意模块，仅主线程）</dd>
-          <dt>输出</dt><dd><code>Player.log</code> 一行 <code>[VD] &lt;id&gt; &lt;msg&gt;</code>（<code>TraceEnabled</code> 时）</dd>
-          <dt>持有</dt><dd>无（<code>Settings</code> 现读）</dd>
-          <dt class="no">不负责</dt><dd class="no">不做统计、不写文件、不当 UI 数据源</dd>
-        </dl>
-      </article>
-
-      <!-- 26 -->
-      <article class="card mod" id="m-UI-Dialog" data-kind="has">
-        <header><span class="idx">26</span><h3>UI/Dialog_VoiceSettings</h3><span class="badge has">已有</span></header>
-        <dl>
-          <dt>输入</dt><dd><code>Settings</code>；玩家点击（主线程，<code>OnGUI</code>）</dd>
-          <dt>输出</dt><dd>写 <code>Settings</code> + <code>FlushIfDirty</code>；打开/关闭窗口</dd>
+          <dt>输入</dt><dd><code>Settings</code>；玩家点击（<code>OnGUI</code>，主线程）</dd>
+          <dt>输出</dt><dd>写 <code>Settings</code> + <code>FlushIfDirty</code>；开/关窗口</dd>
           <dt>持有</dt><dd>当前页签序号</dd>
-          <dt class="no">不负责</dt><dd class="no">不校验业务、不读写缓存目录、不自己删文件</dd>
+          <dt>边界</dt><dd>不校验业务、不读写缓存目录、不删文件</dd>
         </dl>
       </article>
 
-      <!-- 27 -->
-      <article class="card mod" id="m-UI-Tabs" data-kind="has">
-        <header><span class="idx">27</span><h3>UI/Tab_*</h3><span class="badge has">已有</span></header>
+      <article class="card mod ui" id="m-UI-Tabs" data-grp="ui">
+        <header><h3>UI/Tab_*</h3><span class="badge has">已有</span><span class="gt gt-ui">UI</span></header>
         <dl>
-          <dt>输入</dt><dd><code>Settings</code>；<code>SpeechCatalog.Entries</code>；<code>Usage</code>；<code>RecentSnapshot()</code></dd>
-          <dt>输出</dt><dd>改 <code>Settings</code>；试听/朗读 → <code>SpeakDirect</code>；清缓存 → <code>ClearAll()</code></dd>
+          <dt>输入</dt><dd><code>Settings</code>；<code>Entries</code>；<code>Usage</code>；<code>RecentSnapshot</code>；<code>LastError</code></dd>
+          <dt>输出</dt><dd>改 <code>Settings</code>；试听/朗读→<code>SpeakDirect</code>；清缓存→<code>ClearAll</code></dd>
           <dt>持有</dt><dd>滚动位置、手动朗读文本框</dd>
-          <dt class="no">不负责</dt><dd class="no">不删文件、不发 HTTP、不建 <code>AudioSource</code>；无「合并窗口」「说话风格」两行</dd>
+          <dt>边界</dt><dd>不删文件、不发 HTTP、不判「能不能用」</dd>
         </dl>
       </article>
 
-      <!-- 28 -->
-      <article class="card mod" id="m-UI-RowWidgets" data-kind="has">
-        <header><span class="idx">28</span><h3>UI/RowWidgets</h3><span class="badge has">已有</span></header>
+      <article class="card mod ui" id="m-UI-RowWidgets" data-grp="ui">
+        <header><h3>UI/RowWidgets</h3><span class="badge has">已有</span><span class="gt gt-ui">UI</span></header>
         <dl>
           <dt>输入</dt><dd><code>Rect</code> + 标签 / 说明 / 当前值</dd>
-          <dt>输出</dt><dd>绘制 + 返回新值（<code>DrawRow</code>）；总高度（<code>GroupedHeight</code>）</dd>
+          <dt>输出</dt><dd>绘制 + 返回新值；总高度；小字</dd>
           <dt>持有</dt><dd>无</dd>
-          <dt class="no">不负责</dt><dd class="no">不写 <code>Settings</code>（写由调用者做）</dd>
+          <dt>边界</dt><dd>不写 <code>Settings</code>（由调用者写）；纯绘制</dd>
         </dl>
       </article>
 
     </div>
-    <p style="font-size:12.3px;color:#5f7186;margin:11px 2px 0">
-      注：22 类里 <code>BillSuspended</code> 目前<b>没有产出者</b>（保留开关、待游戏内探针）；补丁点共 7 个、分布在 5 个文件里。
-    </p>
   </section>
 
-  <!-- ================= 4. 数据类型 ================= -->
-  <section id="types">
+  <!-- ================= 04 22 类速查 ================= -->
+  <section id="classes">
     <div class="sec-head">
       <span class="num">04</span>
-      <h2>13 个数据类型</h2>
-      <span class="note">跨模块流转的全部类型；字段只列关键项。</span>
+      <h2>22 类速查表</h2>
+      <span class="note">通道 × def 判定 × 优先级 × 默认开关 × 模板键；表即 <code>SpeechCatalog.Bindings</code> 的数据形态。</span>
     </div>
-    <div class="card tbl-wrap">
-      <table>
-        <thead>
-          <tr><th>名字</th><th>关键字段</th><th>谁产出</th><th>谁消费</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Notice</td>
-            <td class="f"><code>Category</code> <code>Phrase</code> <code>Args: string[]</code> <code>Names: string[]</code> <code>Count: int</code> <code>BatchKey: string?</code> <code>Tick: int</code> <i>· sealed class，数组只读不共享</i></td>
-            <td>5 个钩子文件</td>
-            <td><code>Announcer</code></td>
-          </tr>
-          <tr>
-            <td>SpeechPhrase</td>
-            <td class="f"><i>enum：台词模板编号</i> <code>→ PhraseEntry{Template, ArgKinds}</code></td>
-            <td>钩子（选哪条说法）</td>
-            <td><code>SegmentPlanner</code>、<code>SpeechCatalog</code></td>
-          </tr>
-          <tr>
-            <td>Segment</td>
-            <td class="f"><code>Text: string</code> <code>Kind: SegmentKind</code> <i>· 常量 / 枚举 / 人名 / 数字</i></td>
-            <td><code>SegmentPlanner</code></td>
-            <td><code>SegmentSynthesizer</code>、<code>ClipAssembler</code>、<code>LibraryJanitor</code></td>
-          </tr>
-          <tr>
-            <td>Utterance</td>
-            <td class="f"><code>Segments: Segment[]</code> <code>FullText</code>（计算属性） <code>Category</code></td>
-            <td><code>SegmentPlanner</code></td>
-            <td><code>ClipAssembler.Plan</code>、<code>SegmentSynthesizer</code></td>
-          </tr>
-          <tr>
-            <td>PlayableUtterance</td>
-            <td class="f"><code>Clips: AudioClip[]</code> <code>Category</code> <code>FullText</code> <code>FromSentenceCache: bool</code></td>
-            <td><code>ClipAssembler</code></td>
-            <td><code>SpeechQueue</code>、<code>VoicePlayer</code></td>
-          </tr>
-          <tr>
-            <td>BatchSummary</td>
-            <td class="f"><code>Category</code> <code>BatchKey</code> <code>Count: int</code> <code>Names: string[]</code></td>
-            <td><code>BatchAggregator</code></td>
-            <td><code>SegmentPlanner.PlanBatch</code></td>
-          </tr>
-          <tr>
-            <td>LibraryEntry</td>
-            <td class="f"><code>Key: LibraryKey{VoiceFingerprint, Scope, Text, SegmentKind}</code> <code>LastUsedTick</code> <code>Bytes: long</code> <i>· Scope 不落库，用时推</i></td>
-            <td><code>SpeechLibrary</code></td>
-            <td><code>LibraryJanitor</code>、UI</td>
-          </tr>
-          <tr>
-            <td>CategoryEntry</td>
-            <td class="f"><code>Category</code> <code>Group/Label/Description</code> <code>Priority: int</code><span class="n-new">新增</span> <code>Phrase</code><span class="n-new">新增</span></td>
-            <td><code>SpeechCatalog</code></td>
-            <td>UI、<code>SpeechQueue</code>、<code>SegmentPlanner</code></td>
-          </tr>
-          <tr>
-            <td>TtsRequestParams</td>
-            <td class="f"><code>BaseUrl</code> <code>ApiKey</code> <code>Model</code> <code>Voice</code> <code>ResponseFormat</code> <code>Speed: float</code> <i>· 主线程拍的不可变快照</i></td>
-            <td><code>SegmentSynthesizer</code>（主线程）</td>
-            <td><code>TtsClient</code>（后台）</td>
-          </tr>
-          <tr>
-            <td>TtsRequest</td>
-            <td class="f"><code>Text: string</code> <code>Params: TtsRequestParams</code></td>
-            <td><code>SegmentSynthesizer</code></td>
-            <td><code>TtsClient</code>（后台）</td>
-          </tr>
-          <tr>
-            <td>SynthesisResult</td>
-            <td class="f"><code>JobId: long</code> <code>Text: string</code> <code>WavBytes: byte[]?</code> <code>Error: string?</code> <i>· 单条，批量由 Synthesizer 自己聚合</i></td>
-            <td><code>TtsClient</code>（后台）</td>
-            <td><code>SegmentSynthesizer.Drain</code>（主线程）</td>
-          </tr>
-          <tr>
-            <td>WarmupJob</td>
-            <td class="f"><code>Kind: 短语 | 整句</code> <code>Text: string</code> <code>SegmentKind</code> <i>· 短语作业用</i></td>
-            <td><code>WarmupScheduler</code></td>
-            <td><code>SegmentSynthesizer</code></td>
-          </tr>
-          <tr>
-            <td>PcmData</td>
-            <td class="f"><code>Samples: float[]</code> <code>SampleRate: int</code> <code>Channels: int</code></td>
-            <td><code>WavReader</code></td>
-            <td><code>ClipAssembler</code> → <code>LoudnessNormalizer</code> → <code>AudioClip</code></td>
-          </tr>
-        </tbody>
-      </table>
+
+    <div class="card">
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr><th>类别</th><th>通道</th><th>def 判定（补丁点编号）</th><th>优先级</th><th>默认</th><th>模板键</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="cls">ThreatRaid</td><td><span class="ch ch-inc">incident</span></td><td>③ <code>category == ThreatBig</code>，且不命中 <code>ThreatSiege</code></td><td><span class="pr p20">20</span></td><td class="on">开</td><td class="tk">Phrase_ThreatRaid</td></tr>
+            <tr><td class="cls">ThreatSiege</td><td><span class="ch ch-inc">incident</span></td><td>③ <code>raidStrategy</code> 前缀 <code>Siege</code> / <code>arrivalMode</code> 含 <code>Drop</code> / <code>defName</code> 含 <code>Siege·MechCluster·Cluster</code></td><td><span class="pr p20">20</span></td><td class="on">开</td><td class="tk">Phrase_ThreatSiege</td></tr>
+            <tr><td class="cls">ThreatAnimalInsanity</td><td><span class="ch ch-inc">incident</span></td><td>③ <code>defName ∈ AnimalInsanityMass / AnimalInsanitySingle / ManhunterPack</code></td><td><span class="pr p20">20</span></td><td class="on">开</td><td class="tk">Phrase_ThreatAnimalInsanity</td></tr>
+            <tr><td class="cls">PawnDowned</td><td><span class="ch ch-self">自算</span></td><td>⑥ <code>Pawn_HealthTracker.MakeDowned</code>（无 def）</td><td><span class="pr p10">10</span></td><td class="on">开</td><td class="tk">Phrase_PawnDowned</td></tr>
+            <tr><td class="cls">PawnDied</td><td><span class="ch ch-self">自算</span></td><td>⑦ <code>NotifyPlayerOfKilled</code>（<code>Death</code> 信 / <code>PawnDeath</code> 消息两支互斥）</td><td><span class="pr p10">10</span></td><td class="on">开</td><td class="tk">Phrase_PawnDied <span class="b">+ _Batch</span></td></tr>
+            <tr><td class="cls">MentalBreak</td><td><span class="ch ch-self">自算</span></td><td>④ <code>beginLetterDef ≠ null</code> 且 <code>IsColonist</code></td><td><span class="pr p10">10</span></td><td class="on">开</td><td class="tk">Phrase_MentalBreak <span class="b">+ _Batch</span></td></tr>
+            <tr><td class="cls">Birth</td><td><span class="ch ch-self">自算</span></td><td>⑤ <code>Hediff_Pregnant.StartLabor</code> 且 <code>Humanlike</code></td><td><span class="pr p10">10</span></td><td class="on">开</td><td class="tk">Phrase_Birth</td></tr>
+            <tr><td class="cls">DiseaseOutbreak</td><td><span class="ch ch-inc">incident</span></td><td>③ <code>workerClass</code> 是 <code>IncidentWorker_Disease</code> 子类（13 个 <code>Disease_*</code>）</td><td><span class="pr p5">5</span></td><td class="on">开</td><td class="tk">Phrase_DiseaseOutbreak <span class="b">+ _Batch</span></td></tr>
+            <tr><td class="cls">DiseaseSpread</td><td><span class="ch ch-todo">待实现</span></td><td><span class="warn">⚠</span> 自算来源待实现：hediff 名 + 阈值；产出点不在 8 点内</td><td><span class="pr p5">5</span></td><td class="on">开</td><td class="tk">Phrase_DiseaseSpread <span class="b">+ _Batch</span></td></tr>
+            <tr><td class="cls">Addiction</td><td><span class="ch ch-todo">待实现</span></td><td><span class="warn">⚠</span> 自算来源待实现：<code>Hediff_Addiction</code> 的 stage 变化</td><td><span class="pr p5">5</span></td><td class="on">开</td><td class="tk">Phrase_Addiction</td></tr>
+            <tr><td class="cls">TraderArrival</td><td><span class="ch ch-inc">incident</span></td><td>③ <code>defName ∈ TraderCaravanArrival / OrbitalTraderArrival</code></td><td><span class="pr p5">5</span></td><td class="on">开</td><td class="tk">Phrase_TraderArrival</td></tr>
+            <tr><td class="cls">Visitors</td><td><span class="ch ch-inc">incident</span></td><td>③ <code>defName == VisitorGroup</code></td><td><span class="pr p5">5</span></td><td class="on">开</td><td class="tk">Phrase_Visitors</td></tr>
+            <tr><td class="cls">Quests</td><td><span class="ch ch-let">letter</span></td><td>② <code>defName == NewQuest</code></td><td><span class="pr p5">5</span></td><td class="on">开</td><td class="tk">Phrase_Quests</td></tr>
+            <tr><td class="cls">WeatherExtreme</td><td><span class="ch ch-inc">incident</span></td><td>③ <code>defName ∈ HeatWave / ColdSnap / VolcanicWinter</code></td><td><span class="pr p5">5</span></td><td class="on">开</td><td class="tk">Phrase_WeatherExtreme</td></tr>
+            <tr><td class="cls">EnvHazard</td><td><span class="ch ch-inc">incident</span></td><td>③ <code>defName ∈ SolarFlare / Eclipse / ToxicFallout</code></td><td><span class="pr p5">5</span></td><td class="on">开</td><td class="tk">Phrase_EnvHazard</td></tr>
+            <tr><td class="cls">Rotten</td><td><span class="ch ch-msg">message</span></td><td>① <code>NegativeEvent</code> 且 <code>text</code> 以腐烂后缀结尾 <span class="warn">⚠ P2 校准</span></td><td><span class="pr p0">0</span></td><td class="on">开</td><td class="tk">Phrase_Rotten <span class="b">+ _Batch</span></td></tr>
+            <tr><td class="cls">BuildMissingMaterials</td><td><span class="ch ch-self">自算</span></td><td>⑧ 玩家手动放置 且 缺口 &gt; 0</td><td><span class="pr p0">0</span></td><td class="on">开</td><td class="tk">Phrase_BuildMissingMaterials</td></tr>
+            <tr><td class="cls">BuildPlaceFailed</td><td><span class="ch ch-msg">message</span></td><td>① <code>defName ∈ SilentInput / RejectInput</code></td><td><span class="pr p0">0</span></td><td class="on">开</td><td class="tk">Phrase_BuildPlaceFailed</td></tr>
+            <tr><td class="cls">BillSuspended</td><td><span class="ch ch-todo">待实现</span></td><td><span class="warn">⚠</span> 原版零通知；去留待探针 P3</td><td><span class="pr p0">0</span></td><td class="on">开</td><td class="tk">Phrase_BillSuspended</td></tr>
+            <tr><td class="cls">OtherIncident</td><td><span class="ch ch-inc">incident</span></td><td>③ 以上 <code>incident</code> 行都不命中（兜底）</td><td><span class="pr p0">0</span></td><td class="on">开</td><td class="tk">Phrase_OtherIncident</td></tr>
+            <tr><td class="cls">OtherLetter</td><td><span class="ch ch-let">letter</span></td><td>② 丢弃表之外、且非 <code>NewQuest</code>（兜底）</td><td><span class="pr p0">0</span></td><td class="on">开</td><td class="tk">Phrase_OtherLetter</td></tr>
+            <tr><td class="cls">OtherMessage</td><td><span class="ch ch-msg">message</span></td><td>① 丢弃表之外、非 <code>Rotten</code> / <code>BuildPlaceFailed</code>（兜底）</td><td><span class="pr p0">0</span></td><td class="on">开</td><td class="tk">Phrase_OtherMessage</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="tbl-sum">
+        <span>通道分布：<b>incident 9</b> · <b>自算 5</b> · <b>letter 2</b> · <b>message 3</b> · <b>待实现 3</b></span>
+        <span>有产出者 <b>19</b> · 待实现 <b>3</b> · 兜底 <b>3</b></span>
+        <span>默认全开 = <code>CategoryEntry.DefaultEnabled</code> 全 <code>true</code>（唯一默认值定义处）</span>
+        <span>优先级只被 <code>SpeechQueue</code> 读</span>
+      </div>
     </div>
-    <p style="font-size:12.3px;color:#5f7186;margin:11px 2px 0">
-      名字不混用：<code>SaveFingerprint</code> 是存档 GUID（<code>DeputyGameComponent</code> 持有）；<code>VoiceFingerprint</code> 是 <code>sha1(BaseUrl|Model|Voice)</code>，只在键里出现。
-    </p>
   </section>
 
-  <!-- ================= 5. 待拍板 ================= -->
-  <section id="pending">
+  <!-- ================= 05 类型速览 ================= -->
+  <section id="types">
     <div class="sec-head">
       <span class="num">05</span>
-      <h2>待拍板清单</h2>
-      <span class="note">只剩一条没定；图上已按草案写法画，并标了 ⚠。</span>
+      <h2>18 组类型</h2>
+      <span class="note">跨模块流转的全部类型；只列名字 + 一句话 + 关键字段（全文见 01 §6）。</span>
     </div>
-    <div class="q-list">
-      <article class="card q">
-        <div class="id">Q17</div>
-        <div class="txt">
-          <b>跨通道去重是否按「事件身份（类别 + defName + 目标）+ 1.5 s」收敛。</b>
-          <span class="s">同一次精神崩溃会经多个通道各报一遍，收敛口径决定 <code>Announcer</code> 去重表的键与窗口。</span>
-        </div>
-        <span class="st wait">待确认</span>
+    <div class="types">
+
+      <article class="card ty">
+        <div class="h"><b>Notice</b><span class="n">sealed class</span></div>
+        <p>钩子拍平后的唯一消息体：出钩子之后全链只剩 enum / string / int。</p>
+        <div class="f">Category · Phrase · Args[] · Names[] · Count · BatchKey? · Tick</div>
       </article>
+
+      <article class="card ty">
+        <div class="h"><b>Segment</b> <span class="n">/ SegmentKind</span></div>
+        <p>一句话 = 有序片段列表；每片独立合成、独立缓存。</p>
+        <div class="f">Text · Kind ∈ Const / Enum / PersonName / Number / RawText（Sentence 只作键）</div>
+      </article>
+
+      <article class="card ty">
+        <div class="h"><b>Utterance</b></div>
+        <p>待组装的句子；<code>FullText</code> 是计算属性，拼法只有一处。</p>
+        <div class="f">Category · Segments[] · BatchKey? · FullText = string.Concat(Segments)</div>
+      </article>
+
+      <article class="card ty">
+        <div class="h"><b>PlayableUtterance</b></div>
+        <p>已建好 AudioClip 的可播句；停顿与优先级都不在这里。</p>
+        <div class="f">Source（引用，不拷贝） · Clips[] · FromSentenceCache</div>
+      </article>
+
+      <article class="card ty">
+        <div class="h"><b>BatchSummary</b> <span class="n">/ RosterDelta</span></div>
+        <p>聚合批的汇总 / 清理器交出的新名字（消失名单不外传）。</p>
+        <div class="f">Category · BatchKey · Count · Names[] · Single? ‖ NewNames[]</div>
+      </article>
+
+      <article class="card ty">
+        <div class="h"><b>LibraryKey</b><span class="n">值类型</span></div>
+        <p>缓存键：音色指纹 + 作用域 + 原文 + 片段种类；全 mod 唯一键构造点。</p>
+        <div class="f">VoiceFingerprint · Scope（计算） · Text · SegmentKind · Value = sha1(…) </div>
+      </article>
+
+      <article class="card ty">
+        <div class="h"><b>LibraryEntry</b> <span class="n">/ DiskFile</span></div>
+        <p>库条目只存事实（不存等级）/ 磁盘上真实存在的文件。</p>
+        <div class="f">Value · Text · SegmentKind · LastUsedTick · Bytes ‖ Value · Bytes</div>
+      </article>
+
+      <article class="card ty">
+        <div class="h"><b>LibraryUsage</b></div>
+        <p>占用报告：唯一能看见「这个 mod 花了多少磁盘」的出口。</p>
+        <div class="f">Entries · Bytes · Describe() → «1,234 条 / 12.3 MB»</div>
+      </article>
+
+      <article class="card ty">
+        <div class="h"><b>CategoryEntry</b></div>
+        <p>22 类的元数据；优先级、聚合模板、默认开关都只在这里定义一次。</p>
+        <div class="f">Category · Group/Label/Description · Priority · BatchPhrase · DefaultEnabled</div>
+      </article>
+
+      <article class="card ty">
+        <div class="h"><b>PhraseEntry</b> <span class="n">/ PhraseForm</span></div>
+        <p>模板表：一条文案 + 每个槽的种类；加一类只加数据行。</p>
+        <div class="f">Id · Category · Form ∈ SingleEvent / Batch / RawText · Template · ArgKinds[]</div>
+      </article>
+
+      <article class="card ty">
+        <div class="h"><b>TtsRequestParams</b> <span class="n">/ TtsRequest</span></div>
+        <p>主线程拍下的不可变快照 + 一条请求；后台只认这两个。</p>
+        <div class="f">BaseUrl · ApiKey · Model · Voice · ResponseFormat="wav" · Speed ‖ Text · Params</div>
+      </article>
+
+      <article class="card ty">
+        <div class="h"><b>SynthesisResult</b> <span class="n">/ CompletedJob / WarmupJob</span></div>
+        <p>后台回单（单条）→ 主线程作业结果 / 预热作业。</p>
+        <div class="f">JobId · Text · WavBytes? · Error? ‖ Kind · Playback? · DeadTexts[] · Put ‖ Kind · Text · SegmentKind</div>
+      </article>
+
+      <article class="card ty">
+        <div class="h"><b>PcmData</b></div>
+        <p>解出来的 PCM：采样率与声道原样带入 AudioClip.Create。</p>
+        <div class="f">Samples[]（交错 L,R…） · SampleRate · Channels</div>
+      </article>
+
+      <article class="card ty">
+        <div class="h"><b>SpeechChannel</b> <span class="n">/ SourceBinding / BindingKey</span></div>
+        <p>通道与绑定表：加一类 = 加一行，不改任何 if。</p>
+        <div class="f">Channel ∈ Incident/Letter/Message/SelfComputed · Kind ∈ DefName/Category/RaidStrategyPrefix/ArrivalModeContains/WorkerClass/DefNameContains · Value · TextSuffix</div>
+      </article>
+
+      <article class="card ty">
+        <div class="h"><b>AssemblyResult</b> <span class="n">/ AssemblyOutcome</span></div>
+        <p>Plan 的三态互斥结果：非空互斥，Enqueue 永远收不到 null。</p>
+        <div class="f">Outcome ∈ Ready / Missing / Nothing · Playable? · Missing[]?</div>
+      </article>
+
+      <article class="card ty">
+        <div class="h"><b>JobKind</b></div>
+        <p>合成作业两类：缺片段合成 / 预热；决定 Drain 之后走不走二次 Plan。</p>
+        <div class="f">Missing（Playback 非空，回 ClipAssembler） · Warmup（Playback 为 null，只更新占用）</div>
+      </article>
+
+      <article class="card ty">
+        <div class="h"><b>UtteranceSource</b></div>
+        <p>三条 Plan 入口归约成的同一种输入；只在 SegmentPlanner 内部存在。</p>
+        <div class="f">Category · Phrase · Args[] · Names[] · Count · BatchKey</div>
+      </article>
+
+      <article class="card ty">
+        <div class="h"><b>SpeechPhrase</b><span class="n">enum，28 个成员</span></div>
+        <p>模板键的枚举：22 单事件 + 5 聚合 + 1 裸文本，与 PhraseEntry 一一对应。</p>
+        <div class="f">Phrase_&lt;类别&gt; · Phrase_&lt;类别&gt;_Batch · Phrase_RawText</div>
+      </article>
+
     </div>
-    <p style="font-size:12.3px;color:#5f7186;margin:11px 2px 0">
-      已定、不在此列：<b>Q3</b> <code>Notice</code> 取「模板 + 参数」，钩子只取事实、切分唯一归 <code>SegmentPlanner</code>；
-      <b>H3</b> <code>DeputyGameComponent</code> 由框架自动创建（非抽象子类 + <code>public (Game game)</code> 构造，<code>FillComponents()</code> 收养，读档不会重复）。
-    </p>
+  </section>
+
+  <!-- ================= 06 探针 ================= -->
+  <section id="probes">
+    <div class="sec-head">
+      <span class="num">06</span>
+      <h2>探针 P1–P10</h2>
+      <span class="note">每条的「结果会改什么」都只指向一处：一张数据表、一个常量、或一个函数。</span>
+    </div>
+
+    <div class="p-list">
+
+      <article class="card pb">
+        <div class="id">P1</div>
+        <div class="q"><b>验什么</b><span>疾病突发时 ③ 被调几次：一条自带 <code>Count=N</code> 的 <code>Notice</code>，还是逐人 N 条。</span></div>
+        <div class="r"><b>结果会改什么</b><span><code>BatchAggregator</code> 走哪条分支；若逐人 —— <code>DiseaseOutbreak</code> 的 <code>BatchKey</code> 与 <code>Count</code> 来源改成成员计数。</span></div>
+        <span class="st">进游戏才能做</span>
+      </article>
+
+      <article class="card pb">
+        <div class="id">P2</div>
+        <div class="q"><b>验什么</b><span>一局里 <code>Messages.Message</code> 的条数与分类分布：<code>OtherMessage</code> 占比、腐烂文案后缀是否匹配上。</span></div>
+        <div class="r"><b>结果会改什么</b><span><code>OtherMessage</code> 的默认开关；腐烂的后缀常量；以及默认值定稿流程的输入。</span></div>
+        <span class="st">进游戏才能做</span>
+      </article>
+
+      <article class="card pb">
+        <div class="id">P3</div>
+        <div class="q"><b>验什么</b><span>工作台缺料挂起是否产生<strong>任何</strong>提示（ITab / Alert / 消息）。</span></div>
+        <div class="r"><b>结果会改什么</b><span><code>BillSuspended</code> 的去留：留则新增补丁点（超出 8 点），删则四处各删一行。</span></div>
+        <span class="st">进游戏才能做</span>
+      </article>
+
+      <article class="card pb">
+        <div class="id">P4</div>
+        <div class="q"><b>验什么</b><span>设置窗口排版、中文渲染（不出现方块/截断）、开关重启后是否读回。</span></div>
+        <div class="r"><b>结果会改什么</b><span>控件布局与字号；若中文截断只改 <code>RowWidgets</code> 的尺寸常量。</span></div>
+        <span class="st">进游戏才能做</span>
+      </article>
+
+      <article class="card pb">
+        <div class="id">P5</div>
+        <div class="q"><b>验什么</b><span>TTS 端到端延迟、片段拼缝听感、<code>Speed</code> 与 <code>GapMs</code> 的手感；<code>35</code> 是否被念成「三十五」。</span></div>
+        <div class="r"><b>结果会改什么</b><span><code>GapMs</code> 默认值、<code>NumericText</code> 开关、<code>MaxNamedInBatch</code> 默认值。</span></div>
+        <span class="st">进游戏才能做</span>
+      </article>
+
+      <article class="card pb">
+        <div class="id">P6</div>
+        <div class="q"><b>验什么</b><span>Unity 能否直接吃 SiliconFlow 的 WAV（头长度字段是占位值）。</span></div>
+        <div class="r"><b>结果会改什么</b><span><code>WavReader</code> 是否必须重算长度；即便能吃也保留重算（对其它服务端更稳）。</span></div>
+        <span class="st">进游戏才能做</span>
+      </article>
+
+      <article class="card pb">
+        <div class="id">P7</div>
+        <div class="q"><b>验什么</b><span>一场袭击里 ⑦ 被调几次：会不会一次刷十几条。</span></div>
+        <div class="r"><b>结果会改什么</b><span><code>PawnDied</code> 的 <code>BatchKey</code> 策略（同 tick + 同派系 → 同 tick）与 <code>QueueLimit</code> 默认值。</span></div>
+        <span class="st">进游戏才能做</span>
+      </article>
+
+      <article class="card pb">
+        <div class="id">P8</div>
+        <div class="q"><b>验什么</b><span>⑧ 算出的缺口数值与建造 UI 红字是否一致；自动重建 / 样板是否被正确排除。</span></div>
+        <div class="r"><b>结果会改什么</b><span><code>BlueprintHooks</code> 的成本比较函数（<code>CostListAdjusted</code> 的调用口径）。</span></div>
+        <span class="st">进游戏才能做</span>
+      </article>
+
+      <article class="card pb">
+        <div class="id">P9</div>
+        <div class="q"><b>验什么</b><span>袭击期间 <code>MessageRaidersBeginningAssault</code> 与第一封信的实际间隔。</span></div>
+        <div class="r"><b>结果会改什么</b><span><code>message</code> 丢弃表里的 <code>ThreatBig</code>：可能移出并映射到 <code>ThreatRaid</code>。</span></div>
+        <span class="st">进游戏才能做</span>
+      </article>
+
+      <article class="card pb">
+        <div class="id">P10</div>
+        <div class="q"><b>验什么</b><span><code>IncidentParms.silent</code> / <code>sendLetter</code> 的真实置位频率；置位时 ③ 是否仍触发。</span></div>
+        <div class="r"><b>结果会改什么</b><span><code>IncidentHooks</code> 一处：可能给 <code>ThreatRaid</code> 加「静默不播」判断。</span></div>
+        <span class="st">进游戏才能做</span>
+      </article>
+
+    </div>
   </section>
 
 </div>
 
 <footer>
   <div class="in">
-    <div>来源：<code>语音副官/docs/模块-输入输出-信息流-草案.md</code>（815 行）、<code>审查-模块IO-20261017.md</code>、<code>模块IO-修订指令.md</code>、<code>拷打-第2轮-已定-20261017.md</code></div>
-    <div>冲突处置以 <code>模块IO-修订指令.md</code> 为准；生成日期 2026-10-17。</div>
-    <div><span class="warn-pill">本页是草案，未开工</span> 未写代码、未编译、未进游戏；所有游戏 API 结论均转引自取证文档。</div>
+    <div>来源：<code>语音副官/docs/01-架构与模块.md</code>（583 行）· <code>02-类别与来源.md</code>（290）· <code>03-文案与片段.md</code>（262）· <code>04-语音库与清理.md</code>（238）· <code>05-设置界面.md</code>（245）· <code>06-编码顺序与验收.md</code>（224）</div>
+    <div>生成日期 2026-10-17 ｜ 数字口径：28 模块 · 18 组类型 · 8 个补丁点 / 5 个文件 · 22 类（28 条模板键 = 22 单事件 + 5 聚合 + 1 裸文本）</div>
+    <div><span class="warn-pill">本页是设计定稿，代码尚未开工</span> 第 1–2 步（入口与设置骨架）的代码已在 <code>Source/</code>，其余按 <code>06</code> 的 8 步推进；所有游戏 API 结论转引自取证文档，未在游戏内复验的条目在表内标 <span class="warn">⚠</span>。</div>
   </div>
 </footer>
 
 <script>
 (function () {
   var svg = document.getElementById('svg-flow');
-  var loopEdges = document.getElementById('loop-edges');
-  var btnLoop = document.getElementById('btn-loop');
-  var btnLabel = document.getElementById('btn-label');
-  var labels = document.getElementById('labels');
-  var loopOn = false;
-
-  btnLoop.addEventListener('click', function () {
-    loopOn = !loopOn;
-    btnLoop.classList.toggle('on', loopOn);
-    loopEdges.style.opacity = loopOn ? '1' : '.55';
-    loopEdges.style.filter = loopOn ? 'drop-shadow(0 0 3px rgba(23,67,184,.45))' : 'none';
-    document.querySelectorAll('.node .box-loop, .node .box-key').forEach(function (n) {
-      n.style.strokeWidth = loopOn ? '3' : '';
+  if (svg) {
+    svg.querySelectorAll('[data-mod]').forEach(function (g) {
+      g.addEventListener('click', function () {
+        var el = document.getElementById('m-' + g.getAttribute('data-mod'));
+        if (!el) return;
+        document.querySelectorAll('.mod.sel').forEach(function (m) { m.classList.remove('sel'); });
+        el.classList.add('sel');
+        el.scrollIntoView({ block: 'center' });
+      });
     });
-  });
+  }
 
-  btnLabel.addEventListener('click', function () {
-    var on = btnLabel.classList.toggle('on');
-    labels.style.display = on ? '' : 'none';
-  });
-
-  // 点图上的节点 → 跳到对应模块卡片
-  svg.querySelectorAll('[data-mod]').forEach(function (g) {
-    g.addEventListener('click', function () {
-      var id = 'm-' + g.getAttribute('data-mod');
-      var el = document.getElementById(id);
-      if (!el) return;
-      document.querySelectorAll('.mod.sel').forEach(function (m) { m.classList.remove('sel'); });
-      el.classList.add('sel');
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
-  });
-
-  // 模块筛选
   var btns = document.querySelectorAll('[data-filter]');
   btns.forEach(function (b) {
     b.addEventListener('click', function () {
@@ -1041,7 +1201,7 @@
       b.classList.add('on');
       var f = b.getAttribute('data-filter');
       document.querySelectorAll('#mods .mod').forEach(function (c) {
-        c.style.display = (f === 'all' || c.getAttribute('data-kind') === f) ? '' : 'none';
+        c.style.display = (f === 'all' || c.getAttribute('data-grp') === f) ? '' : 'none';
       });
     });
   });
