@@ -5,20 +5,26 @@
 
 ## 现在
 
-- **第 5 步（文案切分）已完成**：`Segment` / `Utterance` / `UtteranceSource` / `BatchSummary` / `SegmentPlanner`，`Announcer` 成句后打 `[VD] 2 <整句原文>`。`dotnet build` **0 错误 0 警告**；判据 **A 过**，**B 类没跑**（没进游戏）。
-- **代码状态**：第 1–5 步的代码全部写完、编译通过、**从未进过游戏**；`[VD] 1/2` 已能打出完整句，但**不出声**。
-- **下一步**：第 6 步——`TtsClient` / `WavReader` / `LoudnessNormalizer` / `SpeechLibrary` / `SegmentSynthesizer` / `ClipAssembler` / `DeputyGameComponent` / `VoicePlayer`（第一次出声）。
-- **进游戏看这几行判定第 4+5 步**（`Settings.TraceEnabled` 默认关，先在调试页打开）：
-  - `[VD] 1 incident ThreatRaid` → 紧跟 `[VD] 2 侦测到袭击，<派系>，袭击。`
-  - `[VD] 1 自算 PawnDowned` → `[VD] 2 鼠条倒地。`（带编号的名字应打成 `鼠条` + `18` 两段）
-  - `[VD] 1 自算 PawnDied` → `[VD] 2 鼠条阵亡。<死因原句>`
-  - `[VD] 1 incident DiseaseOutbreak` → `[VD] 2 疾病爆发，<病名>，N人感染。`
-  - `[VD] 1 自算 BuildMissingMaterials` → `[VD] 2 材料不足，缺 N 个<材料>。`
-  - `[VD] 1 drop Death`：命中丢弃表（信/消息各一行）
-  - `[VD] 2 dup` / `[VD] 2 off` / `[VD] 2 bad-phrase`：去重 / 开关关 / 参数不符（不播半句）
-- **阶段 5（地基探针）：未做。** 探针清单 P1–P10 在 `docs/06-编码顺序与验收.md` §9。
+- **第 6 步（合成与落库）已完成**：`TtsClient` / `WavReader` / `LoudnessNormalizer` / `SpeechLibrary`（键/读写/索引/Usage）/ `SegmentSynthesizer` / `ClipAssembler` / `AssemblyResult` / `DeputyGameComponent` / `VoicePlayer`（最小版），`Announcer.Tick()` 交句，试听接真。`dotnet build` **0 错误 0 警告**；**从未进游戏**（A 过，B/C/D 类没跑）。
+- **代码状态**：第 1–6 步全部写完、编译通过、**未进过游戏**；配置齐全且 key 有效时理论上会出声。
+- **下一步**：第 7 步——`SpeechQueue` / `BatchAggregator` / `VoicePlayer` 完整版 / `Announcer.Tick` 串聚合。
+- **进游戏看这几行判定第 6 步**（先在调试页打开 `TraceEnabled`）：
+  - 点语音页「试听」⇒ `[VD] 5.1 副官就位` → `[VD] 5.2 副官就位` → `[VD] 3a Ready 1 副官就位` → `[VD] 4 副官就位` → 出声 → `[VD] 6 副官就位`
+  - 未配置（`ApiKey` 空）：点试听 ⇒ `[VD] 5.1 …` → `[VD] 5.3 副官就位 未配置`，**没有 5.2、没有请求**，状态条显示「未配置」
+  - 事件播报：`[VD] 1 …` → `[VD] 2 <整句>` → `[VD] 3a Missing n <整句>` → `[VD] 5.1 <片段>` → `[VD] 5.2 <片段>` → `[VD] 3a Ready n <整句>` → `[VD] 4 <整句>` → `[VD] 6 <整句>`
+  - `[VD] 5.3 <片段> HTTP 401: …` = key/域名不对；`[VD] err drain|plan|player <类型>` = 泵里抛了异常（600 帧一条）
 
 ## 待办
+
+- **第 6 步留下的 6 处（都按最字面读法实现，等设计侧决定改文档还是改代码）**：
+  1. **TTS 请求格式是假设**：`docs/` 只写了端点 `https://api.siliconflow.cn/v1/audio/speech` 与 `audio/wav` 响应，没写请求体。`TtsClient.Payload` 按 OpenAI 兼容写成 `{"model","input","voice","response_format":"wav","speed"}` + `Authorization: Bearer <key>`。若服务端不认，只改 `TtsClient.Payload` 一处。
+  2. **`LastError` 的类型放在命名空间层**：`TtsClient` 里既要类型 `LastError` 又要静态属性 `LastError`（文档要 UI 读 `TtsClient.LastError`），嵌套类型与成员不能同名（CS0102）⇒ 类型 `VoiceDeputy.LastError`、属性 `TtsClient.LastError`。
+  3. **`TtsRequest` 多带 `JobId` / `SynthesisResult` 多带 `Kind`**：01 §6.11 / §6.12 的字段表没有这两项，但结果回来时要与作业表和片段种类对上，没有它们就只能靠"文本反查"，同名不同 kind 会错。
+  4. **`index.json` 在验证第 6 步时不会出现**：06 §6 的 B 判据写"`Cache/Voice/` 出现 `.wav` 与 `index.json`"，但 04 §2.3 / §4.1 ④ 规定 `SaveIndex()` 只由 `LibraryJanitor` 调 ⇒ 第 8 步之前只有 `.wav`、没有 `index.json`（重启后缓存等于清零，功能不受影响）。要么接受"第 8 步才有 index.json"，要么允许 `Put` 顺手落索引（违反 04 §4.6）。
+  5. **`PlayableUtterance` 没有指定文件**：与 `AssemblyResult` 一起放在 `AssemblyResult.cs`（它俩同属"组装产物"）。
+  6. **`AssemblyResult.Missing` 的字段改名为 `MissingSegments`**：文档同时要字段 `Missing` 与工厂方法 `Missing(Segment[])`，同名编译不过（CS0102）。
+- **`DeputyGameComponent` 的泵异常日志 id 是 `err`**（01 §5.2 的 id 表只到 `6`）：每段各自 try/catch，同一段 600 帧最多一条，形如 `[VD] err drain NullReferenceException`。
+- **`VoicePlayer` 的音量被 `Mathf.Clamp01` 截到 1.0**：`MasterVolume × TtsVolume` 最大可到 4（两个滑条都 200%），但 `AudioSource.volume` 上限是 1。
 
 - **`DiseaseOutbreak` 的 `Args` 比 02 §4.5 多一个人数**：03 §3 的模板 `疾病爆发，{0}，{1}人感染。` 有两个槽（`Enum` + `Number`），只给 `def.label` 会命中"Args ≠ ArgKinds ⇒ 不播半句"。所以 `IncidentHooks` 交 `[def.label, Count]`（`Count` 字段仍是 `max(1, parms.pawnCount)`）。02 §4.5 那一行要补。
 - **`Pawn.LabelShort` 可能带富文本**（实测 `Pawn.get_LabelNoCount` IL：有头衔时走 `ColoredText.Colorize`）⇒ 带 Royalty 头衔的殖民者名字里会有 `<color=#…>…</color>`；名字清洗只删 `<` `>`，剩下的 `color=#…` 会念出来。进游戏若真见到，只改 `PawnHooks.NameOf` 一处（改用 `pawn.Name.ToStringShort`）。

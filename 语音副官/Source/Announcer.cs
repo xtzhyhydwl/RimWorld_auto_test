@@ -4,8 +4,8 @@ using Verse;
 
 namespace VoiceDeputy
 {
-    // 全 mod 唯一的开关检查点 + 去重（01 §5.3），去重通过后交给 SegmentPlanner 成句。
-    // 合成与播放还不在本步（第 6 步），所以句子成完就丢，只留 [VD] 2 的原文。
+    // 全 mod 唯一的开关检查点 + 去重（01 §5.3），去重通过后交给 SegmentPlanner 成句，
+    // 成好的句子攒到 Tick 交出去（DeputyGameComponent 是唯一的组装调用者）。
     public static class Announcer
     {
         // 01 §5.3：键 = Category + Phrase + Args + Count，窗口 2000 ms。
@@ -15,6 +15,10 @@ namespace VoiceDeputy
         private const int DedupeSweepMs = 300000;
 
         private static readonly Dictionary<string, int> LastAcceptedMs = new Dictionary<string, int>(StringComparer.Ordinal);
+        private static readonly Utterance[] EmptyUtterances = new Utterance[0];
+
+        // 本帧待组装列表（DeputyGameComponent 每帧取走一次）。
+        private static readonly List<Utterance> ready = new List<Utterance>();
         private static int lastSweepMs;
 
         // 钩子的唯一出口：只交事实（通道 / 类别 / def 名 / 参数），Notice 与 [VD] 1 都在这一处生成，
@@ -38,6 +42,45 @@ namespace VoiceDeputy
                 // 钩子里抛异常会污染原版调用栈（01 §4 铁律），这里一律吞掉并留一行日志。
                 Trace.Step("1", SpeechCatalog.ChannelName(channel));
             }
+        }
+
+        // 试听 / 手动朗读（01 §5.3）：绕过事件与开关闸，直接把文本送 PlanRaw。
+        public static void SpeakDirect(string text)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(text))
+                {
+                    return;
+                }
+
+                Utterance utterance = SegmentPlanner.PlanRaw(text);
+                if (utterance == null)
+                {
+                    Trace.Step("2", "bad-phrase");
+                    return;
+                }
+
+                Trace.Step("2", utterance.FullText);
+                ready.Add(utterance);
+            }
+            catch
+            {
+                // 同 Receive：异常不出 Announcer。
+            }
+        }
+
+        // 每帧一次：交出本帧待组装的句子（含已在 Receive 里成好的句）。
+        public static Utterance[] Tick()
+        {
+            if (ready.Count == 0)
+            {
+                return EmptyUtterances;
+            }
+
+            Utterance[] batch = ready.ToArray();
+            ready.Clear();
+            return batch;
         }
 
         private static void Accept(Notice notice)
@@ -75,8 +118,8 @@ namespace VoiceDeputy
                     return;
                 }
 
-                // 第 6 步起这里再加"入队/合成"；本步只把整句原文打出来。
                 Trace.Step("2", utterance.FullText);
+                ready.Add(utterance);
             }
             catch
             {

@@ -18,7 +18,7 @@ namespace VoiceDeputy.UI
 
             Rect statusRect = new Rect(inRect.x, inRect.y, inRect.width, 30f);
             Widgets.DrawMenuSection(statusRect);
-            Widgets.Label(statusRect.ContractedBy(8f), string.IsNullOrEmpty(settings.ApiKey) ? "未配置 —— 不会播报" : "已配置");
+            Widgets.Label(statusRect.ContractedBy(8f), StatusText());
 
             Listing_Standard listing = new Listing_Standard();
             listing.Begin(new Rect(inRect.x, inRect.y + 38f, inRect.width, inRect.height - 38f));
@@ -48,10 +48,21 @@ namespace VoiceDeputy.UI
 
             listing.Gap(10f);
             Rect listenRow = listing.GetRect(32f);
-            Widgets.ButtonText(new Rect(listenRow.x, listenRow.y, 120f, 32f), "试听", active: false);
-            HintText.Line(listing, "TTS 还没接（施工图第 5 步），试听按钮先灰着。");
+            if (Widgets.ButtonText(new Rect(listenRow.x, listenRow.y, 120f, 32f), "试听"))
+            {
+                Announcer.SpeakDirect(SpeechCatalog.ListenText);
+            }
+
+            HintText.Line(listing, "点一次＝一次真实合成；失败时状态条显示 TtsClient 的状态码与响应体前 200 字。");
 
             listing.End();
+        }
+
+        // 可用性判定只归 TtsClient 的配置闸（I4）：这里只读它的失败快照。
+        private static string StatusText()
+        {
+            LastError error = TtsClient.LastError;
+            return error == null ? "已配置" : error.Describe();
         }
 
         private static void DrawApiKeyRow(Listing_Standard listing, VoiceDeputySettings settings)

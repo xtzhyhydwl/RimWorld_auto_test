@@ -53,6 +53,16 @@
       <HintPath>$(RimWorldManagedDir)\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- AudioClip / AudioSource / AudioSettings：第 6 步的音频链 -->
+    <Reference Include="UnityEngine.AudioModule">
+      <HintPath>$(RimWorldManagedDir)\UnityEngine.AudioModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- HttpClient：第 6 步的 TtsClient（后台线程发请求） -->
+    <Reference Include="System.Net.Http">
+      <HintPath>$(RimWorldManagedDir)\System.Net.Http.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
       <HintPath>$(RimWorldManagedDir)\UnityEngine.IMGUIModule.dll</HintPath>
       <Private>false</Private>

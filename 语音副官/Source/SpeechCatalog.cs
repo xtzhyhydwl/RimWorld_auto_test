@@ -6,6 +6,9 @@ namespace VoiceDeputy
 {
     public static class SpeechCatalog
     {
+        // 试听用的固定文本（03 §3.3 只写了内容没写放哪；中文文案只允许住在本类）。
+        public const string ListenText = "副官就位";
+
         private const string ThreatGroup = "威胁";
         private const string PersonGroup = "人身";
         private const string HealthGroup = "健康";
@@ -119,6 +122,13 @@ namespace VoiceDeputy
         {
             CategoryEntry entry;
             return EntriesByCategory.TryGetValue(category, out entry) ? entry : null;
+        }
+
+        // 01 §5.4 的 SpeechQueue 要这个：优先级只有 CategoryEntry.Priority 一处数据，这里只是派生。
+        public static int PriorityOf(SpokenCategory category)
+        {
+            CategoryEntry entry = EntryOf(category);
+            return entry == null ? 0 : entry.Priority;
         }
 
         // N4 的四个通道名：日志里的拼写只在这里（钩子文件里不写这些字面量）。
