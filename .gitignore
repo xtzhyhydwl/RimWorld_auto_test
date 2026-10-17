@@ -10,6 +10,8 @@ bridge/**/bin/
 bridge/**/obj/
 bridge/**/*.dll
 bridge/**/*.pdb
+mods/**/obj/
+mods/**/bin/
 
 # ── 调研中间产物 ──
 .research/
