@@ -196,7 +196,7 @@
         <span class="lg"><i class="dot main"></i>主线程</span>
         <span class="lg"><i class="dot bg"></i>后台线程</span>
         <span class="lg"><i class="dot disk"></i>磁盘</span>
-        <span class="lg"><i class="dot pending"></i>待定 / 待回填</span>
+        <span class="lg"><i class="dot pending"></i>待定（未决）</span>
       </div>
     </div>
     <div class="meta">
@@ -251,7 +251,7 @@
     <div class="sec-head">
       <span class="num">02</span>
       <h2>信息流图：一条数据从游戏事件走到扬声器</h2>
-      <span class="note">蓝=主线程 · 橙=跨线程 · 绿=磁盘 · 灰虚线=待回填</span>
+      <span class="note">蓝=主线程 · 橙=跨线程 · 绿=磁盘 · 灰虚线=待定（Q17）</span>
     </div>
 
     <div class="card">
@@ -319,13 +319,13 @@
           </g>
 
           <!-- 旁路 -->
-          <path d="M1290 378 V350 H560" stroke="#2563c9" stroke-width="1.7" stroke-dasharray="0" marker-end="none"/>
+          <path d="M1290 378 V350 H560" stroke="#2563c9" stroke-width="1.7" marker-end="none"/>
           <path d="M560 350 V386" stroke="#2563c9" stroke-width="1.7" marker-end="url(#ar-main)"/>
           <path d="M1084 350 A9 9 0 0 1 1066 350" stroke="#f4f8ff" stroke-width="4"/>
 
           <path d="M610 420 H1010" stroke="#2563c9" stroke-width="1.7" marker-end="url(#ar-main)"/>
           <path d="M480 520 V456" stroke="#2563c9" stroke-width="1.7" marker-end="url(#ar-main)"/>
-          <path d="M560 596 V864" stroke="#15803d" stroke-width="1.7" marker-end="url(#ar-disk)"/>
+          <path d="M560 596 V868" stroke="#15803d" stroke-width="1.7" marker-end="url(#ar-disk)"/>
           <path d="M1010 312 H340 V558 H360" stroke="#2563c9" stroke-width="1.6" marker-end="url(#ar-main)"/>
         </g>
 
@@ -339,7 +339,7 @@
           <text x="1094" y="212" class="el mono">Utterance</text>
           <text x="1230" y="240" class="el" text-anchor="middle">命中</text>
           <text x="1327" y="352" class="el mono" text-anchor="end">PlayableUtterance</text>
-          <text x="1327" y="474" class="el mono" text-anchor="end">AudioSource.PlayScheduled</text>
+          <text x="1327" y="480" class="el mono" text-anchor="end">AudioSource.PlayScheduled</text>
 
           <text x="1094" y="372" class="el mono">Missing(Segment[])</text>
           <text x="1030" y="592" class="el-bg" text-anchor="end">只传 string + 数值</text>
@@ -352,7 +352,7 @@
           <text x="800" y="342" class="el" text-anchor="middle">播完 → EnqueueSentence(FullText)（先查库，命中不排）</text>
           <text x="760" y="410" class="el" text-anchor="middle">只发缺的 WarmupJob</text>
           <text x="492" y="492" class="el mono">RosterDelta</text>
-          <text x="572" y="606" class="el mono">Remove(key)</text>
+          <text x="572" y="616" class="el mono">Remove(key)</text>
           <text x="660" y="304" class="el" text-anchor="middle">ReportBroken(key)（只登记，不删）</text>
         </g>
 
@@ -372,17 +372,17 @@
             <rect x="244" y="108" width="126" height="64" rx="8" class="box"/>
             <rect x="244" y="108" width="5" height="64" rx="2.5" class="strip-main"/>
             <text x="260" y="134" class="nt">② 5 个钩子文件</text>
-            <text x="260" y="153" class="ns">Notify·Letter·Incident</text>
-            <text x="260" y="166" class="ns">Pawn·Blueprint ｜ 7 个补丁点</text>
+            <text x="260" y="153" class="ns">5 文件 · 7 补丁点</text>
+            <text x="260" y="166" class="ns">含死亡两个总闸</text>
           </g>
 
           <!-- ③ Notice -->
-          <g class="node" data-mod="Announcer">
+          <g class="node">
             <rect x="430" y="108" width="100" height="64" rx="8" class="box"/>
             <rect x="430" y="108" width="5" height="64" rx="2.5" class="strip-main"/>
             <text x="446" y="134" class="nt mono">③ Notice</text>
-            <text x="446" y="153" class="ns">模板 + 参数（已定）</text>
-            <text x="446" y="166" class="ns">带 Count 与 Names</text>
+            <text x="446" y="153" class="ns">模板 + 参数</text>
+            <text x="446" y="166" class="ns">含 Count/Names</text>
           </g>
 
           <!-- ④ Announcer -->
@@ -405,7 +405,7 @@
             <rect x="798" y="108" width="152" height="64" rx="8" class="box"/>
             <rect x="798" y="108" width="5" height="64" rx="2.5" class="strip-main"/>
             <text x="814" y="132" class="nt mono">⑤ BatchAggregator</text>
-            <text x="814" y="150" class="ns">同 tick 合并，tick 一变出句</text>
+            <text x="814" y="150" class="ns">同 tick 合并 → 出句</text>
             <text x="814" y="164" class="ns">无时间窗</text>
           </g>
 
@@ -528,8 +528,8 @@
       </svg>
       </div>
       <div class="figfoot">
-        17 个节点 / 20 条有向边。跨线程的边（橙）只有两条：<code>TtsRequest</code> 出境、<code>SynthesisResult</code> 回来。
-        虚线 ⚠ 的是待回填项；点节点可跳到对应模块卡片。
+        17 个节点 / 19 条有向边。跨线程的边（橙）只有两条：<code>TtsRequest</code> 出境、<code>SynthesisResult</code> 回来。
+        灰虚线只有一处：<code>Announcer</code> 的去重口径（Q17 未定）。点节点可跳到对应模块卡片。
       </div>
     </div>
   </section>
@@ -558,7 +558,7 @@
           <dt>输入</dt><dd><code>ModContentPack</code>（主线程，一次性）</dd>
           <dt>输出</dt><dd>静态 <code>VoiceDeputyMod.Settings</code>；设置页 → 打开设置窗口</dd>
           <dt>持有</dt><dd>只持 <code>Settings</code> 引用，无业务状态</dd>
-          <dt class="no">不负责</dt><dd class="no">不 tick、不初始化缓存目录、不读磁盘</dd>
+          <dt class="no">不负责</dt><dd class="no">不 tick、不初始化缓存目录、不读磁盘、不 Add 组件（框架自动收养）</dd>
         </dl>
       </article>
 
@@ -568,7 +568,7 @@
         <dl>
           <dt>输入</dt><dd>每帧 <code>Update()</code>；<code>LoadedGame</code>/<code>StartedNewGame</code>；<code>ExposeData</code></dd>
           <dt>输出</dt><dd><code>Drain</code> → <code>ClipAssembler.Plan</code> → <code>Enqueue</code>；<code>Tick()</code>；每 2s 预热、每 300s 清理；<code>Put</code> 后 <code>CheckLimit()</code></dd>
-          <dt>持有</dt><dd><code>SaveFingerprint</code>（存档 GUID）；三个计时器</dd>
+          <dt>持有</dt><dd><code>SaveFingerprint</code>（存档 GUID）；三个计时器；由框架自动创建（<code>public (Game game)</code> 构造）</dd>
           <dt class="no">不负责</dt><dd class="no">不含策略：不判开关/优先级/等级，不切文本，不删东西</dd>
         </dl>
       </article>
@@ -969,34 +969,22 @@
     <div class="sec-head">
       <span class="num">05</span>
       <h2>待拍板清单</h2>
-      <span class="note">这三项还没有定论；图上已按草案写法画，并标了 ⚠。</span>
+      <span class="note">只剩一条没定；图上已按草案写法画，并标了 ⚠。</span>
     </div>
     <div class="q-list">
-      <article class="card q">
-        <div class="id">Q3</div>
-        <div class="txt">
-          <b>Notice 的形态：扁平文本 / 模板 + 参数 / 钩子直出片段。</b>
-          <span class="s">现在图上与卡片按「模板 + 参数」画，最终取哪种等你定。</span>
-        </div>
-        <span class="st wait">待确认</span>
-      </article>
       <article class="card q">
         <div class="id">Q17</div>
         <div class="txt">
           <b>跨通道去重是否按「事件身份（类别 + defName + 目标）+ 1.5 s」收敛。</b>
-          <span class="s">同一次精神崩溃会经多个通道各报一遍，收敛口径决定 `Announcer` 去重表的键。</span>
+          <span class="s">同一次精神崩溃会经多个通道各报一遍，收敛口径决定 <code>Announcer</code> 去重表的键与窗口。</span>
         </div>
         <span class="st wait">待确认</span>
       </article>
-      <article class="card q">
-        <div class="id">H3</div>
-        <div class="txt">
-          <b><code>DeputyGameComponent</code> 的注册时机 + 去重（谁在哪个回调 Add、已存在怎么判）。</b>
-          <span class="s">写作 <code>[待回填]</code>，由《取证-GameComponent注册》决定；其余模块不假设它已存在。</span>
-        </div>
-        <span class="st todo">待回填</span>
-      </article>
     </div>
+    <p style="font-size:12.3px;color:#5f7186;margin:11px 2px 0">
+      已定、不在此列：<b>Q3</b> <code>Notice</code> 取「模板 + 参数」，钩子只取事实、切分唯一归 <code>SegmentPlanner</code>；
+      <b>H3</b> <code>DeputyGameComponent</code> 由框架自动创建（非抽象子类 + <code>public (Game game)</code> 构造，<code>FillComponents()</code> 收养，读档不会重复）。
+    </p>
   </section>
 
 </div>
