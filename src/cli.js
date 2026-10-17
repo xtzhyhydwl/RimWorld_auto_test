@@ -2,14 +2,14 @@
 /**
  * RimWorld 自动测试桥 —— 命令行入口。
  *
- *   node src/cli.js start [--profile vanilla] [--minimized] [--width 1600] [--height 900]
- *   node src/cli.js status
- *   node src/cli.js bridge
- *   node src/cli.js tools [关键词]
- *   node src/cli.js call <工具名> ['{"参数":...}']
- *   node src/cli.js logs [行数]
+ *   node src/cli.js start [--profile vanilla] [--port 5174] [--minimized] [--width 1600] [--height 900]
+ *   node src/cli.js status [--profile vanilla]
+ *   node src/cli.js bridge [--profile vanilla]
+ *   node src/cli.js tools [关键词] [--profile vanilla]
+ *   node src/cli.js call <工具名> ['{"参数":...}'] [--profile vanilla]
+ *   node src/cli.js logs [行数] [--profile vanilla]
  *   node src/cli.js live --profile voiced --until 'kind=colony_started' [--timeout 120000]
- *   node src/cli.js stop
+ *   node src/cli.js stop [--profile vanilla] [--force]
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -131,6 +131,8 @@ async function main() {
     case 'start': {
       const rec = await startGame({
         profile,
+        // 不传就让 launcher 在 5174..5183 里挑第一个空闲端口（多实例各拿一个）
+        port: flags.port ? Number(flags.port) : undefined,
         visible: !flags.minimized,
         width: flags.width ? Number(flags.width) : undefined,
         height: flags.height ? Number(flags.height) : undefined,
@@ -138,10 +140,12 @@ async function main() {
         monitor: flags.monitor ? Number(flags.monitor) : undefined,
         doorstop: Boolean(flags.doorstop),
       });
-      console.log(`游戏已启动 PID=${rec.pid}`);
+      console.log(`游戏已启动 PID=${rec.pid}  profile=${profile}`);
       console.log(`  安装目录: ${gameRoot()}`);
       console.log(`  存档目录: ${rec.profileDir}   (独立，不影响主力存档)`);
       console.log(`  日志:     ${rec.logFile}`);
+      console.log(`  记录:     ${rec.recordPath}`);
+      console.log(`  端口:     ${rec.bridge.port}（${rec.portSource}）`);
       console.log(
         `  窗口:     ${rec.window.fullscreen ? '全屏' : '窗口化'} ` +
           `${rec.window.width}x${rec.window.height}  ` +
@@ -174,8 +178,8 @@ async function main() {
        * （逐条判据），让调用方必须自己面对"不知道"这个答案。
        * 正向证据优先取**不依赖 tasklist** 的两条：记录的 PID 存活、桥接握手可达。
        */
-      const st = await gameStatus();
-      const rec = await readProcessRecord();
+      const st = await gameStatus(profile);
+      const rec = await readProcessRecord(profile);
       const info = readBridgeInfo(logPathFor(profile));
       const bridge = await probeBridge(profile); // 有界超时（默认 1.5s）
       const evidence = [...st.evidence];
@@ -190,7 +194,9 @@ async function main() {
         evidence.push(`桥接未知：${bridge.reason}`);
       }
 
-      // 判定：任一条正向证据成立 → true；只有在"能枚举且没枚举到 + 记录里的 PID 也不存活"时才敢说 false
+      // 判定：任一条正向证据成立 → true。
+      // 2026-10-17 多实例：`st.state` 只看本 profile 的记录（其它 RimWorld 进程不算），
+      // 所以「记录里的 PID 不存活」就能说 false；桥接可达仍是最强的反向补证。
       let gameRunning;
       let runningState;
       if (st.state === 'running' || bridge.reachable) {
@@ -214,6 +220,7 @@ async function main() {
       }
 
       out({
+        profile,
         gameRunning,
         runningState,
         runningEvidence: evidence,
@@ -221,11 +228,13 @@ async function main() {
         // 名字有歧义，但改结构会把读 `processes.processes` 的人弄坏）。
         processes: st.enumeration,
         processList: st.enumeration.processes,
+        // 2026-10-17：其它 RimWorld 进程（可能是用户自己在玩的那一局）只报不判、不杀
+        otherGamePids: st.otherGamePids,
         recordedPid: st.recordedPid,
         recordedAlive: st.recordedAlive,
         bridge,
         lastLaunch: rec,
-        bridgeInLog: info ? { host: info.host, port: info.port } : null,
+        bridgeInLog: info ? { host: info.host, port: info.port, source: info.source } : null,
       });
       break;
     }
@@ -331,7 +340,15 @@ async function main() {
     }
 
     case 'stop': {
-      const r = await stopGame();
+      // 默认只杀本 profile 记录里的 PID；--force / --all 才是「枚举全机 RimWorld 并强杀」的破坏性出口。
+      const r = await stopGame({ profile, force: Boolean(flags.force || flags.all) });
+      if (r.alreadyStopped) {
+        console.log(
+          r.recordedPid
+            ? `profile「${profile}」记录里的 PID ${r.recordedPid} 已不在运行（没有需要关的）`
+            : `没有 ${profile} 的运行记录`,
+        );
+      }
       out(r);
       break;
     }
@@ -351,18 +368,18 @@ async function main() {
     default:
       console.log(
         [
-          'RimWorld 自动测试桥',
+          'RimWorld 自动测试桥（每条命令都接受 --profile <名字>，默认 vanilla）',
           '',
-          '  start    启动隔离测试实例并等待桥接就绪',
-          '  status   查看进程 / 上次启动 / 日志中的桥接信息',
-          '  bridge   只打印桥接端口与 token',
+          '  start    启动隔离测试实例并等待桥接就绪（--port N 显式指定端口，否则自动挑 5174..5183 里空闲的）',
+          '  status   查看该 profile 的进程 / 上次启动 / 日志中的桥接信息',
+          '  bridge   只打印该 profile 的桥接端口与 token',
           '  tools    列出游戏暴露的工具（可加关键词过滤）',
           '  describe 显示单个工具的完整参数 schema',
           '  dump-tools  把所有工具 schema 导出到 runs/tools.json',
           '  call     调用一个游戏内工具',
-          '  logs     打印 Player.log 尾部',
+          '  logs     打印该 profile 的 Player.log 尾部',
           '  live     等游戏侧事件（DSH_GameLink 的 NDJSON 或 Player.log），命中即返回',
-          '  stop     关闭测试实例',
+          '  stop     关闭该 profile 的测试实例（--force 才会强杀全机 RimWorld，破坏性）',
           '  smoke    跑冒烟测试闭环',
         ].join('\n'),
       );

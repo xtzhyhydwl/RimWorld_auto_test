@@ -89,7 +89,7 @@ export default Object.assign(
         presentResult: (_a, r) => ({ card: 'generic', title: meta(r)?.text ?? '状态' }),
         async execute() {
           const { launcher } = await lib();
-          const status = await launcher.gameStatus();
+          const status = await launcher.gameStatus(profile);
           const info = launcher.readBridgeInfo(launcher.logPathFor(profile));
           let bridgeUp = false;
           let detail = '';
@@ -186,7 +186,7 @@ export default Object.assign(
         presentResult: (_a, r) => ({ card: 'generic', title: meta(r)?.text ?? '已关闭' }),
         async execute() {
           const { launcher } = await lib();
-          const res = await launcher.stopGame();
+          const res = await launcher.stopGame({ profile });
           const text = res.alreadyStopped
             ? '没有正在运行的实例。'
             : `已关闭 PID ${res.stopped.join(', ')}${res.forced ? '（强制）' : '（正常退出）'}`;

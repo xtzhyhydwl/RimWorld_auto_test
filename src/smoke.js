@@ -302,7 +302,7 @@ export async function runSmoke({
     if (client) client.close();
     if (launched && !keepRunning) {
       try {
-        const r = await stopGame();
+        const r = await stopGame({ profile });
         report.teardown = r;
         log(`\n游戏已关闭：${JSON.stringify(r)}`);
       } catch (e) {

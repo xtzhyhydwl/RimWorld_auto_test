@@ -30,6 +30,13 @@
 用 `node src/cli.js live --profile <p> --until '<条件>' --timeout <ms>` 挂后台 job，**job 完成通知就是推送**。
 参数、`kind` 表与「为什么固定延时是错的」见 skill `rimworld-auto-test` 的「等游戏状态：事件驱动」一节。
 
+6. **自动化测试的机器资源约定**（用户可能同时在玩他自己那一局；数字见 `docs/多实例改造-实现-20261017.md`）：
+- **只开轻 profile**（例 `voiced` 6 个 mod）；满配 `vanilla`（561 个）要当次用户许可。
+- **推时间速度上限 `Fast`**；禁 `Superfast` / `Ultrafast` / `ultraSpeedBoost:true` / `forceRequestedSpeed:true`，除非用户当次允许。
+- 用**独立 profile** 与用户那一局并存（记录/端口/`stop` 都已按 profile 隔离）；一个 profile 只起一个实例。
+- `stop` 默认只关本 profile；**`--force` 会强杀全机 RimWorld（含用户在玩的那局），只有用户明确要求才用**。
+- 起游戏会**抢一次窗口焦点**：用户正在玩时先说一声，窗口放副屏（`prefs.json` 的 `monitor`）。
+
 ## 写代码的三条原则（用户 2026-10-17 定，**顶层，优先于"先能跑"**）
 
 1. **Easy to Change** —— 改一个东西只改一处。

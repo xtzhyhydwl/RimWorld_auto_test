@@ -130,14 +130,20 @@ await call('rimworld/play_for', { durationMs: 10000, speed: 'Ultrafast', forceRe
 ### 1. 起会话
 
 ```bash
-node src/cli.js start          # 启动隔离实例并等桥接就绪（约 6 秒）
-node src/cli.js status         # 看进程/桥接状态
-node src/cli.js stop           # 关闭
+node src/cli.js start  --profile <p>   # 起隔离实例并等桥接就绪（约 5–18 秒，看 mod 数）
+node src/cli.js status --profile <p>   # 看该 profile 的进程 / 桥接
+node src/cli.js stop   --profile <p>   # 只关这一局；--force 才会强杀全机 RimWorld（破坏性）
 ```
 
 隔离机制：`-savedatafolder=profiles/<name>` + 写 `Config/Prefs.xml`。
 **绝不碰用户的主力存档。** 窗口/画面设置在 `profiles/<name>/prefs.json`
 （`runInBackground=true`、静音、英文界面）。
+
+**多实例（2026-10-17 实测成立）**：不同 profile 可以**同时**跑——记录按 profile 落盘
+（`runs/game-process.<p>.json`）、端口自动在 5174..5183 里避让、`stop` 默认只杀本 profile 的 PID。
+**机器上别的 RimWorld 进程不再阻止 `start`**（那可能是用户自己玩的那一局，只会打一行警告）。
+一个 profile 同时只能有一个实例。资源基准（主菜单、未进图）：6 mod ≈ 600 MB、14 mod ≈ 1.1 GB working set；
+**推时间上限用 `Fast`**，不要 `Superfast`/`Ultrafast`（和用户那一局抢 CPU）。
 
 **多显示器**：`prefs.json` 的 `monitor` 决定启动到哪个屏（1=主屏，2=副屏），
 会转成 Unity 的 `-monitor N`（**1-based**）。用户在主屏玩别的游戏时用 `"monitor": 2` 把它赶到副屏。
@@ -156,7 +162,8 @@ Add-Type -AssemblyName System.Windows.Forms
 ⚠ **判断"窗口是否在屏内"要给 ~10px 容差**：Windows 10 窗口有一圈隐形拖拽边框（DWM），
 外框比可见区域大 7px 左右，直接拿 `GetWindowRect` 比会误判成溢出。
 
-> 用长驻任务托管游戏：从一次性 shell 命令里启动的游戏，会在该命令结束时被进程树清理掉。
+> **不需要长驻 job 托游戏**（2026-10-17 实测更正）：`start` 命令退出后游戏仍在跑（detached + unref）。
+> 等它就绪/进图用 `live` 事件（见上文「等游戏状态：事件驱动」），不要挂 `Start-Sleep`。
 
 ### 2. 开调试殖民地
 
