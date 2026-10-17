@@ -48,6 +48,10 @@ node src/cli.js tools | Select-String '工具总数'
 | `rimworld/create_allowed_area` | **无限挂起，并把整个桥接一起拖死** | **不要调用** |
 | `rimworld/spawn_thing` 传 pawn | 崩（`Verse.Pawn.SpawnSetup` NRE） | 用 `execute_debug_action('Actions\Spawn Pawn...\<kind>')` |
 | `rimworld/search_debug_actions` 传短语 | 会挂死 | 只用**单个关键词**，如 `spawn` 而不是 `spawn pawn` |
+| `rimworld/search_debug_actions` 传**某些单词**也会挂住 | **实测 `query:"recipe"` 超时 30s** ⇒ **"只用单个关键词"也不总安全**；而且这类调用**成功也只回空/无关结果** | 先查本文件 ⑥ 的"没有专用工具"结论；实在要查就用**具体、罕见**的关键词（`bill` / `minif` / `spawn`）逐个试，并**给这次调用设小超时** |
+| **工作台 / bill / 配方 没有专用工具** | 桥接**没有** bill/recipe/工作台工具；调试树里**也没有**（`query:"bill"` 的 16 条命中**全是 `BilliardsTable`**（台球桌），`query:"RecipeDef"`/`"work table"` = 0） | **只能驱动真实 UI**，见 §6 的"有序前置清单"＋ hover 顺序 |
+| `Settings\Unlimited Power` 以为能给工作台供电 | **只改 `PowerNet.CurrentEnergyGainRate`**（IL：`DebugSettings.unlimitedPower` 全程序集只有 2 处引用），**不会**让一个没接电的工作台获得电力 | **真摆导线**（`spawn_thing PowerConduit`），回读 `inspectString` 出现 `Grid excess: … W`；中立建筑还要 `execute_gizmo(Claim)` |
+| 调试殖民地**地面资源默认全是禁止的** | 开局实测 **54 件禁取**（钢 1170 也在里面）⇒ 小人不动手 | `foodprobe/forbidden_stats` → `foodprobe/unforbid_all {onlyItems:true}` → **回读** `remaining:0` |
 | `rimworld/get_camera_state` 无地图时 | NRE | 先确认 `hasCurrentGame=true` |
 | Doorstop 与 RimBridgeServer | 桥接完全起不来 | 启动时加 `--doorstop-enabled false`（仓库已默认） |
 | **`play_for` 秒退（`elapsedMs≈6`、0 tick）** | **某个 `forcePause` 窗口开着**（实测 `MainTabWindow_Menu`）每帧覆盖 unpause。此后**所有** `play_for` 全失败，换速度/`pause_game` 都救不回来 | 长跑前先查 `get_ui_state.windowsForcePause`，为 true 就先 `close_main_tab`。详见下节 |
@@ -177,6 +181,10 @@ node src/cli.js call rimworld/get_debug_action --args-file args.json   # {"path"
 规律：带 `...` 的是**参数化动作，按 Def 展开**；父节点是 `BrowseOnly`（菜单容器），
 **能执行的是叶子**；`T:` 前缀是工具型（要地图坐标）。
 
+⚠ **这一类里有一个真空缺**：**"给工作台加 bill / 选配方"没有任何 debug action，也没有桥接工具**
+（`query:"bill"` 的命中全是台球桌；`query:"recipe"` 还会让调用**超时挂住**）
+⇒ **只能驱动真实 UI**：见 §6 的「有序前置清单」与 `set_hover_target` 那条。**别在这上面再试一轮 debug 树。**
+
 ### 5. 改 Def 后热重载 —— 不用重启游戏（实测有效）
 
 ```bash
@@ -194,11 +202,41 @@ ModsConfig 管理：`node scripts/modsconfig.mjs {list|add|remove|set|baseline|c
 
 ### 6. 驱动真实 UI
 
+> ⚠ **先记住这条**：**当某个游戏内功能"看起来不存在"时，先按「前置条件清单」逐项排除，再下"桥接不支持"的结论。**
+> 实测表明：一条"放工作台 → 加 bill → 造出东西"的链路上，**有好几步各自带一个静默陷阱**，
+> 每一个都会伪装成"功能不存在"（小人不动手 / 点了没反应）。
+
+**闭环一条链的有序前置清单（漏一步就伪装成"功能不存在"）**：
+
+| 步 | 做什么 | 可观测的完成判据 | 漏掉会伪装成什么 |
+| --- | --- | --- | --- |
+| 1 | **允许全图资源**：读取 `foodprobe/forbidden_stats` 就 `/unforbid_all`（调试殖民地开局**地面资源默认全是禁止的**，实测 54 件） | 回读 `forbidden_stats.remaining == 0`（不要只看 `success`） | 小人永远不动手 ⇒ 看起来像"这个配方无效" |
+| 2 | **放置工作台**：`rimworld/spawn_thing {defName,x,z}`，再 `click_cell` + **回读**选中语义确认选中的是工作台 | `get_selection_semantics.selectedObjects[0].type` = 那个 `Building_*`（小人常站在同一格 ⇒ 要"点→回读→重试 ≤8 次"） | 打开了小人的 Health/Bio 页 ⇒ 后面全错 |
+| 3 | **让工作台通电**：⚠ `Settings\Unlimited Power` **不足以**供电（它只改 `PowerNet::CurrentEnergyGainRate`）⇒ **真摆导线**；中立建筑还要 `execute_gizmo(Claim)` 认领 | 选中后 `inspectString` 里出现电网格信息（如 `Grid excess: … W`），不再是 `Not connected to power.` | 材料够、bill 也在，**但小人永远不动手** ⇒ 看起来像"配方无效" |
+| 4 | **加 bill（必须驱动真实 UI，见下方坑）** | `get_ui_layout` 的 Bills 面板出现新行（配方名 / `1x` / `Do X times` / `Details...`） | 面板打开着但是空的 |
+| 5 | **开工作类型**：该小人对应的 WorkType 要是激活的（如 Crafting） | `foodprobe/colony_snapshot` 的 `work_type_<X>_enabled_for` 列表里**有**这个 pawn（**回读，不要假定**） | 没人认领这条活 |
+
+之后才轮到时序：`step_game_ticks({ticks, pauseFirst:true})` 分段推进 + 每段回读 `list_colonists[].job`（应见 `<JobDef>`，如 `DoBill`）。
+
 ```js
 const snap = await call('rimworld/get_ui_layout');
 // snap.surfaces[] -> elements[] { targetId, kind, label, actionable, screenRect, scroll }
 await call('rimworld/click_ui_target', { targetId, timeoutMs: 5000 });
 ```
+
+⚠ **坑 5（静默失效，最费时间的一个）：`click_ui_target` 单独调用会静默无效。**
+调用会返回 `{success:true, changed:true, message:"Activated UI target '…'…"}`，
+**但界面什么都没发生**（`get_ui_layout` 的 `surfaces` 一个没变）。**正确顺序**：
+
+```
+get_ui_layout → set_hover_target {targetId, settleMs} → （约 300ms）→ click_ui_target {targetId}
+```
+
+- **必须先 `set_hover_target` 置虚拟光标再点**；**点完不要立刻 `clear_hover_target`**（实测立刻清 ⇒ 弹出的浮菜单不会出现；留约 500ms 再清）。
+- 它解开的是**"从 FloatMenu 里选一项"这一环**（实测例：`Add bill` 的 FloatMenu 里列出配方 `Make probe bike`，按 `screenRect` 的 **y 带**把它和对应 `button` 配对后点中 ⇒ bill 进列表）。
+- **判据不是 `changed:true`**，而是回读 `get_ui_state.windows`（浮菜单是 `Verse.FloatMenu@Super`、`floatMenuOpen:true`）与 `get_ui_layout` 的列表内容。
+- **方法论教训（一句话）**：**UI 驱动"没反应"优先怀疑缺少前置步骤，而不是"桥接不支持"。**
+- 证据：`tmp\bike-probe\run-4\RUN4-REPORT.md` §2 阶段 A（3d / 3d-改 / 3d-改2 / 3e / 3f）与 §6-④/⑤（三条失败尝试的完整记录）。
 
 - **列表行 = 2 个 label + 1 个 button，且 button 自己的 `label` 是 `null`** ——
   必须靠 **`screenRect` 完全一致**配对，不能"找到文字就点"。用 `src/ui.js` 的 `clickRowByLabel()`。
@@ -206,6 +244,12 @@ await call('rimworld/click_ui_target', { targetId, timeoutMs: 5000 });
 - **对话框层数不可预测**（空投袭击实测 4 步，点了地图还会再弹）。
   写成**贪心循环**，参考 `scripts/raid-full.mjs`。
 - `click_ui_target` 在下一个真实绘制帧激活，**不需要窗口焦点**。
+- ⚠ **没有"工作台 / bill / 配方"专用工具**：桥接没有，调试树里也没有
+  （`search_debug_actions{query:"bill"}` 的 16 条命中**全是 `BilliardsTable`（台球桌）**）
+  ⇒ **要往工作台加配方，只能走上表第 4 步 + 上面那条 hover 顺序**。
+- ⚠ **设计器残留**：`apply_architect_designator` 之后设计器仍处于选中态 ⇒ 后续 `click_cell` 不是"选物"而是继续**涂区域**。
+ `clear_selection` / `right_click_cell` / `press_cancel` 三种清法**实测都无效**；实测有效的是
+ `apply_architect_designator {…, x:9999, z:9999, keepSelected:false}`（**机制未确证**，只记"有效"）。
 
 ### 7. 读状态
 
@@ -316,9 +360,37 @@ await ce.bumpSkill(client, 'Shooting', +3);// 点该行右侧的 −/+ 按钮
 await ce.getSkillLevel(client, 'Shooting');
 ```
 
+> ⚠ 上面这段示例里的等待**藏在 `src/ce.js` 内部**（600 / 700 / 900 / 250 ms，使用者看不见）。
+> 把它当「怎么调用」的演示可以，当「已经等够了」不可以——需要用 CE 驱动的脚本，
+> 请在调用前后**自己轮询下面那张表里的可观测字段**。
+
 **坑**：CE 把左栏（殖民者）、中栏（特质）、右栏（技能）排在同一批 y 上，
 必须**同时按 x 限列 + 按 y 容差（±8px）取带**；技能 ± 是该行仅有的两个 `icon_button`，
-靠左的减、靠右的加。刚打开 CE 立刻截图会拿到未绘制完的帧，等约 1 秒。
+靠左的减、靠右的加。
+
+> ⚠ **反模式（2026-10-13 更正）**：本节原先写「刚打开 CE 立刻截图会拿到未绘制完的帧，**等约 1 秒**」。
+> 那是**固定等待**，已废弃：1 秒**既不是必要条件**（画完了也白等 1 秒）**也不是充分条件**
+> （卡一下就拿到半绘制的帧），而且它把「到底等够了没有」变成不可观测的东西——
+> 这正与第一原则第 2 条「永远回读状态确认，不要相信 `success`」同源。
+> 桥接自己的官方指引也写得很直白，`runs/food-recon/lua_reference.json:611`（`pollingGuidance`）：
+> *"Keep conditions narrow and state-based. **Prefer structured fields** such as position, drafted,
+> selectedDesignatorId, or inEntryScene **over UI timing assumptions**."*
+
+**正确做法：轮询一个可观测条件直到它成立，外层再用一个有界超时当护栏。** 不要 `setTimeout` 等画面。
+
+| 要等的东西 | **可观测的完成判据**（字段名与出处） |
+| --- | --- |
+| CE 窗口出现、且内容画完 | 轮询 `ce.ceSurface(client)`（`src/ce.js:28`）返回的 `surface.elements[]`，直到特征元素出现：技能列要求该行**恰好 2 个 `icon_button`**（`src/ce.js:199-207` 用的就是这个判据，凑不齐就报「CE 排版可能变了」）；Bio 页则看 Childhood / Adulthood 标签行 |
+| 某个 tab 真的切过去了 | 同上，轮询该 tab 的特征元素——而不是 `ce.openTab()` 里那句 700ms |
+| 现在选中的是哪个人 | `ce/get_traits` / `ce/get_skills` 带 `pawnId` **反射直读回读**（参数例：`{"pawnId":"Thing_115"}`）；`scripts/verify-7-cetools.mjs:84-87` 就是靠 `ce/get_skills` 的 `raw` 串逐字节比对来确认写入生效 |
+| 地图上选中了哪一格 | `rimworld/get_selection_semantics` 的 `selectedObjects[0]`（带稳定 id 与 `inspectString`，见上文「读状态」节），轮询到坐标/id 等于刚点的那一格 |
+
+现成机制，优先用，不要另写等待：
+
+- **库里**：`src/ui.js:94` 的 `waitUntil(fn, { timeoutMs = 30000, intervalMs = 250, what })` —— `fn` 返回真值即通过，超时抛错并带上 `lastErr`。
+- **桥接自带的「等它画出来」有界等待**：`rimworld/get_ui_layout` 的 `timeoutMs`（描述原文 *"Maximum time to wait for the requested UI surface to draw on screen"*，默认 2000）与 `rimworld/click_ui_target` 的 `timeoutMs`（*"Maximum time to wait for the target control to be redrawn so the click can be injected"*，默认 2000）。
+- **Lua 侧**：`rb.poll(alias, argsTable?, policyTable)`，其中 `policyTable = { timeoutMs, pollIntervalMs, timeoutMessage, condition }`（`runs/food-recon/lua_reference.json:321-345`）；官方范式原文同文件 `:609` ——
+  **"Mutate first, then poll."**（动作只发一次，然后轮询只读能力直到条件成立）。
 
 ### 什么时候用哪条
 
