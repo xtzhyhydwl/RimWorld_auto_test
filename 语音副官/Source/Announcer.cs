@@ -4,8 +4,8 @@ using Verse;
 
 namespace VoiceDeputy
 {
-    // 全 mod 唯一的开关检查点 + 去重（01 §5.3）。
-    // 第 4 步只走到"去重 + 记日志"为止，句子直接丢掉（不组装）；成句在第 5 步接 SegmentPlanner。
+    // 全 mod 唯一的开关检查点 + 去重（01 §5.3），去重通过后交给 SegmentPlanner 成句。
+    // 合成与播放还不在本步（第 6 步），所以句子成完就丢，只留 [VD] 2 的原文。
     public static class Announcer
     {
         // 01 §5.3：键 = Category + Phrase + Args + Count，窗口 2000 ms。
@@ -68,8 +68,15 @@ namespace VoiceDeputy
 
                 LastAcceptedMs[key] = now;
 
-                // 第 5 步在这里改成 SegmentPlanner.Plan + Trace("2", FullText)；本步到此为止。
-                Trace.Step("2", "accept " + notice.Category + " " + notice.Phrase);
+                Utterance utterance = SegmentPlanner.Plan(notice);
+                if (utterance == null)
+                {
+                    Trace.Step("2", "bad-phrase");
+                    return;
+                }
+
+                // 第 6 步起这里再加"入队/合成"；本步只把整句原文打出来。
+                Trace.Step("2", utterance.FullText);
             }
             catch
             {

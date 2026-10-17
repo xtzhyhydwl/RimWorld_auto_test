@@ -5,15 +5,29 @@
 
 ## 现在
 
-- **第 4 步（5 个 Hook 文件 + 8 个补丁点 + 只打日志）已完成**：`dotnet build` **0 错误 0 警告**；Harmony 引用已加到 csproj（编译借 `0Harmony.dll`，跑游戏仍靠 `brrainz.harmony`）。判据 **A 过**；**B/C 类没跑**（没进游戏）。
-- **代码状态**：第 1–4 步的代码全部写完、编译通过、**从未进过游戏**。
-- **下一步**：第 5 步——`Segment` / `Utterance` / `UtteranceSource` / `SegmentPlanner`，`[VD] 2` 从 `accept <类别> <模板键>` 换成整句原文。
-- **进游戏先看**：`[VD] 1 incident ThreatRaid`（袭击）、`[VD] 1 自算 PawnDowned`（倒地）、`[VD] 1 自算 PawnDied`（死亡）、`[VD] 1 incident DiseaseOutbreak`（疾病）、`[VD] 1 自算 BuildMissingMaterials`（缺料蓝图）、`[VD] 1 drop Death`（命中丢弃表）。`Settings.TraceEnabled` 默认**关**，先在调试页打开。
+- **第 5 步（文案切分）已完成**：`Segment` / `Utterance` / `UtteranceSource` / `BatchSummary` / `SegmentPlanner`，`Announcer` 成句后打 `[VD] 2 <整句原文>`。`dotnet build` **0 错误 0 警告**；判据 **A 过**，**B 类没跑**（没进游戏）。
+- **代码状态**：第 1–5 步的代码全部写完、编译通过、**从未进过游戏**；`[VD] 1/2` 已能打出完整句，但**不出声**。
+- **下一步**：第 6 步——`TtsClient` / `WavReader` / `LoudnessNormalizer` / `SpeechLibrary` / `SegmentSynthesizer` / `ClipAssembler` / `DeputyGameComponent` / `VoicePlayer`（第一次出声）。
+- **进游戏看这几行判定第 4+5 步**（`Settings.TraceEnabled` 默认关，先在调试页打开）：
+  - `[VD] 1 incident ThreatRaid` → 紧跟 `[VD] 2 侦测到袭击，<派系>，袭击。`
+  - `[VD] 1 自算 PawnDowned` → `[VD] 2 鼠条倒地。`（带编号的名字应打成 `鼠条` + `18` 两段）
+  - `[VD] 1 自算 PawnDied` → `[VD] 2 鼠条阵亡。<死因原句>`
+  - `[VD] 1 incident DiseaseOutbreak` → `[VD] 2 疾病爆发，<病名>，N人感染。`
+  - `[VD] 1 自算 BuildMissingMaterials` → `[VD] 2 材料不足，缺 N 个<材料>。`
+  - `[VD] 1 drop Death`：命中丢弃表（信/消息各一行）
+  - `[VD] 2 dup` / `[VD] 2 off` / `[VD] 2 bad-phrase`：去重 / 开关关 / 参数不符（不播半句）
 - **阶段 5（地基探针）：未做。** 探针清单 P1–P10 在 `docs/06-编码顺序与验收.md` §9。
 
 ## 待办
 
-- **TEMP 自检要删**：`SpeechCatalog.SelfCheck()`（`#region TEMP`，打 `[VD] 0 …`）＋ `VoiceDeputyMod` 构造里的调用，**第 4 步进游戏验收后整段删除**。只在 `Settings.TraceEnabled` 为真时跑（`LongEventHandler.ExecuteWhenFinished`，等语言包就绪）。
+- **`DiseaseOutbreak` 的 `Args` 比 02 §4.5 多一个人数**：03 §3 的模板 `疾病爆发，{0}，{1}人感染。` 有两个槽（`Enum` + `Number`），只给 `def.label` 会命中"Args ≠ ArgKinds ⇒ 不播半句"。所以 `IncidentHooks` 交 `[def.label, Count]`（`Count` 字段仍是 `max(1, parms.pawnCount)`）。02 §4.5 那一行要补。
+- **`Pawn.LabelShort` 可能带富文本**（实测 `Pawn.get_LabelNoCount` IL：有头衔时走 `ColoredText.Colorize`）⇒ 带 Royalty 头衔的殖民者名字里会有 `<color=#…>…</color>`；名字清洗只删 `<` `>`，剩下的 `color=#…` 会念出来。进游戏若真见到，只改 `PawnHooks.NameOf` 一处（改用 `pawn.Name.ToStringShort`）。
+- **第 5 步留下的 4 处**：
+  1. `BatchSummary`（01 §6.5）在 06 §11 没有指定文件 ⇒ 和 `Utterance`/`UtteranceSource` 一起放在 `Utterance.cs`；第 7 步加 `Single` 字段时仍在原处。
+  2. `Plan(BatchSummary)` **还没有 `Single` 分支**（字段第 7 步才加）⇒ "批内合计 == 1 走单事件模板"（03 §5.2）现在不可达；聚合模板只有 `Count > 1` 才会被调用。
+  3. `PlanRaw` 的 `Category` 取 `OtherMessage`：01 §6.17 没给 `FromText` 的 Category，取兜底值；第 6 步接试听时定稿。
+  4. `Settings.NumericText` **没有这个字段**（05 §6 标"待加字段"）⇒ `Number` 段一律原样送 TTS（03 §4.4 的默认分支）；等字段补上再接中文转换。
+- **TEMP 自检要删**：`SpeechCatalog.SelfCheck()`（`#region TEMP`，打 `[VD] 0 …`）＋ `VoiceDeputyMod` 构造里的调用，**第 4/5 步进游戏验收后整段删除**。只在 `Settings.TraceEnabled` 为真时跑（`LongEventHandler.ExecuteWhenFinished`，等语言包就绪）。
 - **第 4 步的两处补做**（都是第 3 步的缺口，不是新设计）：
   1. `SpeechCatalog.SinglePhraseOf(SpokenCategory)`：`SourceBinding` 没有 `Phrase` 字段，`Notice.Phrase` 只能由类别反查单事件模板（派生，不加表）；查不到 `throw`（01 §5.2）。
   2. `SpeechCatalog.ChannelName(SpeechChannel)`：`SpeechTypes.cs` 的注释早就写"日志拼写由 `SpeechCatalog.ChannelName` 给"，但没实现；`[VD] 1` 的通道名（含中文 `自算`）只能从这里出，钩子里不留中文字面量。
@@ -60,6 +74,7 @@
 
 ## 历史（只记里程碑）
 
+- 2026-10-17 晚：第 4 步（8 钩子，只打 `[VD] 1`）+ 第 5 步（`SegmentPlanner` 切分，打 `[VD] 2`）完成，编译 0/0，**未进游戏**。
 - 2026-10-17 下午：两轮拷打 → 模块 I/O 契约 → 两轮独立审查（21 + 23 条）→ 设计定稿 6 份。
 - 2026-10-17 上午：一轮 grilling 产出初版设计；发现"被推翻的结论与推翻后的结论并列"。
 - 2026-10-17 早：骨架 + 设置窗口；旧 mod 归档；整条线迁到 `语音副官/`。

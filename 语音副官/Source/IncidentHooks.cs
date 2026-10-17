@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using HarmonyLib;
 using RimWorld;
 using Verse;
@@ -65,7 +66,8 @@ namespace VoiceDeputy
                     args = new[] { factionName, label };
                     break;
                 case SpokenCategory.DiseaseOutbreak:
-                    args = new[] { label };
+                    // 03 §3 的模板 `疾病爆发，{0}，{1}人感染。` 两个槽，人数要进 Args（02 §4.5 只写了 def.label）。
+                    args = new[] { label, pawns.ToString(CultureInfo.InvariantCulture) };
                     count = pawns;
                     batchKey = defName;
                     break;
