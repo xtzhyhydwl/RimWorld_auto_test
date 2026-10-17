@@ -5,11 +5,22 @@
 
 ## 现在
 
-- **当前阶段：4（设计）已完成，可开工。** 两轮拷打 + 两轮独立审查（21 + 23 条硬伤，全部修完）。
-- **设计定稿**：`docs/01`–`docs/06` 六份，旧版与审查材料已移出工作区（本机另存，仓库不留）。
-- **代码状态**：骨架 + 设置界面已写、编译通过、**从未进过游戏**。按现状只算试写。
+- **第 3 步（目录表与开关闸）已完成**：`dotnet build` **0 错误 0 警告**；B 类判据还没跑（没有游戏），靠 `[VD] 0` 自检日志在第一次进游戏时补。
+- **代码状态**：第 1–3 步的代码全部写完、编译通过、**从未进过游戏**。
+- **下一步**：第 4 步——5 个 Hook 文件 + 8 个补丁点 + `Trace`，只打日志不发声；那是第一个可自动验收的点（判据 A + B + C）。
 - **阶段 5（地基探针）：未做。** 探针清单 P1–P10 在 `docs/06-编码顺序与验收.md` §9。
-- **下一步**：按 `06` 第 3 步开工（目录表与开关闸，不需要装 Harmony）；第 4 步装 8 个补丁点，只打日志不发声——那是第一个可自动验收的点。
+
+## 待办
+
+- **TEMP 自检要删**：`SpeechCatalog.SelfCheck()`（`#region TEMP`，打 `[VD] 0 …`）＋ `VoiceDeputyMod` 构造里的调用，**第 4 步进游戏验收后整段删除**。只在 `Settings.TraceEnabled` 为真时跑（`LongEventHandler.ExecuteWhenFinished`，等语言包就绪）。
+- **第 3 步与文档不一致的 6 处**（已按最字面读法实现，等设计侧决定改文档还是改代码）：
+  1. `SegmentKind` 被 `06 §11` 排在第 5 步的 `Segment.cs`，但第 3 步 `PhraseEntry.ArgKinds` 就要它 ⇒ 现定义在 `SpeechTypes.cs`，第 5 步 `Segment.cs` 只建 `Segment`。
+  2. `02 §3.1` 的 `ForIncident` 签名只有 4 个字符串，但判定第 3 步要 `def.workerClass` 是 `IncidentWorker_Disease` 的子类 ⇒ 加第 5 个可选参数 `workerClassName = null`（4 参调用照旧）。
+  3. 「`Bindings` 落 22 类」与 `02 §2.2`「`自算` 类没有 `SourceBinding` 行」冲突 ⇒ 实际 23 行覆盖 14 类（incident 9 / letter 2 / message 3），其余 8 类属自算或待实现。
+  4. `02 §1.1` 说「三张丢弃表」，其中 incident 那张是「无」⇒ 代码只有 `LetterDiscardDefNames` / `MessageDiscardDefNames` 两张。
+  5. `SourceBinding.TextSuffix` 要从 `MessageRottedAwayInStorage.Translate()` 派生，静态字段会在 Mod 构造期（语言包未读）求值 ⇒ `Bindings` 改成首次查询时创建；后缀不可用时 Rotten 行不建（退化成 `OtherMessage`，`02 §3.3` 允许）。
+  6. `05 §6.0` 说本版删掉 `ResponseFormat` / `BatchWindowMs` / `SpeechStyle`，现有代码与 `Tab_Voice`/`Tab_Volume` 仍在用；本步不动，留给第 2 步补做（与 P4 一起看）。
+- **`ConstantTexts()` 含纯标点片段**：按 `03 §4.2` 字面量原样切分，32 条里有「，」「。」「 个」这类片段，预热会把它们也送 TTS。是否符合预期待第 6 步听感（D 类）确认。
 
 ## 已定的硬事实（不要再翻案）
 

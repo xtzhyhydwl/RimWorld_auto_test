@@ -183,9 +183,10 @@ namespace VoiceDeputy
 
         private void SetDefaults()
         {
+            // 类别开关的默认值只有 CategoryEntry.DefaultEnabled 一处（02 §5），本方法是唯一读者。
             foreach (CategoryEntry entry in SpeechCatalog.Entries)
             {
-                SetCategoryEnabled(entry.Category, true);
+                SetCategoryEnabled(entry.Category, entry.DefaultEnabled);
             }
 
             BaseUrl = DefaultBaseUrl;

@@ -7,9 +7,22 @@ namespace VoiceDeputy
     {
         public static VoiceDeputySettings Settings;
 
+        // TEMP：第 4 步进游戏验收后删除（连同 SpeechCatalog.SelfCheck 整段）。
+        // 注册放在构造里、Settings 赋值之后：静态构造早于实例构造，那时 Settings 还是 null，
+        // 万一 ExecuteWhenFinished 立即执行就会静默跳过。自检要等语言包就绪（腐烂后缀来自 Translate）。
         public VoiceDeputyMod(ModContentPack content) : base(content)
         {
             Settings = GetSettings<VoiceDeputySettings>();
+            LongEventHandler.ExecuteWhenFinished(RunSelfCheckWhenTracing);
+        }
+
+        // TEMP：第 4 步进游戏验收后删除。
+        private static void RunSelfCheckWhenTracing()
+        {
+            if (Settings != null && Settings.TraceEnabled)
+            {
+                SpeechCatalog.SelfCheck();
+            }
         }
 
         public override string SettingsCategory()
