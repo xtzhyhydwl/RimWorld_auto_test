@@ -213,37 +213,44 @@ namespace VoiceDeputy
             SpeechStyle = VoiceDeputy.SpeechStyle.Deputy;
         }
 
-        // 存盘时把「当前值」当缺省值交给 Scribe：老配置文件里没有的键会保持代码里的默认值，
-        // 而不是被重置成 0 / false。构造函数已经设过默认值，所以调用时当前值就是默认值。
+        // 全字段走同一个 Look：缺键 ⇒ 保持当前值（构造函数已设过默认值），写盘 ⇒ 一律落盘。
+        // 不能直接写 Scribe_Values.Look(ref X, "k", X)：保存模式下"等于缺省值"的项会被跳过，
+        // 而这里第三参传的就是当前值 ⇒ 每一行都被判成"等于缺省"而永远写不出来（配置 XML 成空对象）。
         public override void ExposeData()
         {
             foreach (CategoryEntry entry in SpeechCatalog.Entries)
             {
                 bool enabled = IsCategoryEnabled(entry.Category);
-                Scribe_Values.Look(ref enabled, "enabled_" + entry.Category, enabled);
+                Look(ref enabled, "enabled_" + entry.Category);
                 CategorySlot(entry.Category) = enabled;
             }
 
-            Scribe_Values.Look(ref BaseUrl, "baseUrl", BaseUrl);
-            Scribe_Values.Look(ref ApiKey, "apiKey", ApiKey);
-            Scribe_Values.Look(ref Model, "model", Model);
-            Scribe_Values.Look(ref Voice, "voice", Voice);
-            Scribe_Values.Look(ref ResponseFormat, "responseFormat", ResponseFormat);
+            Look(ref BaseUrl, "baseUrl");
+            Look(ref ApiKey, "apiKey");
+            Look(ref Model, "model");
+            Look(ref Voice, "voice");
+            Look(ref ResponseFormat, "responseFormat");
 
-            Scribe_Values.Look(ref MasterVolume, "masterVolume", MasterVolume);
-            Scribe_Values.Look(ref TtsVolume, "ttsVolume", TtsVolume);
-            Scribe_Values.Look(ref Speed, "speed", Speed);
-            Scribe_Values.Look(ref GapMs, "gapMs", GapMs);
-            Scribe_Values.Look(ref BatchWindowMs, "batchWindowMs", BatchWindowMs);
-            Scribe_Values.Look(ref MaxNamedInBatch, "maxNamedInBatch", MaxNamedInBatch);
-            Scribe_Values.Look(ref QueueLimit, "queueLimit", QueueLimit);
-            Scribe_Values.Look(ref ThreatInterrupts, "threatInterrupts", ThreatInterrupts);
+            Look(ref MasterVolume, "masterVolume");
+            Look(ref TtsVolume, "ttsVolume");
+            Look(ref Speed, "speed");
+            Look(ref GapMs, "gapMs");
+            Look(ref BatchWindowMs, "batchWindowMs");
+            Look(ref MaxNamedInBatch, "maxNamedInBatch");
+            Look(ref QueueLimit, "queueLimit");
+            Look(ref ThreatInterrupts, "threatInterrupts");
 
-            Scribe_Values.Look(ref LibraryLimit, "libraryLimit", LibraryLimit);
-            Scribe_Values.Look(ref JanitorIntervalSeconds, "janitorIntervalSeconds", JanitorIntervalSeconds);
-            Scribe_Values.Look(ref WarmupJobsPerMinute, "warmupJobsPerMinute", WarmupJobsPerMinute);
-            Scribe_Values.Look(ref TraceEnabled, "traceEnabled", TraceEnabled);
-            Scribe_Values.Look(ref SpeechStyle, "speechStyle", VoiceDeputy.SpeechStyle.Deputy);
+            Look(ref LibraryLimit, "libraryLimit");
+            Look(ref JanitorIntervalSeconds, "janitorIntervalSeconds");
+            Look(ref WarmupJobsPerMinute, "warmupJobsPerMinute");
+            Look(ref TraceEnabled, "traceEnabled");
+            Look(ref SpeechStyle, "speechStyle");
+        }
+
+        // 唯一的存取点：defaultValue 传当前值（读档缺键 ⇒ 原样保留），forceSave 让保存不跳过。
+        private static void Look<T>(ref T field, string key)
+        {
+            Scribe_Values.Look(ref field, key, field, true);
         }
     }
 }

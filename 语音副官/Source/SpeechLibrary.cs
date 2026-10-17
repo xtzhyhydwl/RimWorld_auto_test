@@ -115,6 +115,7 @@ namespace VoiceDeputy
         private const string GlobalScope = "global";
 
         private static Dictionary<string, LibraryEntry> index;
+        private static bool indexDirty;
         private static string saveFingerprint = string.Empty;
         private static string voiceFingerprint;
         private static string voiceFingerprintInput;
@@ -158,6 +159,13 @@ namespace VoiceDeputy
 
                 return new LibraryUsage(entries.Count, bytes);
             }
+        }
+
+        // 索引改过、还没落盘（04 §4.6）：Put 只标脏，什么时候落盘由 LibraryJanitor 决定
+        // （唯一落盘入口 SaveIndex，节流在 LibraryJanitor.SaveIndexIfDue 里）。
+        public static bool IndexDirty
+        {
+            get { return indexDirty; }
         }
 
         public static LibraryKey Key(string text, SegmentKind segmentKind)
@@ -252,6 +260,7 @@ namespace VoiceDeputy
             }
 
             Index()[key.Value] = new LibraryEntry(key.Value, key.Text, key.SegmentKind, bytes.Length, GenTicks.TicksGame);
+            indexDirty = true;
             return Usage;
         }
 
@@ -315,7 +324,10 @@ namespace VoiceDeputy
                 return;
             }
 
-            Index().Remove(value);
+            if (Index().Remove(value))
+            {
+                indexDirty = true;
+            }
         }
 
         // 只允许 LibraryJanitor 调（04 §4.6）：删磁盘文件，不动索引。
@@ -361,6 +373,7 @@ namespace VoiceDeputy
                 }
 
                 File.WriteAllText(path, SerializeIndex(Index()), new UTF8Encoding(false));
+                indexDirty = false;
                 return true;
             }
             catch

@@ -109,9 +109,12 @@ node src/cli.js live --profile voiced --last 30
 
 ```powershell
 # 等「殖民地建好」（命中打印那一行原文并退出 0；超时退出 2）
+# 默认从文件开头扫：事件早就落盘了也照样立刻命中（watcher 晚于游戏起来是常态）
 node src/cli.js live --profile voiced --until 'kind=colony_started' --timeout 120000
 # 等 [VD] 的钩子日志（多条件用空格或 && 连接；值里可以有空格）
 node src/cli.js live --profile voiced --until 'kind=log text~[VD] 1 incident'
+# 只看「从现在起」新增的行：确定事件还没发生、不想被历史里那条旧的命中时用
+node src/cli.js live --profile voiced --new-only --until 'kind=colony_started'
 # 只看最近 30 条（立即退出 0，不等待）
 node src/cli.js live --profile voiced --last 30
 # mod 还没部署时：直接跟 Player.log（每行 = {kind:"log", text:...}）
@@ -119,8 +122,9 @@ node src/cli.js live --profile voiced --source log --until 'text~Bridge token'
 ```
 
 - 谓词：`key=value`（相等）/ `key~value`（子串），键取事件 JSON 顶层字段；数字与布尔按 JSON 字面量转字符串比（`tick=900`、`speed=1`、`opened=true`）。
-- 默认从文件**末尾**开始（只看新内容）；`--from-start` 从头读；`--file <路径>` 直接指定文件（与 `--source log` 合用就是跟任意日志文件）。
-- 退出码：**0** 命中 / **2** 超时（打印文件最后 10 条）/ **1** 参数错（含「`--last` 与 `--until` 同时给」）。
+- **默认从文件开头扫**：历史里已有命中的行 ⇒ 立即打印并退出 0。只等"此后新增"就加 `--new-only`（它跟 `--from-start` 互斥——后者只是旧写法，现在等于默认）；`--file <路径>` 直接指定文件（与 `--source log` 合用就是跟任意日志文件）。
+- `--last N` 行为不变：读文件末尾 N 条、立即退出 0，不参与"从头/从尾"的判定。
+- 退出码：**0** 命中 / **2** 超时（打印文件最后 10 条）/ **1** 参数错（含「`--last` 与 `--until` 同时给」「`--new-only` 与 `--from-start` 同时给」）。
 - 事件文件查找顺序：`--file` → `$DSH_LIVE_DIR/<profile>.ndjson` → `<profiles>/<profile>/dsh-live/game.ndjson`（存在才用）→ `runs/live/<profile>.ndjson`。
 
 ## D. 已实测 / 未验证
@@ -132,8 +136,9 @@ node src/cli.js live --profile voiced --source log --until 'text~Bridge token'
 3. `live` 超时：`--until kind=never_happens --timeout 900` ⇒ 打印最后 4 条并 **exit 2**。
 4. `live --last 2` ⇒ 打印最后 2 条并 **exit 0**。
 5. `live` 参数错（缺 `--until`/`--last`、`--until nonsense`、`--last abc`）⇒ 三条都 **exit 1**。
-6. 增量跟读：先起 watcher（不 `--from-start`），0.9 s 后追加 heartbeat、0.5 s 后追加 `colony_started` ⇒ watcher 打印该行并 **exit 0**，会计数「读到 2 条新事件」（起始行按设计被跳过）。
+6. 增量跟读（`--new-only`）：先起 watcher，0.9 s 后追加 heartbeat、0.5 s 后追加 `colony_started` ⇒ watcher 打印该行并 **exit 0**，会计数「读到 2 条事件」（起始行按设计被跳过）；同一个文件不改 `--new-only` 直接跑 ⇒ **exit 2**（历史里的 `colony_started` 不参与）。
 7. `--source log`：跟一个普通文本文件，`--until 'kind=log text~[VD] 2 ready'` ⇒ 命中 **exit 0**。
+8. 默认从头扫（2026-10-17 改）：文件里已有 `colony_started`，watcher 后起 ⇒ **204 ms 命中 exit 0**；`--new-only --from-start` 同时给 ⇒ **exit 1**。
 
 **未验证（没进游戏，属推断）**：
 

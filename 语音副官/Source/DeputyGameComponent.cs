@@ -172,6 +172,17 @@ namespace VoiceDeputy
                     NoteError("janitor", exception);
                 }
             }
+
+            // 索引脏了但"还没满 5 s"的那最后一笔：CheckLimit 只在 Put 之后跑，追不到这一笔；
+            // 由这里每帧问一次（没脏/没到点就是一次 bool 判断），保证脏数据最多晚 IndexSaveMinIntervalSeconds 落盘。
+            try
+            {
+                LibraryJanitor.SaveIndexIfDue();
+            }
+            catch (Exception exception)
+            {
+                NoteError("janitor", exception);
+            }
         }
 
         // 设置项的取值区间归 UI 控件（05 §5）；这里只做兜底，坏配置不至于把清理变成每帧一次。

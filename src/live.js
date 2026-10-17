@@ -10,8 +10,8 @@
  *   2 = 超时，没等到
  *   1 = 参数错（抛异常，由 cli.js 的 main().catch 统一置 1）
  *
- * 为什么从末尾开始：事件是「接下来会发生什么」的信号，不是历史查询（历史查 `--last`）。
- * 要重放已有内容就加 `--from-start`。
+ * 为什么默认从头扫：`--until` 问的常常是「那个事件发生了没有」，而 watcher 往往比游戏**晚起**
+ * （先开殖民地、再挂 watcher 是常态）—— 从末尾跟会永远等不到已经落盘的那条。只看新内容就加 `--new-only`。
  *
  * 谓词语法（够用就行，不上表达式引擎）：
  *   `key=value`  顶层字段相等（数字/布尔按 JSON 字面量转字符串比，所以 `tick=123`、`speed=1`、`opened=true` 都成立）
@@ -32,12 +32,13 @@ const USAGE = [
   '用法: node src/cli.js live --profile <名字> (--until \'<条件>\' | --last N) [选项]',
   '',
   '  --until \'kind=colony_started\'            等到条件成立（命中打印该行并退出 0；超时退出 2）',
+  '                                            默认从文件开头扫：历史里已有 ⇒ 立刻命中',
   '  --until \'kind=log text~[VD] 1 incident\'  多个条件用空格或 && 连接，全部成立才命中',
   '  --last N                                 只打印最后 N 条，立即退出 0（不等待）',
+  '  --new-only                               只看从现在起新增的行（跳过历史；watcher 已确定事件还没发生才用）',
   '  --timeout 120000                         等多久（毫秒，默认 120000）',
   '  --source events|log                      跟读事件文件（默认）还是 Player.log',
   '  --file <路径>                            直接指定要跟读的文件',
-  '  --from-start                             从头读（默认从文件当前末尾开始，只看新内容）',
 ].join('\n');
 
 /**
@@ -114,7 +115,7 @@ export function createFollower(file) {
   let pending = '';
 
   return {
-    /** 从当前末尾开始（默认行为）：只关心「从现在起」发生的事。 */
+    /** 跳到当前末尾（`--new-only`）：只关心「从现在起」发生的事。 */
     seekToEnd() {
       try {
         offset = fs.statSync(file).size;
@@ -252,6 +253,11 @@ export async function runLive({ profile = 'vanilla', flags = {} } = {}) {
     throw new Error(`--timeout 必须是正数（毫秒），收到「${flags.timeout}」\n\n${USAGE}`);
   }
 
+  const newOnly = Boolean(flags['new-only']);
+  if (newOnly && flags['from-start']) {
+    throw new Error(`--new-only 与 --from-start 互斥（默认已是从头扫，--from-start 只剩兼容意义）\n\n${USAGE}`);
+  }
+
   const file =
     flags.file === undefined
       ? source === 'log'
@@ -268,11 +274,11 @@ export async function runLive({ profile = 'vanilla', flags = {} } = {}) {
 
   note(
     `[live] 等待 ${conditions.map((c) => `${c.key}${c.op}${c.value}`).join(' && ')}` +
-      `  ← profile=${profile} source=${source} file=${file}`,
+      `  ← profile=${profile} source=${source} from=${newOnly ? 'now' : 'start'} file=${file}`,
   );
 
   const follower = createFollower(file);
-  if (!flags['from-start']) follower.seekToEnd();
+  if (newOnly) follower.seekToEnd();
 
   const startedAt = Date.now();
   let newEvents = 0;
@@ -288,7 +294,7 @@ export async function runLive({ profile = 'vanilla', flags = {} } = {}) {
         if (!matches(event, conditions)) continue;
         clearInterval(timer);
         writeOut(raw);
-        note(`[live] 命中（等待 ${Date.now() - startedAt}ms，共读到 ${newEvents} 条新事件）`);
+        note(`[live] 命中（等待 ${Date.now() - startedAt}ms，共读到 ${newEvents} 条事件）`);
         resolve(0);
         return;
       }
@@ -297,7 +303,7 @@ export async function runLive({ profile = 'vanilla', flags = {} } = {}) {
         clearInterval(timer);
         const tail = tailLines(file, TIMEOUT_TAIL_LINES);
         note(
-          `[live] 超时 ${timeoutMs}ms 没等到（读到 ${newEvents} 条新事件）；` +
+          `[live] 超时 ${timeoutMs}ms 没等到（读到 ${newEvents} 条事件）；` +
             `下面是文件最后 ${tail.length} 条：`,
         );
         for (const line of tail) writeOut(line);

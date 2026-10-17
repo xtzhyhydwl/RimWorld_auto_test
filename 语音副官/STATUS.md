@@ -5,9 +5,13 @@
 
 ## 现在
 
-- **第 8 步（清理、预热与整句缓存）已完成**：新建 `LibraryJanitor`（四步 `Tick` + 等级表 + 两阶段名单 + 超限淘汰 + 孤儿对账 + `SaveIndex` + `ReportBroken` + `ClearAll`）与 `WarmupScheduler`（两队列 + `Contains` 先查 + `WarmupJobsPerMinute` 节流）；`SpeechLibrary` 的 `RemoveEntry` / `RemoveFile` / `SaveIndex()` 接真；`DeputyGameComponent` 两个计时器（2 s 预热 / `JanitorIntervalSeconds` 清理）+ `Put` 后 `CheckLimit()`；`VoicePlayer` 播完交整句；`Tab_Debug` 缓存占用 / 清缓存 / 最近播报 / 手动朗读接真，库上限 / 清理周期 / 预热节流可改。`dotnet build` **0 错误 0 警告**；**从未进游戏**。
-- **代码状态**：第 1–8 步全部写完、编译通过、**未进过游戏**；`index.json` 现在由 `LibraryJanitor` 每轮落盘（第 6 步那条矛盾已消）。
-- **下一步**：进游戏跑 `06` §9 的探针 + §10 全链验收（8 项里目前只有"编译 0/0"在本地验过）。
+- **第 1–8 步全部写完**：6 次提交（`a6a5b7f`→`27e4f93`），`dotnet build -t:Rebuild` **0 错误 0 警告**。
+- **已进游戏（2026-10-17 16:10 起）**，两轮运行时验收：
+  - 第一轮报告 `runs/游戏内验收-20261017.md`：自检 `28/23/32/22` + 17 sample 全 ok；8 个补丁点里 6 个被真实触发（incident 3 类 / 自算 3 类 / message 1 类 / letter 丢弃表）；合成闸（无 key 时）`5.1→5.3 未配置`、0 请求、0 异常；发现 F1（死亡句富文本）与 `VoicePlayer` 告警，均已修（`fe2b0e9`）。
+  - 第二轮（进行中）：配好 `ApiKey` 后真合成成功（`5.2` 45 条、`Cache/Voice` 46 个 wav / 2.36 MB）、`[VD] 3a Ready`→`3b`→`4`→`6` 首次跑通；`[VD] 4 Taisia阵亡。Taisia已死亡。` 证明 F1 已修、第 7 步开始真播放。
+  - 新装 `DSH_GameLink`（事件通道，见 `docs/提案-游戏侧事件通道-DSH_GameLink.md`）：`runs/live/voiced.ndjson` 163 行、0 行非法 JSON；`node src/cli.js live --until …` 实测 12.6 s 命中并退出。
+- **下一步**：第二轮报告出来后，按它补齐 `06` §10 全链验收（类别开关跨重启读回、听感、队列截断/插队/聚合）。
+
 - **进游戏看这几行判定第 8 步**（先在调试页打开 `TraceEnabled`）：
   - 启动首帧：`[VD] janitor roster new=<n> gone=0`；2 s 后：`[VD] warmup first-batch <入队>/<总数>` → 一批 `[VD] 5.1 <常量片段>` + `[VD] 5.2 <片段>`（**不伴随** `[VD] 4`），随后 `[VD] warmup sent <n> left=<n>`
   - 把库上限调到 5：连续出现 `[VD] janitor evict L3 <文本>`；L3/L2 清完仍超限时 `[VD] janitor l1-protect over=<n>`，L1 条目仍在
@@ -29,6 +33,8 @@
 
 ## 待办
 
+- **P1（设置写盘成空对象）已修 2026-10-17**：实测 `profiles\voiced\Config\Mod_副官语音_VoiceDeputyMod.xml` 是 `<ModSettings Class="VoiceDeputy.VoiceDeputySettings" />`（内存里 `ApiKey`/`TraceEnabled` 却是非默认值）。根因：`VoiceDeputySettings.ExposeData` 每行 `Scribe_Values.Look(ref X, "k", X)` 把**当前值**当缺省值 ⇒ `forceSave=false` 时保存侧判"等于缺省"全部跳过。修法：新增私有 `Look<T>(ref T field, string key)` ⇒ `Scribe_Values.Look(ref field, key, field, true)`，`ExposeData` 里全部 40 行（含 22 个 `enabled_<Category>`）改走它。读档缺键仍保持当前值（第三参就是当前值）。编译 0/0；**未进游戏验证**（判据：退出游戏后设置 XML 里能见到 `apiKey` / `traceEnabled` / `enabled_*`）。
+- **P2（`index.json` 长期 `{}`）已修 2026-10-17**：索引原先只在 `LibraryJanitor` 每 `JanitorIntervalSeconds`（默认 300 s）落一次 ⇒ 崩溃/强杀窗口里刚合成的 wav 在索引里没有，下次进游戏对账当孤儿删掉。修法：`SpeechLibrary.Put` / `RemoveEntry` 只置私有 `indexDirty`（读侧新属性 `SpeechLibrary.IndexDirty`；`SaveIndex()` 写成功即清零），落盘仍只在 `LibraryJanitor`；新增唯一落盘入口 `LibraryJanitor.SaveIndexIfDue(bool force = false)`，节流常量 `IndexSaveMinIntervalSeconds = 5`（tick 换算 `IndexSaveIntervalTicks`，上次落盘 tick 存 `lastIndexSaveTick`，新局 tick 变小也当到期）；调用点四处：`CheckLimit()`（每次 `Put` 后，脏了才写）、`Tick()` 第 ④ 步（`force: true`，每轮无条件但要守 5 s 下限，首帧仍建出 `index.json`）、`DeputyGameComponent.TickTimers()` 每帧一次（追"最后一笔脏数据落在 5 s 窗口内"的情况，否则它要等下一轮 300 s）、`ClearAll()` 仍立即落盘。**未进游戏验证**（判据：连播几句后 5 s 内 `Cache\Voice\index.json` 非空）。
 - **F1（死亡句带富文本标签）已修 2026-10-17**：实测 `[VD] 2 Jidai阵亡。(*Name)Jidai(/Name)已死亡。`（同一串还进了 `[VD] 5.1` → TTS）。修法：`SegmentPlanner` 新增私有纯函数 `StripRichText`，在 `AddArg` 里对**每个参数段**各跑一次（`AddArg` 是唯一入口 ⇒ 只改一处），去 `<...>` 标签与括号化标签 `(*Name)…(/Name)`、折叠空白、trim，结果空则整段丢弃（沿用旧规则）；`Const` 字面量不跑。顺序是**先去标签、再走 `PersonName` 清洗**（`SplitPersonName` 入口也跑同一个 `StripRichText`：名字有 `AddArg` / `JoinNames` 两条来路，幂等）。`PlanCore` 的 `RawText` 分支改走 `AddArg`（原先直接 `new Segment`），所以试听/朗读的裸文本也一并洗。**未进游戏验证**：判据是 `[VD] 2 <名字>阵亡。…` 与 `[VD] 5.1 …` 里不再出现 `(*` 或 `</`。
 - **F2（`VoicePlayer` 静态资产告警）已修 2026-10-17**：类上加 `[StaticConstructorOnStartup]`，行为不动（仍是首次 `Source()` 才建 `GameObject`）。按 1.6 IL 核对过告警判定只看 `Texture`/`Material`/`Shader`/`Graphic`/`GameObject`/`MaterialPropertyBlock`（数组解到元素类型）⇒ 全 mod 只有 `VoicePlayer.host` 命中，`AssemblyResult.EmptyClips`（`AudioClip[]`）与 `AudioSource source` 不在名单里。顺带给 `About.xml` 的 Harmony 依赖补了 `<downloadUrl>`。**未进游戏验证**。
 - **第 8 步与文档不一致 / 补做的 10 处（都记在这里等设计侧决定改文档还是改代码）**：

@@ -26,9 +26,15 @@ namespace VoiceDeputy
     {
         public const int L1SoftLimit = 500;
 
+        // 04 §4.6：索引落盘的最小间隔。原先只在每 JanitorIntervalSeconds（默认 300 s）落一次，
+        // 崩溃/强杀窗口里刚合成的 wav 在索引里没有 ⇒ 下次进游戏被对账当孤儿删掉（缓存白做）。
+        public const int IndexSaveMinIntervalSeconds = 5;
+
         private const int LevelL1 = 1;
         private const int LevelL2 = 2;
         private const int LevelL3 = 3;
+
+        private const int IndexSaveIntervalTicks = IndexSaveMinIntervalSeconds * 60;
 
         // 坏文件待删名单（04 §4.1 ①）：ClipAssembler 只登记，删除在下一轮 Tick 里做。
         private static readonly List<LibraryKey> brokenKeys = new List<LibraryKey>();
@@ -37,6 +43,10 @@ namespace VoiceDeputy
         private static HashSet<string> roster = new HashSet<string>(StringComparer.Ordinal);
         private static string[] vanished = new string[0];
         private static bool l1Warned;
+
+        // 上一次落盘的游戏 tick（int.MinValue = 还没落过 ⇒ 第一次必落）。新局 tick 会变小，
+        // 所以"变回去了"也当到期，否则第一次落盘会被上一局的大 tick 挡住。
+        private static int lastIndexSaveTick = int.MinValue;
 
         // UI「清缓存」（04 §4.6）：删目录内全部 .wav + 清内存索引 + 落索引；不动 Settings 与 VoiceFingerprint。
         public static void ClearAll()
@@ -72,10 +82,13 @@ namespace VoiceDeputy
         }
 
         // 04 §4.4：判据只有一条 Usage.Entries > Settings.LibraryLimit；每次 Put 之后与每轮 Tick 第 ③ 步都跑它。
+        // 这里也是"刚合成的 wav 多久进索引"的唯一决定处（04 §4.6）：脏了就落盘，间隔不小于 5 s。
         public static void CheckLimit()
         {
             try
             {
+                SaveIndexIfDue();
+
                 LibraryUsage usage = SpeechLibrary.Usage;
                 int limit = Limit();
                 if (usage.Entries > limit)
@@ -115,7 +128,8 @@ namespace VoiceDeputy
 
             CheckLimit();
 
-            SaveIndexOrTrace();
+            // 第 ④ 步：每轮无条件落一次（首帧就要有 index.json），同样受 IndexSaveMinIntervalSeconds 下限约束。
+            SaveIndexIfDue(true);
 
             if (delta != null && delta.NewNames.Length > 0)
             {
@@ -411,10 +425,31 @@ namespace VoiceDeputy
 
         private static void SaveIndexOrTrace()
         {
+            lastIndexSaveTick = GenTicks.TicksGame;
             if (!SpeechLibrary.SaveIndex())
             {
                 Trace.Step("janitor", "index-write-failed");
             }
+        }
+
+        // 04 §4.6：索引落盘的唯一入口。脏了就写，但两次写至少隔 IndexSaveMinIntervalSeconds；
+        // force=true 时不看脏标记（Tick 第 ④ 步要保证进游戏就有 index.json）。
+        // CheckLimit 每次 Put 后跑一次，但最后一笔可能落在"还没满 5 s"的窗口里 ⇒ 由 DeputyGameComponent
+        // 每帧再调一次（不带 force）兜住这一笔，否则它要等下一轮清理（默认 300 s）才落盘。
+        public static void SaveIndexIfDue(bool force = false)
+        {
+            if (!force && !SpeechLibrary.IndexDirty)
+            {
+                return;
+            }
+
+            int now = GenTicks.TicksGame;
+            if (lastIndexSaveTick != int.MinValue && now >= lastIndexSaveTick && now - lastIndexSaveTick < IndexSaveIntervalTicks)
+            {
+                return;
+            }
+
+            SaveIndexOrTrace();
         }
 
         private static string[] Difference(HashSet<string> left, HashSet<string> right)
