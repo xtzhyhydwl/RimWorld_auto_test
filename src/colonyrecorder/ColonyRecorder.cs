@@ -56,6 +56,14 @@ namespace ColonySnapshots
         /// <summary>本会话的输出文件</summary>
         private string _file;
 
+        /// <summary>
+        /// 本进程内写盘是否**失败过**（磁盘满 / 文件被占）。
+        ///
+        /// ★ 失败一次就不再往同一个文件里试了（只记一次警告）—— 本项目纪律：
+        ///   失败必须**带原因**地留痕，但绝不每 6000 tick 刷爆 `Player.log`。
+        /// </summary>
+        private bool _writeFailed;
+
         /// <summary>已写入的行数（诊断用）</summary>
         public static int WrittenLines;
 
@@ -64,20 +72,24 @@ namespace ColonySnapshots
         }
 
         /// <summary>
-        /// 输出目录：存档目录下的 `foodcontrol-snapshots/`。
+        /// **老根目录**（存档目录下的 `foodcontrol-snapshots/`）——
+        /// ⚠ 现在**只用于日志/诊断**：新数据写在它的子目录 `runs/run-<runId>/` 里
+        ///   （见 <see cref="RunScope"/>）。老文件留在根目录，**一个都不动、也不续写**。
         ///
-        /// ⚠ 目录名**故意保持不变**（不改成 colony-snapshots）：分析端脚本
+        /// ⚠ 根目录名**故意保持不变**（不改成 colony-snapshots）：分析端脚本
         ///   `scripts/analyze-snapshots.mjs` 的 `SNAPSHOT_DIR` 与既有的
         ///   `profiles/vanilla/foodcontrol-snapshots/` 都依赖这个名字，
         ///   改名会让已有数据与工具链对不上。它只是个目录名，不影响本 mod 的独立性。
         /// </summary>
         public static string OutDir
         {
-            get
-            {
-                try { return Path.Combine(GenFilePaths.SaveDataFolderPath, "foodcontrol-snapshots"); }
-                catch (Exception) { return null; }
-            }
+            get { return RunScope.OutDirRoot; }
+        }
+
+        /// <summary>本次启动的 run 目录（三流共用；拿不到就 null）</summary>
+        public static string RunDir
+        {
+            get { return RunScope.RunDir; }
         }
 
         public override void GameComponentTick()
@@ -90,9 +102,34 @@ namespace ColonySnapshots
                 int tick = Find.TickManager != null ? Find.TickManager.TicksGame : 0;
                 if (tick <= 0) return;
 
+                // ★ **tick 倒退 = 换局 / 读档**：采样状态、序号、输出文件、会话号**全部重开**。
+                //
+                //   ⚠ 老实现**漏了这条**（操作流有、快照流没有）—— 后果是：
+                //     读档后 `_file` 仍指向上一次会话那个文件路径，
+                //   而那个路径现在是**同一个 run 目录**里的老文件 ⇒
+                //   同一进程内"读档续写旧文件"（文件名只由 殖民地名+mapId 决定，正好还是同一个），
+                //   于是 `seq` 从 1 重开、`sessionId` 却没变 —— 分析端按会话切段会切错。
+                //   ⇒ 这里必须清 `_file`（下一张快照重新按新会话去拼路径）并开新会话号。
+                if (_lastTick != int.MinValue && tick < _lastTick)
+                {
+                    try
+                    {
+                        Log.Message("[ColonyRecorder][录制] tick 倒退（" + _lastTick + " → " + tick
+                            + "），按新的一局重开会话（文件：" + (_file ?? "(还没建)") + "）");
+                    }
+                    catch (Exception) { }
+                    _file = null;
+                    _lastTick = int.MinValue;
+                    _writeFailed = false;
+                    // ★ 会话号由三流**共用一本账**（见 RunScope.EnsureSessionForPoll）
+                    RunScope.EnsureSessionForPoll(tick);
+                }
+
                 // 首次：立刻拍一张（这样"存档刚开"就有基线）
                 if (_lastTick == int.MinValue)
                 {
+                    // 进程内第一次会话也要**占一个会话号**（守卫保证同一 tick 只开一次）
+                    RunScope.EnsureSessionForPoll(tick);
                     _lastTick = tick;
                     Capture(tick);
                     return;
@@ -119,12 +156,36 @@ namespace ColonySnapshots
                 ColonySnapshot snap = SnapshotBuilder.Build(map, tick, IntervalTicks);
                 snap.WallClock = DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
 
+                // ★ **三流行尾元数据一致**：快照行也要带 runId / sessionId / sessionSeq
+                //   （由 `ColonySnapshot.ToJsonLine()` 追加在整行最后 —— 老字段顺序/类型一个不动）。
+                //   ⚠ 成组取（内部一次锁）：防止取到"sessionSeq=2 配 sessionId=<s0001>"的自相矛盾组合。
+                SessionMeta meta = SessionMeta.Capture();
+                snap.RunId = meta.RunId;
+                snap.SessionId = meta.SessionId;
+                snap.SessionSeq = meta.SessionSeq;
+
                 EnsureFile(map, snap);
-                if (string.IsNullOrEmpty(_file)) return;
+                if (string.IsNullOrEmpty(_file)) return;      // 建不出文件（已警告）→ 这一张不写
+                if (_writeFailed) return;                     // 本进程写盘已失败过 → 不再重试刷日志
 
                 // JSONL：一行一张快照，追加写
-                File.AppendAllText(_file, snap.ToJsonLine() + "\n");
-                WrittenLines++;
+                try
+                {
+                    File.AppendAllText(_file, snap.ToJsonLine() + "\n");
+                    WrittenLines++;
+                }
+                catch (Exception e)
+                {
+                    // ★ 写失败只警告一次，绝不影响游戏（磁盘满 / 文件被占 / 权限）
+                    _writeFailed = true;
+                    try
+                    {
+                        Log.Warning("[ColonyRecorder][录制] 写文件失败（已吞，本进程后续不再重试）：" + e.Message
+                            + "；文件=" + _file);
+                    }
+                    catch (Exception) { }
+                    return;
+                }
 
                 // 每 10 张露一次脸 + **健康摘要**（回答用户说的"是否读取了足量"）
                 if (snap.Seq == 1 || snap.Seq % 10 == 0)
@@ -192,38 +253,46 @@ namespace ColonySnapshots
         }
 
         /// <summary>
-        /// ★ **一个殖民地一个文件，跨会话追加**（用户 2026-10-03 明确要求）。
+        /// ★ **一个 run 目录一个文件，run 内跨会话追加**（用户 2026-10-04 口径变更）。
         ///
-        /// ## 为什么要改（用户实测遇到的问题）
+        /// ## 为什么又改了（用户实测遇到的问题）
         ///
-        /// 老实现是"**一次游戏会话一个文件**"：`colony-<启动时间>.jsonl`。
-        /// 用户存档 → 读档一次，就分裂成**多个文件**，而且从文件名**看不出属于哪个殖民地**。
+        /// 上一版是"**一个殖民地一个文件、跨会话甚至跨启动追加**"：`colony-<名>-<mapId>.jsonl`。
+        /// 用户实测结果（真数据）：同一个 `actions-` 文件里有 **3 条 `session` 全是 `tick=1`**
+        /// （三次开局混进了一个文件）—— `mapId` 新殖民地恒为 0，重启后 tick 从 1 重来，
+        /// 采集端**根本不认为换局**。⇒ "哪一局"不能靠分析端的纪律，得靠**目录结构**。
         ///
-        /// ## 新规则
+        /// ## 现在的规则（三层：run × session × map）
         ///
-        /// 文件名 = `colony-<殖民地名>-<mapId>.jsonl`，**追加**写：
-        /// - 殖民地名做文件系统安全化（去非法字符、截断长度），拿不到就用 `unknown`
-        /// - 用 `mapId` 区分同一殖民地的不同地图（分基地 / 临时地图）
-        /// - 每次会话加载时 `Log.Message` 说清楚"本次会话**追加**到 <路径>"
+        /// ```text
+        /// foodcontrol-snapshots/runs/run-<runId>/colony-<殖民地名>-<mapId>.jsonl
+        ///                              └─ 一次进程启动一个目录（三流共享）
+        /// ```
         ///
-        /// ⚠ 老的 `colony-<时间>.jsonl` **一个都不动**（那是用户的数据）。
+        /// - **runId**：进程内恒定（`RunScope`，目录名里）
+        /// - **session**：进程内换局/读档（tick 倒退）⇒ 行字段 `sessionId` / `sessionSeq`（**不进文件名**，
+        ///   用户要求"文件名保持简洁"），一个文件里可以有多个 session
+        /// - **mapId**：区分同一 run 内的不同地图（文件名里）
+        ///
+        /// ⚠ 目录建不出来 / 存档目录还没就绪 ⇒ `RunScope.PathFor` 返回 `null` ⇒
+        ///   **这一张不写**（内存里的采样序号照常推进），警告由 `RunScope` 统一报，
+        ///   下次 tick 自动重试。**绝不抛异常。**
+        ///
+        /// ⚠ 老根目录 `foodcontrol-snapshots/*.jsonl` 的老文件**一个都不动**（那是用户的数据），
+        ///   新数据也不再往根目录写。
         /// </summary>
         private void EnsureFile(Map map, ColonySnapshot snap)
         {
             if (!string.IsNullOrEmpty(_file)) return;
-            string dir = OutDir;
-            if (string.IsNullOrEmpty(dir)) return;
 
-            try { Directory.CreateDirectory(dir); } catch (Exception) { return; }
-
-            int mapId = 0;
-            try { mapId = map != null ? map.uniqueID : 0; } catch (Exception) { }
+            int mapId = RunScope.GetMapId(map);
             string colony = snap != null ? snap.ColonyName : "";
-            string safe = FileSafe(colony);
 
-            // 换局（不同殖民地/不同地图）时换文件 —— 同一个殖民地跨会话是**同一个文件**
-            string name = "colony-" + safe + "-" + mapId + ".jsonl";
-            _file = Path.Combine(dir, name);
+            // ★ 唯一的路径出口（三流共用同一套规则；run 目录由 RunScope 保证是同一个）
+            string file = RunScope.PathFor(RunNaming.ColonyPrefix, colony, mapId);
+            if (string.IsNullOrEmpty(file)) return;       // 降级：这一张不写（原因已由 RunScope 记过警告）
+
+            _file = file;
 
             bool existed = false;
             try { existed = File.Exists(_file); } catch (Exception) { }
@@ -232,7 +301,10 @@ namespace ColonySnapshots
             {
                 Log.Message("[ColonyRecorder][录制] 本次会话**追加**到 " + _file
                     + (existed ? "（文件已存在，接着往里写）" : "（新文件）")
-                    + "；殖民地名=" + (string.IsNullOrEmpty(colony) ? "（拿不到，用 unknown）" : colony));
+                    + "；runId=" + (RunScope.RunId ?? "(未就绪)")
+                    + " sessionSeq=" + RunScope.SessionSeq
+                    + "；殖民地名=" + (string.IsNullOrEmpty(colony) ? "（拿不到，用 unknown）" : colony)
+                    + " mapId=" + mapId);
             }
             catch (Exception) { }
         }
@@ -240,46 +312,14 @@ namespace ColonySnapshots
         /// <summary>
         /// 把殖民地名变成**文件系统安全**的名字。
         ///
-        /// 规则：非法字符（`Path.GetInvalidFileNameChars()`）→ `_`；
-        ///       只留字母/数字/中文/`-`/`_`；连续 `_` 压成一个；
-        ///       截断 40 字符；结果为空 → `unknown`。
+        /// ⚠ 规则已**搬到** <see cref="RunNaming.SafeSegment"/>（三条流共用一份，见那边的注记：
+        ///   "文件名规则三份实现"正是这一轮要消掉的重复）。这里**只保留转发**，
+        ///   因为另外两条流（`PlayerActionObserver` / `EventTimelineObserver`）
+        ///   与既有调用点都还在用这个名字 —— 行为逐字不变。
         /// </summary>
         internal static string FileSafe(string name)
         {
-            if (string.IsNullOrEmpty(name)) return "unknown";
-
-            var sb = new StringBuilder(name.Length);
-            char[] bad = Path.GetInvalidFileNameChars();
-            for (int i = 0; i < name.Length; i++)
-            {
-                char c = name[i];
-                bool ok = true;
-                for (int j = 0; j < bad.Length; j++) if (bad[j] == c) { ok = false; break; }
-
-                if (ok)
-                {
-                    // 只留"看得懂"的字符：ASCII 字母数字 + 中文 + - _
-                    bool keep = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-                             || (c >= '0' && c <= '9') || c == '-' || c == '_'
-                             || c > 0x7F;                      // 中文等非 ASCII 一律保留（NTFS 支持）
-                    if (!keep) ok = false;
-                }
-
-                if (ok)
-                {
-                    // 连续 `_` 压成一个（`_` 本身是合法字符，但重复没意义）
-                    if (c == '_' && sb.Length > 0 && sb[sb.Length - 1] == '_') continue;
-                    sb.Append(c);
-                }
-                else
-                {
-                    if (sb.Length > 0 && sb[sb.Length - 1] != '_') sb.Append('_');
-                }
-            }
-
-            string s = sb.ToString().Trim('_', '.', ' ');
-            if (s.Length > 40) s = s.Substring(0, 40).Trim('_', '.', ' ');
-            return string.IsNullOrEmpty(s) ? "unknown" : s;
+            return RunNaming.SafeSegment(name);
         }
 
         public override void ExposeData()

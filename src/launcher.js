@@ -23,7 +23,9 @@ import {
   killForce,
   killGraceful,
   tryListProcessesByName,
+  listProcessesByPowerShell,
 } from './proc.js';
+import { connectGabp } from './gabp.js';
 import { ensurePrefs, resolvePrefs, prefsPath } from './prefs.js';
 
 export const WS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -105,21 +107,129 @@ export function listGameProcesses() {
 }
 
 /**
+ * 游戏进程枚举：先 tasklist，**不可用时用 Get-Process 兜底**。
+ * 2026-10-13 新增兜底 —— 见 proc.js 的 listProcessesByPowerShell 注释。
+ * 结果里的 `via` 说明这份清单是哪儿来的，调用方（和读报告的人）能看到判据来源。
+ * 注意：和 tasklist 一样，这份清单**不区分 profile**（游戏进程看不出是哪个存档目录）。
+ */
+export async function listGameProcessesWithFallback() {
+  const primary = await listGameProcesses();
+  if (primary.known) return { ...primary, via: 'tasklist' };
+  try {
+    const processes = await listProcessesByPowerShell(GAME_IMAGE);
+    return { known: true, processes, via: 'Get-Process（tasklist 被拒时的兜底）' };
+  } catch (err) {
+    return {
+      known: false,
+      processes: [],
+      via: 'none',
+      reason: `${primary.reason}；兜底 Get-Process 也不可用：${err.message}`,
+    };
+  }
+}
+
+/**
  * 综合判断游戏是否在跑。
  * 沙箱下 tasklist 会被拒绝，所以以「我们记录的 PID 是否还活着」为主，
  * 进程枚举只作为补充，并且明确标注它是否可用。
+ *
+ * 2026-10-13 修改：新增 `state` 三态字段。原因是同一天发现的**假阴性事故**——
+ * `cli.js status` 只取进程枚举、且写错了取值方式，在沙箱下稳定输出
+ * `gameRunning: false`，而同一时刻 `isAlive(29908)`、`Get-Process`、GABP 握手
+ * 三条证据都说明游戏在跑；有人据此写了「游戏未运行」的结论，导致一次无谓重启。
+ * `state` 把「确认在跑 / 确认没跑 / 判不了」三者分开：
+ *   - 'running'     : 有**正向**证据（记录的 PID 存活，或枚举到了进程）
+ *   - 'not-running' : 有**排他**证据（枚举可用且没枚举到、且记录里的 PID 不存活）
+ *   - 'unknown'     : 只有「查不到」这一条（枚举被拒 + 没有记录/记录里的 PID 不存活）
+ * 旧字段 `running` / `recordedAlive` / `enumeration` 原样保留，语义不变。
  */
 export async function gameStatus() {
   const record = await readProcessRecord();
   const recordedAlive = Boolean(record?.pid) && isAlive(record.pid);
-  const enumeration = await listGameProcesses();
+  // 2026-10-13：枚举走「tasklist → Get-Process 兜底」，让"查不到"尽量变成"查得到"，
+  // 剩下的才叫 unknown。兜底只在 tasklist 被拒时才多花那 0.2~1s。
+  const enumeration = await listGameProcessesWithFallback();
+  const via = enumeration.via ?? 'tasklist';
+  const running = recordedAlive || (enumeration.known && enumeration.processes.length > 0);
+  const state = running ? 'running' : enumeration.known ? 'not-running' : 'unknown';
   return {
-    running: recordedAlive || (enumeration.known && enumeration.processes.length > 0),
+    running,
+    state,
+    // 判据清单（给人看的，不是给机器判的）：说明 state 是从哪条证据推出来的
+    evidence: [
+      ...(recordedAlive ? [`记录的 PID ${record.pid} 仍存活（process.kill(pid,0) 未报 ESRCH）`] : []),
+      ...(enumeration.known
+        ? [
+            enumeration.processes.length
+              ? `${via} 枚举到 ${enumeration.processes.length} 个进程（PID ${enumeration.processes.map((p) => p.pid).join(', ')}）`
+              : `${via} 可用，且没有枚举到该映像名的进程`,
+          ]
+        : [`进程枚举不可用：${enumeration.reason}`]),
+      ...(state === 'unknown'
+        ? ['没有任何可用的正向证据，也无法枚举进程 —— 判据不足，不能结论「没在跑」']
+        : []),
+    ],
     recordedPid: record?.pid ?? null,
     recordedAlive,
     enumeration,
     record,
   };
+}
+
+/** 桥接探测的默认超时：status 是交互命令，绝不能挂住（实测握手 20ms 级，1.5s 足够宽松） */
+export const BRIDGE_PROBE_TIMEOUT_MS = 1500;
+
+/**
+ * 有界超时地探测桥接是否可达 —— 2026-10-13 新增。
+ *
+ * 为什么要它：桥接跑在**游戏进程内部**，能完成 `session/hello` 握手本身就是
+ * 「游戏活着」的独立证据，而且这条证据**不依赖 tasklist**（沙箱拒绝的是 tasklist，
+ * 不是 TCP）。所以它和「记录的 PID 是否存活」是两条不同来源的正向证据。
+ *
+ * 边界（明确写清，别拿它当万能判据）：
+ *   - `available:false` = 我们连「桥接应该在哪」都不知道（日志和记录里都没有端口），
+ *     **不能**据此说游戏没跑 —— 刚启动还没写日志、或日志被轮转都会这样。
+ *   - `available:true, reachable:false` = 知道地址但握手失败。这是**弱否定**证据：
+ *     游戏可能没跑，也可能只是桥接还没起来 / 被某个长调用挂住。判据不足时不要下结论。
+ *   - 超时是**有界**的（默认 1.5s），任何情况下都会返回，不会挂住调用方。
+ */
+export async function probeBridge(profile = 'vanilla', { timeoutMs = BRIDGE_PROBE_TIMEOUT_MS } = {}) {
+  const info = readBridgeInfo(logPathFor(profile));
+  if (!info) {
+    return {
+      available: false,
+      reachable: false,
+      reason: '日志与启动记录里都没有桥接端口/令牌（游戏可能还没启动到写日志那一步）',
+      probeTimeoutMs: timeoutMs,
+    };
+  }
+  try {
+    const { client, welcome } = await connectGabp(info, { timeoutMs });
+    try {
+      return {
+        available: true,
+        reachable: true,
+        host: info.host,
+        port: info.port,
+        source: info.source,
+        app: welcome?.app ?? null,
+        agentId: welcome?.agentId ?? null,
+        probeTimeoutMs: timeoutMs,
+      };
+    } finally {
+      client.close();
+    }
+  } catch (err) {
+    return {
+      available: true,
+      reachable: false,
+      host: info.host,
+      port: info.port,
+      source: info.source,
+      reason: err.message,
+      probeTimeoutMs: timeoutMs,
+    };
+  }
 }
 
 export async function readProcessRecord() {

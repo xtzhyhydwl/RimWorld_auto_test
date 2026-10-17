@@ -13,13 +13,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { connectGabp } from './gabp.js';
+import { checkToolName } from './toolname.js';
 import {
   startGame,
   stopGame,
   waitForBridge,
   readBridgeInfo,
-  listGameProcesses,
   readProcessRecord,
+  gameStatus,
+  probeBridge,
   logPathFor,
   tailFile,
   profileDir,
@@ -70,6 +72,55 @@ async function withBridge(profile, fn, opts = {}) {
   }
 }
 
+/**
+ * 2026-10-13 新增：`call` 路径的**工具名预校验**，在真正发起调用之前执行。
+ *
+ * 为什么要有它：`tmp/audit-test/AUDIT.md`（2.7 / A8）记录了一次**静默失效**——
+ * `scripts/verify-5-actions.mjs:201/220` 调用了**不存在**的工具
+ * `rimworld/wait_for_long_event_idle`（该工具只在 `rimbridge/` 命名空间下，
+ * 见 `tmp/audit-test/tool-names.txt:26`），失败又被 `.catch(() => {})` 吞掉，
+ * 脚本「以为自己等过了」，实际零等待、零记录，报告看起来有效却什么都没发生。
+ * 这比固定等待更糟，所以把校验提到 CLI 层：写错名字必须**响亮地失败**。
+ *
+ * 判据：**优先用实时清单** `client.listTools()`（与 `describe` 分支同一用法）。
+ * 拿不到实时清单（桥接未连接 / 查询失败）就**跳过校验**并提示一句——
+ * 宁可漏报，也不用 2026-10-03 的 `runs/tools.json` 过期快照硬判，那会产生假失败。
+ *
+ * 明确**不**做的事：不自动把名字改成「最接近的那个」再继续调用。人必须知道名字写错了。
+ */
+async function assertToolNameExists(client, name) {
+  let names;
+  try {
+    const tools = await client.listTools();
+    names = (tools ?? []).map((t) => t.name);
+  } catch (err) {
+    console.warn(`[警告] 取不到实时工具清单（${err.message}），跳过工具名预校验，直接发起调用。`);
+    return;
+  }
+  if (!names.length) {
+    console.warn('[警告] 实时工具清单为空，跳过工具名预校验，直接发起调用。');
+    return;
+  }
+
+  const r = checkToolName(name, names);
+  if (r.ok) return;
+
+  console.error(`工具名不存在：${name}`);
+  console.error(`  清单来源：实时清单 client.listTools()（共 ${names.length} 个工具）`);
+  if (r.candidates?.length) {
+    console.error('  最接近的候选名（按相似度）：');
+    for (const c of r.candidates) {
+      console.error(`    - ${c.name}${c.namespaceDiffers ? '   ← 子名相同，命名空间不同' : ''}`);
+    }
+  } else {
+    console.error('  最接近的候选名：没找到相近的（名字可能整体写错了）');
+  }
+  for (const h of r.hints ?? []) console.error(`  提示：${h}`);
+  console.error('  本次调用未发起；也不会自动改用上面任何一个候选名。');
+  process.exitCode = 1;
+  throw new Error(`未知工具「${name}」——已阻止调用（不会自动改用候选名）`);
+}
+
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   const { positional, flags } = parseArgs(rest);
@@ -104,12 +155,74 @@ async function main() {
     }
 
     case 'status': {
-      const procs = await listGameProcesses();
+      /**
+       * 2026-10-13 修复：这里以前会给出**假阴性**。
+       *
+       * 旧代码：`const procs = await listGameProcesses(); ... gameRunning: procs.length > 0`。
+       * 两个错叠在一起：
+       *   1) `listGameProcesses()` 返回的是 `{known, processes, reason}` **对象**，不是数组
+       *      （见 `data/auto-bisect.mjs:122` 的同一条备注），`obj.length` 是 `undefined`，
+       *      `undefined > 0` 恒为 `false` —— 所以 `gameRunning` **任何时候都是 false**，
+       *      连"枚举成功且真的找到了进程"也一样；
+       *   2) 沙箱下 tasklist 被拒 → `known:false`，这本来只是"查不到"，却被第 1) 条
+       *      掩盖成一个看起来确定的 `false`。有人据此写过"游戏未运行"的结论（实际在跑），
+       *      代价是一次无谓的游戏重启。
+       *
+       * 现在：`gameRunning` 是**三态** `true | false | null`（null = 判据不足），
+       * 并额外给出 `runningState`（'running'|'not-running'|'unknown'）与 `runningEvidence`
+       * （逐条判据），让调用方必须自己面对"不知道"这个答案。
+       * 正向证据优先取**不依赖 tasklist** 的两条：记录的 PID 存活、桥接握手可达。
+       */
+      const st = await gameStatus();
       const rec = await readProcessRecord();
       const info = readBridgeInfo(logPathFor(profile));
+      const bridge = await probeBridge(profile); // 有界超时（默认 1.5s）
+      const evidence = [...st.evidence];
+      if (bridge.reachable) {
+        evidence.push(
+          `桥接可达 ${bridge.host}:${bridge.port}（GABP session/hello 握手成功，` +
+            `${bridge.app?.name ?? '?'} ${bridge.app?.version ?? ''}）—— 桥接跑在游戏进程内部，这是独立的"游戏活着"证据`,
+        );
+      } else if (bridge.available) {
+        evidence.push(`桥接不可达 ${bridge.host}:${bridge.port}（${bridge.reason}）—— 弱否定证据，不足以单独结论"没在跑"`);
+      } else {
+        evidence.push(`桥接未知：${bridge.reason}`);
+      }
+
+      // 判定：任一条正向证据成立 → true；只有在"能枚举且没枚举到 + 记录里的 PID 也不存活"时才敢说 false
+      let gameRunning;
+      let runningState;
+      if (st.state === 'running' || bridge.reachable) {
+        gameRunning = true;
+        runningState = 'running';
+      } else if (st.state === 'not-running') {
+        gameRunning = false;
+        runningState = 'not-running';
+      } else {
+        gameRunning = null;
+        runningState = 'unknown';
+      }
+
+      if (runningState === 'unknown') {
+        process.stderr.write(
+          '[警告] 无法判断游戏是否在运行（判据不足）—— gameRunning=null。\n' +
+            '       不要把 null 当成 false；下面是逐条判据：\n' +
+            evidence.map((e) => `       - ${e}`).join('\n') +
+            '\n',
+        );
+      }
+
       out({
-        gameRunning: procs.length > 0,
-        processes: procs,
+        gameRunning,
+        runningState,
+        runningEvidence: evidence,
+        // 兼容字段：旧调用方读的 `processes` 原样保留（它就是枚举结果对象本身，
+        // 名字有歧义，但改结构会把读 `processes.processes` 的人弄坏）。
+        processes: st.enumeration,
+        processList: st.enumeration.processes,
+        recordedPid: st.recordedPid,
+        recordedAlive: st.recordedAlive,
+        bridge,
         lastLaunch: rec,
         bridgeInLog: info ? { host: info.host, port: info.port } : null,
       });
@@ -189,6 +302,8 @@ async function main() {
         args = {};
       }
       await withBridge(profile, async (client) => {
+        // 2026-10-13：先校验工具名再调用，避免「调用不存在的工具名 + 吞掉错误」的静默失效。
+        await assertToolNameExists(client, name);
         const res = await client.callTool(name, args, { timeoutMs: Number(flags.timeout || 300000) });
         out(res);
       }, { requestTimeoutMs: Number(flags.timeout || 300000) });

@@ -77,6 +77,20 @@ namespace ColonySnapshots
         /// <summary>快照序号（同一会话内递增）</summary>
         public int Seq;
 
+        /// <summary>
+        /// ★ **本次进程启动的 runId**（= `foodcontrol-snapshots/runs/run-<runId>/` 里那个 runId）。
+        ///
+        /// 由 `ColonyRecorder.Capture` 从 `SessionMeta` 灌进来；序列化时**追加在整行最后**
+        /// （老字段的名字/类型/相对顺序一个不动 —— 本项目硬约束）。
+        /// </summary>
+        public string RunId = "";
+
+        /// <summary>★ **会话 id**（`<runId>-s<sessionSeq>`；进程内换局/读档 = 新会话）</summary>
+        public string SessionId = "";
+
+        /// <summary>★ **会话号**（1, 2, 3 …；0 = 还没开过会话）</summary>
+        public int SessionSeq;
+
         /// <summary>区域（种植区 / 储藏区 / 其他）</summary>
         public List<SnapZone> Zones = new List<SnapZone>();
 
@@ -327,6 +341,18 @@ namespace ColonySnapshots
                 sb.Append(Q(kv.Key)).Append(':').Append(Q(kv.Value));
             }
             sb.Append('}');
+
+            // ── ★ run / session 元数据（**追加在整行最后**）──
+            //
+            //  用户 2026-10-04 要求"三流 JSON 行尾追加一致的 runId/sessionId/sessionSeq 元数据"。
+            //  规则与 `SessionMeta.AppendTo` **逐字一致**：
+            //   ⚠ 三个**平级**字段（不是嵌套对象）—— 老解析器按字段名取值，追加平级字段它无感；
+            //     嵌套对象会诱使新老两套读法并存，必翻车。
+            //   ⚠ 字段顺序也要与另外两条流一致：runId → sessionId → sessionSeq。
+            //   ⚠ 老字段一个都没动：这是整行**最后**的三个字段。
+            sb.Append(",\"runId\":").Append(Q(RunId));
+            sb.Append(",\"sessionId\":").Append(Q(SessionId));
+            sb.Append(",\"sessionSeq\":").Append(SessionSeq);
 
             sb.Append('}');
             return sb.ToString();

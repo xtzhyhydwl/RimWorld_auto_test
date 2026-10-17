@@ -192,3 +192,51 @@ export async function tryListProcessesByName(imageName) {
     throw err;
   }
 }
+
+/**
+ * 兜底枚举：用 Windows PowerShell 的 `Get-Process` 拿 PID 列表。
+ *
+ * 2026-10-13 新增。背景：本机沙箱下 `tasklist` 被拒绝访问，但 `Get-Process` **能用**
+ * （实测 224ms、exit 0、拿到 PID 29908）。以前只有 tasklist 一条路，于是"查不到"
+ * 被当成"没在跑"，让 `cli.js status` 报了假阴性，有人据此写了"游戏未运行"的结论。
+ *
+ * 为什么是**兜底**而不是首选：它要起一个 powershell.exe 子进程（约 0.2~1s），
+ * 比 tasklist 贵；只有 tasklist 不可用时才值得付这个代价。
+ *
+ * 为什么能拿它当判据：`Get-Process -Name X -ErrorAction SilentlyContinue` 在
+ * **没有**该进程时返回空（这是"确认没有"），只有在 PowerShell 自己失败时才输出 stderr /
+ * 非 0 退出码；后者按 EPROCENUM 抛出（"查不到"），调用方必须区别对待。
+ *
+ * 只支持按映像名取 PID（不取 ProcessName），这样命令里不会出现 `$_`，
+ * 免得经过多层引号转义后语义漂移。映像名先过白名单，绝不把它拼进命令。
+ */
+export async function listProcessesByPowerShell(imageName, { timeoutMs = 8000 } = {}) {
+  const base = String(imageName).replace(/\.exe$/i, '');
+  if (!/^[A-Za-z0-9_.\-]+$/.test(base)) {
+    throw Object.assign(new Error(`映像名含不安全字符，拒绝拼进 PowerShell 命令：${imageName}`), {
+      code: 'EPROCENUM',
+    });
+  }
+  const { code, stdout, stderr } = await capture(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `(Get-Process -Name '${base}' -ErrorAction SilentlyContinue).Id -join [char]10`,
+    ],
+    { timeoutMs },
+  );
+  if (code !== 0 || stderr.trim()) {
+    throw Object.assign(
+      new Error(`Get-Process 兜底枚举失败（code=${code}）：${stderr.trim().slice(0, 200) || '无输出'}`),
+      { code: 'EPROCENUM' },
+    );
+  }
+  const procs = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    const pid = Number(line.trim());
+    if (Number.isInteger(pid) && pid > 0) procs.push({ name: imageName, pid });
+  }
+  return procs;
+}
