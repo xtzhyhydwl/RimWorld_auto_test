@@ -5,9 +5,16 @@
 
 ## 现在
 
-- **第 7 步（播放调度与聚合）已完成**：`SpeechQueue`（上限 / 优先级插队 / 丢最旧最低）、`BatchAggregator`（同 tick 合并 + tick 末出句）、`VoicePlayer` 完整版（`clipIndex` + `nextDspTime` + 最近 20 条 + `CurrentPriority`）、`BatchSummary.Single`、`Announcer.Tick` 串聚合。`dotnet build` **0 错误 0 警告**；**从未进游戏**（A 过，B/C/D 类没跑）。
-- **代码状态**：第 1–7 步全部写完、编译通过、**未进过游戏**；配置齐全且 key 有效时理论上会出声、会排队。
-- **下一步**：第 8 步——`LibraryJanitor` / `WarmupScheduler` / `DeputyGameComponent` 两个计时器 / `VoicePlayer` 播完交整句 / `Tab_Debug` 接真。
+- **第 8 步（清理、预热与整句缓存）已完成**：新建 `LibraryJanitor`（四步 `Tick` + 等级表 + 两阶段名单 + 超限淘汰 + 孤儿对账 + `SaveIndex` + `ReportBroken` + `ClearAll`）与 `WarmupScheduler`（两队列 + `Contains` 先查 + `WarmupJobsPerMinute` 节流）；`SpeechLibrary` 的 `RemoveEntry` / `RemoveFile` / `SaveIndex()` 接真；`DeputyGameComponent` 两个计时器（2 s 预热 / `JanitorIntervalSeconds` 清理）+ `Put` 后 `CheckLimit()`；`VoicePlayer` 播完交整句；`Tab_Debug` 缓存占用 / 清缓存 / 最近播报 / 手动朗读接真，库上限 / 清理周期 / 预热节流可改。`dotnet build` **0 错误 0 警告**；**从未进游戏**。
+- **代码状态**：第 1–8 步全部写完、编译通过、**未进过游戏**；`index.json` 现在由 `LibraryJanitor` 每轮落盘（第 6 步那条矛盾已消）。
+- **下一步**：进游戏跑 `06` §9 的探针 + §10 全链验收（8 项里目前只有"编译 0/0"在本地验过）。
+- **进游戏看这几行判定第 8 步**（先在调试页打开 `TraceEnabled`）：
+  - 启动首帧：`[VD] janitor roster new=<n> gone=0`；2 s 后：`[VD] warmup first-batch <入队>/<总数>` → 一批 `[VD] 5.1 <常量片段>` + `[VD] 5.2 <片段>`（**不伴随** `[VD] 4`），随后 `[VD] warmup sent <n> left=<n>`
+  - 把库上限调到 5：连续出现 `[VD] janitor evict L3 <文本>`；L3/L2 清完仍超限时 `[VD] janitor l1-protect over=<n>`，L1 条目仍在
+  - 名字的主人死亡：本轮 `[VD] janitor roster new=… gone=<n>` → **下一轮**（再等一个清理周期）`[VD] janitor vanish <名字>`（两阶段判据）
+  - 点「清缓存」：`[VD] janitor clear entries=<n> files=<n>`，调试页占用归零、`Cache/Voice` 里 .wav 全没
+  - 整句缓存：同一句第二次播 ⇒ `[VD] 3a sentence-hit <整句>`；第一次播完 ⇒ `[VD] 6 <整句>` 之后 `[VD] 5.2 <整句>`（整句作业，`warmup sent` 里顺带看到）
+  - 对账 / 坏文件：`[VD] janitor reconcile orphan=<n> stale=<n>`、`[VD] janitor broken-register <文本>`、`[VD] janitor broken <文本>`、`[VD] janitor index-write-failed`、`[VD] janitor reconcile-skip`
 - **进游戏看这几行判定第 7 步**（先在调试页打开 `TraceEnabled`）：
   - 单句：`[VD] 3a Ready n <整句>` → `[VD] 3b <队列长度> <类别>` → `[VD] 4 <整句>` → … → `[VD] 6 <整句>`
   - 连发 3 条：`[VD] 3b` 出现 3 次且队列长度不超过 `QueueLimit`；`[VD] 4` 与 `[VD] 6` 交替、不重叠；超限时出现 `[VD] 3b drop-old …` 或 `[VD] 3b drop-new …`
@@ -22,11 +29,25 @@
 
 ## 待办
 
+- **第 8 步与文档不一致 / 补做的 10 处（都记在这里等设计侧决定改文档还是改代码）**：
+  1. **`SpeechLibrary.ListFiles()` 读目录失败时返回 `null`（不是空数组）**：04 §2.4 写"失败 ⇒ 空数组"，但 04 §4.1 ① 要求"失败 ⇒ 本轮跳过对账"。空数组会把"读目录失败"变成"索引全部失效"⇒ 缓存被清空。现在 `null` = 跳过、空数组 = 目录里真没有文件。
+  2. **`SpeechLibrary.SaveIndex()` 改成返回 `bool`**：04 §4.1 ④ 要"落盘失败 ⇒ 记日志，下轮再试"，不返回成功与否就只能瞎猜；`[VD] janitor index-write-failed` 由它触发。
+  3. **预热作业的 `SegmentKind` 按片段的真实种类给，不是"恒 `PersonName`"**：01 §6.12 写"短语恒 `PersonName`"，但 03 §7.1 的启动批是模板字面量（`Const`）。按 `PersonName` 存 ⇒ 键带上 `save:` 作用域，`ClipAssembler` 用 `Const` 永远查不到，预热等于白花钱。现在三种源各按 `Const` / `PersonName` / `Sentence` 建作业。
+  4. **`RosterDelta` 放在 `LibraryJanitor.cs`**：06 §11 没给它指定文件；它由清理器产出、只被 `WarmupScheduler` 消费。
+  5. **`SegmentPlanner.PersonNameText(raw)` 是新增的公开派生方法**：名单要按"清洗后的名字"匹配条目（条目里存的就是清洗后的 `PersonName` 文本），而名字清洗只允许一处（03 §4.3）⇒ 清理器从这里取，不自己抄规则。`AddPersonName` 与它共用同一个私有切分函数。
+  6. **`WarmupScheduler` 的"丢最旧"是两个队列合起来的近似**：`WarmupJob` 没有时间戳（01 §6.12 只有 `Kind/Text/SegmentKind`），所以先丢片段队列（启动批最旧），片段队列空再丢整句队列。
+  7. **`VoiceDeputySettings` 新增 `JanitorIntervalSeconds`（默认 300）与 `WarmupJobsPerMinute`（默认 100000）**：05 §6 标"待加字段"，本步的计时器与节流必须有读者；调试页两条滑条已接上（30–3600 s / 1–1000000 条/分）。
+  8. **新增两个日志 id：`janitor` / `warmup`**（01 §5.2 的 id 表只到 `6`，沿用 `err` 的先例）：`[VD] janitor …` 记清理与淘汰，`[VD] warmup …` 记预热批次与节流。
+  9. **`LibraryJanitor.ClearAll()` 顺带清"坏文件待删名单"**：不清的话，清缓存后重新合成出来的同名文件会被旧名单在下一轮误删（`LibraryKey` 只知道文本，不区分新旧文件）。
+  10. **`ClipAssembler` 现在会登记坏文件**：`TryRead` 成功但 `WavReader` 解不开 ⇒ `LibraryJanitor.ReportBroken(key)`（第 6 步注释里留的"留给第 8 步"）；删除仍只归清理器。
+- **第 8 步的两条实现口径**（不是矛盾，记下来免得下次又猜）：
+  1. `LibraryJanitor` 的第一次 `Tick` 在进游戏首帧就跑（否则 `index.json` 要等 `JanitorIntervalSeconds` 才出现，06 §6 的判据没法验）；预热第一次在进游戏 2 s 后（03 §7.3 的"启动批 2 s 才排"）。
+  2. 等级表只按 `SegmentKind` + "名字在不在名单里"判（04 §4.2），不显式看 `Scope`；`PersonName` / `Sentence` 的 `save:` 作用域由键本身保证。
 - **第 6 步留下的 6 处（都按最字面读法实现，等设计侧决定改文档还是改代码）**：
   1. **TTS 请求格式是假设**：`docs/` 只写了端点 `https://api.siliconflow.cn/v1/audio/speech` 与 `audio/wav` 响应，没写请求体。`TtsClient.Payload` 按 OpenAI 兼容写成 `{"model","input","voice","response_format":"wav","speed"}` + `Authorization: Bearer <key>`。若服务端不认，只改 `TtsClient.Payload` 一处。
   2. **`LastError` 的类型放在命名空间层**：`TtsClient` 里既要类型 `LastError` 又要静态属性 `LastError`（文档要 UI 读 `TtsClient.LastError`），嵌套类型与成员不能同名（CS0102）⇒ 类型 `VoiceDeputy.LastError`、属性 `TtsClient.LastError`。
   3. **`TtsRequest` 多带 `JobId` / `SynthesisResult` 多带 `Kind`**：01 §6.11 / §6.12 的字段表没有这两项，但结果回来时要与作业表和片段种类对上，没有它们就只能靠"文本反查"，同名不同 kind 会错。
-  4. **`index.json` 在验证第 6 步时不会出现**：06 §6 的 B 判据写"`Cache/Voice/` 出现 `.wav` 与 `index.json`"，但 04 §2.3 / §4.1 ④ 规定 `SaveIndex()` 只由 `LibraryJanitor` 调 ⇒ 第 8 步之前只有 `.wav`、没有 `index.json`（重启后缓存等于清零，功能不受影响）。要么接受"第 8 步才有 index.json"，要么允许 `Put` 顺手落索引（违反 04 §4.6）。
+  4. ~~**`index.json` 在验证第 6 步时不会出现**~~ **第 8 步已接上**：`SaveIndex()` 现在由 `LibraryJanitor` 每轮调（首帧就跑一次，所以进游戏就有 `index.json`），页签里的「清缓存」也会落一次。
   5. **`PlayableUtterance` 没有指定文件**：与 `AssemblyResult` 一起放在 `AssemblyResult.cs`（它俩同属"组装产物"）。
   6. **`AssemblyResult.Missing` 的字段改名为 `MissingSegments`**：文档同时要字段 `Missing` 与工厂方法 `Missing(Segment[])`，同名编译不过（CS0102）。
 - **`DeputyGameComponent` 的泵异常日志 id 是 `err`**（01 §5.2 的 id 表只到 `6`）：每段各自 try/catch，同一段 600 帧最多一条，形如 `[VD] err drain NullReferenceException`。
@@ -90,6 +111,7 @@
 
 ## 历史（只记里程碑）
 
+- 2026-10-17 深夜：第 8 步（清理、预热、整句缓存）完成，编译 0/0，**未进游戏**；8 步代码全部写完。
 - 2026-10-17 夜：第 6 步（合成与落库，第一次出声）+ 第 7 步（队列、聚合、播放调度）完成，编译 0/0，**未进游戏**。
 - 2026-10-17 晚：第 4 步（8 钩子，只打 `[VD] 1`）+ 第 5 步（`SegmentPlanner` 切分，打 `[VD] 2`）完成，编译 0/0，**未进游戏**。
 - 2026-10-17 下午：两轮拷打 → 模块 I/O 契约 → 两轮独立审查（21 + 23 条）→ 设计定稿 6 份。

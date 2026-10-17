@@ -159,7 +159,37 @@ namespace VoiceDeputy
         // 03 §4.3：一次清洗可能产出两个片段（名字 + 编号数字）。
         private static void AddPersonName(List<Segment> segments, string raw)
         {
-            List<string> numbers = null;
+            List<string> numbers;
+            string name = SplitPersonName(raw, out numbers);
+
+            if (name.Length > 0)
+            {
+                segments.Add(new Segment(name, SegmentKind.PersonName));
+            }
+
+            if (numbers == null)
+            {
+                return;
+            }
+
+            foreach (string number in numbers)
+            {
+                segments.Add(new Segment(number, SegmentKind.Number));
+            }
+        }
+
+        // 04 §4.3：清理器的名单要按"能念出来的名字"匹配（条目里存的是清洗后的 PersonName 文本）。
+        // 名字清洗只有这一处（03 §4.3），所以清理器从这里取结果，不自己抄一遍规则。
+        public static string PersonNameText(string raw)
+        {
+            List<string> numbers;
+            return string.IsNullOrEmpty(raw) ? string.Empty : SplitPersonName(raw, out numbers);
+        }
+
+        // 尾部编号后缀拆成 Number，剩下的部分做清洗（03 §4.3 步 1–4）。
+        private static string SplitPersonName(string raw, out List<string> numbers)
+        {
+            numbers = null;
             string name = raw;
             while (true)
             {
@@ -178,21 +208,7 @@ namespace VoiceDeputy
                 name = name.Substring(0, separator);
             }
 
-            name = CleanName(name);
-            if (name.Length > 0)
-            {
-                segments.Add(new Segment(name, SegmentKind.PersonName));
-            }
-
-            if (numbers == null)
-            {
-                return;
-            }
-
-            foreach (string number in numbers)
-            {
-                segments.Add(new Segment(number, SegmentKind.Number));
-            }
+            return CleanName(name);
         }
 
         // 尾部编号后缀 `.数字` / `-数字` / `_数字` 的分隔符下标；没有则 −1（03 §4.3 步 1）。

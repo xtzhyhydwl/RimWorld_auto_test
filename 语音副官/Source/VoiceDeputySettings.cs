@@ -56,6 +56,8 @@ namespace VoiceDeputy
         public bool ThreatInterrupts;
 
         public int LibraryLimit;
+        public int JanitorIntervalSeconds;
+        public int WarmupJobsPerMinute;
         public bool TraceEnabled;
         public SpeechStyle SpeechStyle;
 
@@ -205,6 +207,8 @@ namespace VoiceDeputy
             ThreatInterrupts = true;
 
             LibraryLimit = 3000;
+            JanitorIntervalSeconds = 300;
+            WarmupJobsPerMinute = 100000;
             TraceEnabled = false;
             SpeechStyle = VoiceDeputy.SpeechStyle.Deputy;
         }
@@ -236,6 +240,8 @@ namespace VoiceDeputy
             Scribe_Values.Look(ref ThreatInterrupts, "threatInterrupts", ThreatInterrupts);
 
             Scribe_Values.Look(ref LibraryLimit, "libraryLimit", LibraryLimit);
+            Scribe_Values.Look(ref JanitorIntervalSeconds, "janitorIntervalSeconds", JanitorIntervalSeconds);
+            Scribe_Values.Look(ref WarmupJobsPerMinute, "warmupJobsPerMinute", WarmupJobsPerMinute);
             Scribe_Values.Look(ref TraceEnabled, "traceEnabled", TraceEnabled);
             Scribe_Values.Look(ref SpeechStyle, "speechStyle", VoiceDeputy.SpeechStyle.Deputy);
         }

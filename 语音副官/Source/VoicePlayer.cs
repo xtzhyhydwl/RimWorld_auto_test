@@ -138,6 +138,12 @@ namespace VoiceDeputy
                 millis));
 
             Trace.Step("6", text);
+
+            // 03 §6：整句播完才交给预热排整句缓存（播之前排等于给没听过的句子花钱）。
+            if (finished != null)
+            {
+                WarmupScheduler.EnqueueSentence(finished.Source);
+            }
         }
 
         private static string Text(PlayableUtterance playable)

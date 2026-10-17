@@ -269,7 +269,9 @@ namespace VoiceDeputy
             return snapshot;
         }
 
-        // 读目录失败 ⇒ 空数组（对账那一步本轮跳过）。
+        // 目录不存在 ⇒ 空数组（真的没有文件）；读目录失败 ⇒ null（对账那一步本轮跳过）。
+        // 04 §2.4 写的是"失败 ⇒ 空数组"，但 §4.1 ① 要求"失败 ⇒ 本轮跳过对账"；
+        // 空数组表达不了这两者的区别，会变成"读目录失败就清空全部索引"，所以失败回 null。
         public static DiskFile[] ListFiles()
         {
             string directory = CacheDirectory();
@@ -285,7 +287,7 @@ namespace VoiceDeputy
             }
             catch
             {
-                return EmptyFiles;
+                return null;
             }
 
             List<DiskFile> files = new List<DiskFile>(paths.Length);
@@ -305,13 +307,49 @@ namespace VoiceDeputy
             return files.ToArray();
         }
 
-        // 只允许 LibraryJanitor 调（04 §4.6）。
-        public static void SaveIndex()
+        // 只允许 LibraryJanitor 调（04 §4.6）：删索引条目，不动文件。
+        public static void RemoveEntry(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return;
+            }
+
+            Index().Remove(value);
+        }
+
+        // 只允许 LibraryJanitor 调（04 §4.6）：删磁盘文件，不动索引。
+        // 返回 false = 删不掉（被占用 / 权限），调用方按"留待下轮"处理（04 §4.4）。
+        public static bool RemoveFile(string value)
+        {
+            string path = FilePath(value);
+            if (path == null)
+            {
+                return true;
+            }
+
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // 只允许 LibraryJanitor 调（04 §4.6）。返回 false = 落盘失败，由调用方记日志。
+        public static bool SaveIndex()
         {
             string path = IndexPath();
             if (path == null)
             {
-                return;
+                return false;
             }
 
             try
@@ -323,10 +361,12 @@ namespace VoiceDeputy
                 }
 
                 File.WriteAllText(path, SerializeIndex(Index()), new UTF8Encoding(false));
+                return true;
             }
             catch
             {
                 // 落盘失败 ⇒ 记日志的事归调用方，这里只保证不抛（04 §4.1 ④）。
+                return false;
             }
         }
 

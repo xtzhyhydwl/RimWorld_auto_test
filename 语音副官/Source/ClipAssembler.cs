@@ -76,6 +76,8 @@ namespace VoiceDeputy
             PcmData pcm = WavReader.Read(bytes);
             if (pcm == null || pcm.Frames <= 0)
             {
+                // 文件在、WAV 解不开（头坏/截断）⇒ 坏文件：只登记，删除归清理器（04 §4.6）。
+                LibraryJanitor.ReportBroken(key);
                 return null;
             }
 
