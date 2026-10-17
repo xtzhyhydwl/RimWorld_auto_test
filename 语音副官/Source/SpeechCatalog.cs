@@ -121,6 +121,39 @@ namespace VoiceDeputy
             return EntriesByCategory.TryGetValue(category, out entry) ? entry : null;
         }
 
+        // N4 的四个通道名：日志里的拼写只在这里（钩子文件里不写这些字面量）。
+        public static string ChannelName(SpeechChannel channel)
+        {
+            switch (channel)
+            {
+                case SpeechChannel.Incident:
+                    return "incident";
+                case SpeechChannel.Letter:
+                    return "letter";
+                case SpeechChannel.Message:
+                    return "message";
+                case SpeechChannel.SelfComputed:
+                    return "自算";
+                default:
+                    return channel.ToString();
+            }
+        }
+
+        // SourceBinding 没有 Phrase 字段，所以 Notice.Phrase 由类别反查单事件模板（派生，不加表）。
+        // 01 §5.2：SpeechPhrase 查不到是编程错误（编译期数据缺条目），所以抛而不返回 null。
+        public static SpeechPhrase SinglePhraseOf(SpokenCategory category)
+        {
+            foreach (PhraseEntry phrase in Phrases)
+            {
+                if (phrase.Form == PhraseForm.SingleEvent && phrase.Category == category)
+                {
+                    return phrase.Id;
+                }
+            }
+
+            throw new InvalidOperationException("SpeechCatalog: no SingleEvent phrase for " + category);
+        }
+
         // 02 §3.1：特例（Siege）→ 具体白名单 → workerClass → 类别（ThreatBig）→ 兜底。
         // workerClassName 是 02 §3.1 判定第 3 步需要的第 5 份事实（文档签名只写了前 4 个）。
         public static SpokenCategory? ForIncident(string defName, string categoryDefName, string raidStrategyDefName, string arrivalModeDefName, string workerClassName = null)
