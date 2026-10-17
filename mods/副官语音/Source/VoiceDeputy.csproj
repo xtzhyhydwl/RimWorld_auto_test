@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 1.6 跑在 Unity 的 Mono 上，谱系是 net472；本机没装 net472 目标包，也没网拉 NuGet 包。
+         所以按 docs/mod开发基础.md 那条 csc 命令的口径编：/nostdlib+ + 显式引用游戏目录里的程序集，
+         这样基础库和游戏运行时是同一套（ABI 不易对不上）。 -->
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <AssemblyName>VoiceDeputy</AssemblyName>
+    <RootNamespace>VoiceDeputy</RootNamespace>
+    <Nullable>disable</Nullable>
+    <Deterministic>true</Deterministic>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <NoStdLib>true</NoStdLib>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages>
+    <NuGetAudit>false</NuGetAudit>
+    <OutputPath>..\Assemblies\</OutputPath>
+    <!-- 游戏目录写在这里；换机器时改这一行或传 /p:RimWorldManagedDir=... -->
+    <RimWorldManagedDir Condition="'$(RimWorldManagedDir)' == ''">D:\SteamLibrary\steamapps\common\RimWorld\RimWorldWin64_Data\Managed</RimWorldManagedDir>
+    <!-- 这两个私有属性填上，GetReferenceAssemblyPaths 就不会去找 net472 目标包（否则报 MSB3644） -->
+    <_TargetFrameworkDirectories>$(RimWorldManagedDir)</_TargetFrameworkDirectories>
+    <_FullFrameworkReferenceAssemblyPaths>$(RimWorldManagedDir)</_FullFrameworkReferenceAssemblyPaths>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="mscorlib">
+      <HintPath>$(RimWorldManagedDir)\mscorlib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System">
+      <HintPath>$(RimWorldManagedDir)\System.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Core">
+      <HintPath>$(RimWorldManagedDir)\System.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="netstandard">
+      <HintPath>$(RimWorldManagedDir)\netstandard.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(RimWorldManagedDir)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(RimWorldManagedDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(RimWorldManagedDir)\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(RimWorldManagedDir)\UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
