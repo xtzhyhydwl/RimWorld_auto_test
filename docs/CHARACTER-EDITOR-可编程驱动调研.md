@@ -742,6 +742,11 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 - ❌ **没有实机运行**。游戏当前未启动（`node src/cli.js status` → `gameRunning:false`），
   所以 `get_ui_layout` 看到 CE 的真实元素、`MainTabWindow_CharacterEditor` 能否用
   `open_window_by_type` 打开、targetId 跨帧稳定性 —— **全部未验证**，已在 §4.3-④/⑤ 标注。
+  > ⚠ 2026-10-13 更正：这里的 `gameRunning:false` **不是证据**。当时的 `cli.js status` 把
+  > `listGameProcesses()` 的 `{known,processes,reason}` 对象当数组用（`obj.length > 0` 恒假），
+  > 所以那个 `false` 是**恒假的假阴性**，与游戏是否在跑无关。已修成三态
+  > `true|false|null`（null=判据不足）+ `runningState`/`runningEvidence`/桥接握手/`Get-Process` 兜底。
+  > "未实机运行"这个结论本身在该文档写作时可能是对的，但**判据必须换成重新跑一次 status**。
 - ❌ **没有验证 companion DLL 能真的被加载**。`RimBridgeTools` 目录的确切位置、
   DLL 命名/加载顺序/是否要求特定 TFM，我只从字符串和类型名推断，**没有实证**。
 - ✅ **HugsLib 是否真的可选 —— 已验证**：我解析了 CE 全部 337 个类型的 IL 调用图

@@ -93,6 +93,13 @@ ModsConfig 是**启动时读一次**，所以加完必须重启游戏（`stop` �
 
 **游戏现在没在跑**（`gameRunning: false`，实测）。
 
+> ⚠ 2026-10-13 更正：上面这条结论**不可信**。当时 `node src/cli.js status` 的 `gameRunning`
+> 是一个**恒为 false 的假阴性**——它把 `listGameProcesses()` 返回的 `{known,processes,reason}` 对象
+> 当数组用（`obj.length > 0` 恒假），沙箱下 tasklist 又恰好被拒，于是"查不到"被写成了确定的 `false`。
+> 已修：现在 `gameRunning` 是三态 `true|false|null`（null=判据不足），并给出 `runningState` /
+> `runningEvidence` / 桥接握手证据 / `Get-Process` 兜底枚举。当天实测同一时刻游戏**一直在跑**
+> （PID 29908 存活 + 桥接握手成功）。凡引用过 `gameRunning:false` 的结论都要按新输出重判。
+
 ---
 
 ## 三、已经做完并**验证过**的（直接信，不用重做）
