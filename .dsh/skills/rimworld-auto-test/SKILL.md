@@ -38,6 +38,10 @@ node src/cli.js tools | Select-String '工具总数'
 3. **别和用户抢窗口。** 桥接的点击是真注入到游戏 UI 的；人工同时操作会把游戏搞卡死。
    驱动期间不要动那个窗口。
 4. **卡住了先跑诊断**：`node scripts/diag.mjs`（每步 15 秒超时），看桥接是否响应、最后完成到哪一步。
+5. **多实例/多会话时，先证明「我连的是自己那一局」。** 1.7 的 `Player.log` 全机共用、后启动者整份重写，
+   `readBridgeInfo` 会按「最新记录」兜底 ⇒ `call`/`wait` 可能打进别人的局，而返回看着正常。
+   发命令前跑 `docs\多实例并发安全-给运行中会话的补充说明-20261024.md` §0 的三段校验
+   （记录 pid ↔ 监听该端口的 PID ↔ 该 PID 命令行含 `-savedatafolder=…\profiles\<profile>`）；**不要**用 `status`/`logs` 判断连的是谁。
 
 ---
 

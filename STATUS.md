@@ -17,6 +17,8 @@
 
 - **P0 已落地**：`node src/cli.js wait`（判定只在 `src/wait.js`，本轮只做 `--source bridge`；`src/ui.js` 的旧 `waitUntil` 已删）。真机 9 个用例见 [docs/cli-wait-实测-20261024.md](docs/cli-wait-实测-20261024.md)，语法/15 算子见 [docs/cli-wait-用法-20261024.md](docs/cli-wait-用法-20261024.md)；P1/P2 清单见 [docs/HANDOFF-自动化闭环改造.md](docs/HANDOFF-自动化闭环改造.md) §4。skill 与 AGENTS.md 硬约束 5 已同步。
 - **新踩的坑（实测）**：① **起游戏的命令一退出，游戏就被连进程树杀掉**（`start` 单独跑：桥接 7 s 就绪后游戏死）⇒ 多步驱动要把启动命令挂成**保活 job**；② `src/proc.js:125 isAlive` 把 `EPERM` 当活着，PID 复用后会误判「已有实例在运行」而挡住 `start`（本轮删 `runs\game-process.<profile>.json` 绕过，**未修**）。
+- **多实例会串台（另一路会话实测，已影响本线）**：1.7 的 `Player.log` 全机共用、后启动者整份重写，`readBridgeInfo` 的「最新记录」兜底会把别人的实例/假记录当成自己 ⇒ `call`/`wait` 可能打进别人的局。发命令前跑 [docs/多实例并发安全-给运行中会话的补充说明-20261024.md](docs/多实例并发安全-给运行中会话的补充说明-20261024.md) §0 的三段校验；四条该修的见其 §4。
+- **交接**：[docs/HANDOFF-闭环等待-交接-20261024.md](docs/HANDOFF-闭环等待-交接-20261024.md) 是给下一个会话的自包含说明（现状 / 实测 / 坑 / 剩余任务）。
 
 | 线 | 是什么 | 状态文件 | 当前一句话 |
 | --- | --- | --- | --- |
