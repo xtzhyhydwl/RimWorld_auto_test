@@ -313,13 +313,14 @@ function acceptRecord(rec, label) {
  */
 function resolveRecordFor({ logFile, profile }) {
   if (profile) {
-    const { rec, trust } = acceptRecord(readProcessRecord(profile), `profile「${profile}」的记录`);
-    return { rec, how: rec ? `profile「${profile}」的记录` : `profile「${profile}」没有可用记录（${trust.reason}）` };
+    // readProcessRecord 已经过 recordTrust 过滤（不可信的返回 null 并告警），这里不再重复校验
+    const rec = readProcessRecord(profile);
+    return { rec, how: rec ? `profile「${profile}」的记录` : `profile「${profile}」没有可用记录（或记录不可信）` };
   }
   const guess = profileFromLogPath(logFile);
-  const own = acceptRecord(readProcessRecord(guess), `按日志路径反推的 profile「${guess}」的记录`);
-  if (own.rec && samePath(own.rec.logFile, logFile)) {
-    return { rec: own.rec, how: `按日志路径反推的 profile「${guess}」` };
+  const own = readProcessRecord(guess);
+  if (own && samePath(own.logFile, logFile)) {
+    return { rec: own, how: `按日志路径反推的 profile「${guess}」` };
   }
   const byLog = findRecordByLogFile(logFile);
   if (byLog) return { rec: byLog, how: `按 logFile 匹配到的 profile「${byLog.profile}」` };
@@ -496,7 +497,6 @@ export function findRecordByLogFile(logFile) {
 export async function resolveBridge(profile = 'vanilla') {
   const logFile = logPathFor(profile);
   const record = readProcessRecord(profile);
-  const trust = recordTrust(record, `profile「${profile}」的记录`);
   const info = readBridgeInfo(logFile, { profile });
   const evidence = [];
   const fail = (reason) => ({ ok: false, profile, info, record, reason, evidence });
@@ -504,8 +504,15 @@ export async function resolveBridge(profile = 'vanilla') {
   if (!record) {
     return fail(`没有 profile「${profile}」的启动记录（${processRecordPath(profile)} 不存在或不可信）`);
   }
+  const trust = recordTrust(record, `profile「${profile}」的记录`);
   if (!trust.ok) return fail(trust.reason);
   evidence.push(trust.reason);
+  // 记录内容里的 profile 必须与文件名一致：文件是 `game-process.<profile>.json`，两者不一致
+  // 说明这条记录是**被复制/搬动**过来的（离线测试、手工排障都干过这事），此时端口/token 归属不可信。
+  if (record.profile && record.profile !== profile) {
+    return fail(`记录里的 profile 字段是「${record.profile}」，与文件名要求的「${profile}」不一致（记录被复制过？）`);
+  }
+  evidence.push(`记录自述 profile「${record.profile ?? '(未写)'}」与文件名一致`);
 
   const identity = await verifyInstance(record.pid, {
     processesDir: path.join(WS, 'profiles'),
@@ -683,13 +690,17 @@ export async function probeBridge(profile = 'vanilla', { timeoutMs = BRIDGE_PROB
  * 调用方照旧可以 `await` 它。
  */
 export function readProcessRecord(profile = 'vanilla') {
+  const file = processRecordPath(profile);
+  // 「文件不存在」是正常状态（这个 profile 从没启动过），不要报警；只有「文件在但内容不可信」才告警。
+  if (!fs.existsSync(file)) return null;
   let raw;
   try {
-    raw = JSON.parse(fs.readFileSync(processRecordPath(profile), 'utf8'));
+    raw = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch {
+    warnOnce(`[警告] 已忽略一条不可信的启动记录：${file} 不是合法 JSON`);
     return null;
   }
-  const { rec } = acceptRecord(raw, `runs\\game-process.${profile}.json`);
+  const { rec } = acceptRecord(raw, `profile「${profile}」的记录`);
   return rec;
 }
 
