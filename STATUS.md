@@ -51,6 +51,8 @@
     `start` 前按 profile 补齐（只加不删、幂等、补了才打印一行），`node src/cli.js base-mods [--profile <p>]` 只读对账。
     已验：`node --check` 三文件、临时 profile 首次 +4 / 二次 +0（顺序与缩进正确）、`rhah` 报缺 2 且未写文件。
     **未验**：真机 `start` 的补齐打印路径（`voiced` 已齐，不用补）。
+  - **下一会话任务（2026-10-24 交接）**：空窗期，用**全新上下文**把整条测试流程全量试跑一遍（环境自检 → 起实例/进图 → CE 摆读 → 推时间 → 截图取证 → 故意造失败判读 → 停手缺原子 → 按需新建 SOP），产出缺陷清单 `docs\2026-10-25-skill试跑缺陷.md`。
+    交接文档：`%TEMP%\HANDOFF-skill试跑-20261024.md`（含八项清单、已知坑、建议 skills）。当前无实例在跑。
   - 旧 skill `rimworld-auto-test` **已删**（用户 2026-10-24 决定；删前 HEAD `8ee9bae`，需要时可从 git 历史取回）。
   - **模块线（用户已定）**：代码按**四层原子**切（`condition.js` 判定 / `wait-sources.js` 取样与聚合 / `conditions.json` 登记 / 游戏内工具 mod 侧）。
   - 设计过程与取舍（含试跑发现）：[docs/组合skill-草案-20261024.md](docs/组合skill-草案-20261024.md)、
