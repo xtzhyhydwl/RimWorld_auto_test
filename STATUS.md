@@ -3,6 +3,16 @@
 > 本仓库有多条独立的线，各自的状态在各自目录里。**本文只是索引。**
 > 协作约定见 [AGENTS.md](AGENTS.md)。
 
+## 现在（2026-10-24）
+
+- **主线：RHAH（鼠族：饥与祸）模组返修**。规划与票据在另一个仓库 `..\RHAH-wayfinder`（`map.md` / `EXECUTION-PLAN.md` / `tickets\0001`–`0010` / `HANDOFF.md`）；本仓库只出测试机器与 `docs\` 分析报告。
+- **已完成：1.6 程序集重建**。产物在 `RimworldMods\ratkin_hunger_and_havoc\1.6\Assemblies\HungerAndHavoc.dll`（865,280 B / SHA256 `D38461F0…C5FCC2` / InfoVersion 1.1.4），旧版备份在 `runs\build-backup-20261024\`。**只落仓库，未部署**到游戏/工坊。
+- **正在做：票 0008（门 / 离场）**（由另一个会话推进）。方向已定：用原版「被困 → 凿墙/跑掉」的行为，**不传送、不消失**；倒地不强制；被囚/招募/死亡不处理。下一步是接入点调研 → 实施。
+- **E12（票 0001）已有存档级证据**：`Letter_0` 仍 `Pending`；`openChoices` 里 `id=1 / I-014 / expireTick 62349` 未结算；`LordJob_RHAH_Visitor` 的 `armedChoiceId=1 / armedAssault=True`（拒绝已生效）。测试档 `profiles\rhah\Saves\probe-choice-record-20261024.rws`。
+- **测试环境可用：profile `rhah`（14 项）**。起 `node src/cli.js start --profile rhah --width 1600 --height 900 --monitor 2`；停 `node src/cli.js stop --profile rhah`（**不加 `--force`**）；**必须显式 `--profile`**（默认是 `vanilla` 561 项全量档，且 `profiles\` 不入库）。
+- **本轮踩的坑**（细节见 [docs/RimWorld-工具耗时与暂停行为测量-20261024.md](docs/RimWorld-工具耗时与暂停行为测量-20261024.md)）：推游戏时间用 `step_game_ticks`（能穿 forcePause，实测 600/600），`play_for` 在 forcePause 下静默 0 tick；信件对话框开着会冻结游戏时间（30 秒 Δ=0，`ESC` 无效）；`search_debug_actions` 常态 349–437 ms，曾一次 68 秒主线程停摆（占用者未定性）。
+- **下一步**：0008 的调研（原版「被困 → 凿墙」接入点）与实施；其后按 `EXECUTION-PLAN.md` §2 的顺序推进其余票。
+
 | 线 | 是什么 | 状态文件 | 当前一句话 |
 | --- | --- | --- | --- |
 | 自动化测试 | 顶层线：用户用自然语言描述测试流程 → 翻译成游戏操作；测试用的机器（启动器/桥接/调试殖民地/UI 驱动/断言）都属于它 | [自动化测试/STATUS.md](自动化测试/STATUS.md) | 待用户确认（原文件没有单独写这条线的进度，只留下"桥接与测试基础设施"一节） |
