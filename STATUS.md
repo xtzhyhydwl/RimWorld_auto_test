@@ -5,6 +5,12 @@
 
 ## 现在（2026-10-24）
 
+- **下一轮：回归重跑（用户决定，2026-10-24 22:5x）**。改完 31 条之后**还没用干净上下文走过一次**，等于未经测试的改动。
+  交接说明在 `C:\Users\MikanseiP\AppData\Local\Temp\HANDOFF-回归-20261024.md`（**故意不进仓库**，免得下一轮把它当"历史交接文档"读而污染判断）。
+  回归要跑：八项（重点补第 3 项"加被测 mod"与 `桥接可连` 场景）+ 新缺陷落 `docs\2026-10-25-回归缺陷.md`。
+  口径已定死：实测优先 / 截图只作辅助 / 推时间宁可慢（上限 `Fast`）/ 环境事实跑 `env-check` / 底座 5 个 DLC / 缺 `--profile` 拒绝 / 被测 mod 存 `profiles\<p>\tested-mods.json` / E 类不追。
+  **仍未做**：`[DSH-TEST]` 埋点进 ndjson（要改 LogTap）——不做则"日志验收"这条主张据还没被真机走通过一次；`mods add` 无依赖预检。
+
 - **加被测 mod 有受支持入口了（2026-10-24 22:3x，`1b6ce38`）**：`node src/cli.js mods add|remove|apply|list --profile <p>`。
   被测 mod 清单存 `profiles\<p>\tested-mods.json`（用户拍板单独一份），ModsConfig 顺序 = **底座 → 被测 → 其余保持原序**，幂等。
   真机端到端验过：临时 profile（底座 11 + 1 个额外 mod）→ `env-check` ✓ 无阻塞项、`activeMods 12`、**本次已加载 12**、ordering 0、`restartRequired=false`、桥接 15.3 s 就绪；临时 profile 已删。
