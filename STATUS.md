@@ -37,7 +37,10 @@
     [`.dsh/skills/rimworld-auto-test-closed-loop/SKILL.md`](.dsh/skills/rimworld-auto-test-closed-loop/SKILL.md)
   - **SOP 目录**：[docs/测试SOP/README.md](docs/测试SOP/README.md)。标准六阶段在
     [docs/测试SOP/标准-六阶段.md](docs/测试SOP/标准-六阶段.md)（原 `测试模板-六阶段`，已 `git mv`）；
-    失败判读在 [docs/测试SOP/失败判读.md](docs/测试SOP/失败判读.md)；特殊流程表暂时为空，按「加文件 + 一行登记」生长。
+    配套：[环境自检](docs/测试SOP/环境自检.md)（必备 mod / profile 现状 / CE 部署）、
+    [角色编辑器](docs/测试SOP/角色编辑器.md)（CE 反射与 UI 两条路）、
+    [推时间](docs/测试SOP/推时间.md)（`step_game_ticks` vs `play_for`、预算、分段）、
+    [失败判读](docs/测试SOP/失败判读.md)。特殊流程表暂时为空，按「加文件 + 一行登记」生长。
   - 旧 `rimworld-auto-test` 去留：**用户自己看完再定**（2026-10-24 口径），本轮未动。
   - **模块线（用户已定）**：代码按**四层原子**切（`condition.js` 判定 / `wait-sources.js` 取样与聚合 / `conditions.json` 登记 / 游戏内工具 mod 侧）。
   - 设计过程与取舍（含试跑发现）：[docs/组合skill-草案-20261024.md](docs/组合skill-草案-20261024.md)、

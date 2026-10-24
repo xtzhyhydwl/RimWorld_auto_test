@@ -8,7 +8,7 @@ description: RimWorld 测试闭环：把「测一下 X」拆成动作、等待�
 仓库 `E:\2026.7以后的新工程\DSH\RimWorld_auto_test`（下称 `$WS`），所有命令在 `$WS` 下执行。
 
 一次测试 = **动作**（改状态）+ **等待**（等到可观测判据）+ **取证**（截图 / 回读 / 事件）+ **断言**（证据 vs 期望）。
-你的工作是**把需求拆成这四件事，逐件用现成原子表达**；表达不了就停手（§5），不要自己发明流程。
+你的工作是**把需求拆成这四件事，逐件用现成原子表达**；表达不了就停手（§6），没有匹配的 SOP 就按 §4 自建并登记。
 
 ## 1 开工先拿原子清单
 
@@ -18,9 +18,21 @@ node src/cli.js wait --list  # 已登记场景 + 证据等级
 node src/cli.js tools        # 游戏内工具；单个参数用 describe <工具名>
 ```
 
-参数不确定就先 `describe`，再回 §6 查用法文档。
+参数不确定就先 `describe`，再回 §7 查用法文档。
 
-## 2 把需求拆成判据（四问，答完再动手）
+## 2 开测前自检（不过就停手）
+
+| 检查 | 判据 |
+| --- | --- |
+| 桥接与归属 | `status --profile <p>` 的 `bridgeResolution.ok = true` |
+| 底座 mod 已加载 | `call rimworld/list_mods`：Core / Harmony / RimBridgeServer / 被测 mod 都 `loadedInSession = true`、`unsatisfiedDependencies` 为空 |
+| 加载顺序健康 | `call rimworld/get_mod_configuration_status`：无 ordering issue、`restartRequired = false` |
+| 按需能力 | 要用事件 → `dsh.gamelink`；要摆/读小人 → `void.charactereditor`；要用 `ce/*` → `call ce/probe` 有返回 |
+
+**按需项缺了也停手**，不降级成"用别的方式凑合"。
+必备清单、profile 现状、缺了怎么补：`docs\测试SOP\环境自检.md`。**在缺底座的实例里跑出来的结论不可信。**
+
+## 3 把需求拆成判据（四问，答完再动手）
 
 用户给的是人话结果（"离场了"、"bill 挂上了"），你要等的是**一个可观测字段**。
 
@@ -29,19 +41,19 @@ node src/cli.js tools        # 游戏内工具；单个参数用 describe <工�
 3. 有没有更早更便宜的等价判据？`hasCurrentGame` → `playable` → 业务字段。
 4. 只有人眼能判断吗？是 ⇒ 截图交给人，那一部分不进断言。
 
-答完要落成一句「探针 + 一次单值比较」。落不成 ⇒ §5。
+答完要落成一句「探针 + 一次单值比较」。落不成 ⇒ §6。
 
 需求只能测一半时：能测的那半先测、给证据；测不了的单独报缺原子。
 
-## 3 走一条 SOP
+## 4 走一条 SOP
 
 - 普通需求（起实例 → 进图 → 摆场景 → 推时间 → 等判据 → 取证）走 `docs\测试SOP\标准-六阶段.md`，照件填空。
 - 特殊流程（多实例对撞、存档读档、长时推进……）看 `docs\测试SOP\README.md`，按"适用条件"挑一条。
 - 都不匹配 ⇒ 用 `docs\测试SOP\README.md` 里的骨架自建一条；跑通后登记进去（新增文件 + 目录里一行）。
 
-SOP 每一阶段都有完成判据，判据不过不进入下一阶段。某个动作/等待失败时怎么读：`docs\测试SOP\失败判读.md`。
+SOP 每一阶段都有完成判据，判据不过不进入下一阶段。动作/等待失败怎么读：`docs\测试SOP\失败判读.md`。
 
-## 4 硬规则
+## 5 硬规则
 
 1. 动作之后用 `wait` 等一个可观测判据；等价判据拿不准时，先用最便宜的那个。
 2. 结论来自回读：`wait` 命中、`cli call` 取回字段、截图。动作返回的 `success` 表示请求发出去了。
@@ -50,8 +62,9 @@ SOP 每一阶段都有完成判据，判据不过不进入下一阶段。某个�
 5. 每条结论带证据：产物落 `runs/<日期>-<主题>/`，正文只给路径 + 结论，并标【实测】/【未验证】。
 6. 资源：轻 profile 起实例（一个 profile 一个实例）、推时间 `Fast` 封顶、`--force`/`--all` 要用户当场同意。
 7. 探东西用 `cli call` / `wait` / `live` 组合；`runs/game-process.*.json` 只由启动器写，离线验证就传假 `client` 对象。
+8. 推时间只按 tick：`step_game_ticks{ticks, pauseFirst:true, timeoutMs:大}`，判据是 `advancedTicks`；推之前先确认 `windowsForcePause = false`。选型、单次预算、分段见 `docs\测试SOP\推时间.md`。
 
-## 5 停手与缺原子
+## 6 停手与缺原子
 
 遇到下面任一情况，**停下报**，不要硬编：
 
@@ -70,14 +83,17 @@ SOP 每一阶段都有完成判据，判据不过不进入下一阶段。某个�
 
 能写成「探针 + 一次单值比较」的属**补数据**（登记表一条）；写不成单值比较的才属**补算子/补采样层**。
 
-## 6 指针
+## 7 指针
 
 | 想知道 | 去哪 |
 | --- | --- |
-| 命令、算子、四类采样源 | `docs/cli-wait-用法-20261024.md` |
-| 标准六阶段 SOP | `docs/测试SOP/标准-六阶段.md` |
-| 有哪些 SOP、怎么加一条 | `docs/测试SOP/README.md` |
-| 动作/等待失败怎么判 | `docs/测试SOP/失败判读.md` |
-| 四层原子怎么扩、边界在哪 | `docs/自动化测试-流程与原子能力清单-20261024.md` |
+| 命令、算子、四类采样源 | `docs\cli-wait-用法-20261024.md` |
+| 标准六阶段 SOP | `docs\测试SOP\标准-六阶段.md` |
+| 有哪些 SOP、怎么加一条 | `docs\测试SOP\README.md` |
+| 环境自检、必备 mod、profile 现状 | `docs\测试SOP\环境自检.md` |
+| 小人状态怎么摆、怎么读（Character Editor） | `docs\测试SOP\角色编辑器.md` |
+| 时间怎么推（选型 / 分段 / 判据） | `docs\测试SOP\推时间.md` |
+| 动作/等待失败怎么判 | `docs\测试SOP\失败判读.md` |
+| 四层原子怎么扩、边界在哪 | `docs\自动化测试-流程与原子能力清单-20261024.md` |
 
 新增知识落**指针文档**，skill 只加指针不加正文。
