@@ -10,6 +10,11 @@
  *   2 = 超时，没等到
  *   1 = 参数错（抛异常，由 cli.js 的 main().catch 统一置 1）
  *
+ * **2026-10-24：本文件不再有自己的等待循环**。以前它用 `setInterval` + 自己的 `matches()`，
+ * 与 `wait.js` 是两套判定。现在：`--until` 只是**翻译**成条件 JSON，循环用 `waitFor`，
+ * 取样用 `wait-sources.js` 的 `eventSampler`（逐行预判、命中行粘在 `lineMatch` 上）。
+ * 这样「同一个条件在 live 与 wait 里答案一致」是结构保证，而不是靠两处对齐。
+ *
  * 为什么默认从头扫：`--until` 问的常常是「那个事件发生了没有」，而 watcher 往往比游戏**晚起**
  * （先开殖民地、再挂 watcher 是常态）—— 从末尾跟会永远等不到已经落盘的那条。只看新内容就加 `--new-only`。
  *
@@ -18,15 +23,14 @@
  *   `key~value`  顶层字段包含子串
  *   多个条件用空格或 `&&` 连接，全部成立才算命中；值里可以有空格（`text~[VD] 1 incident`）。
  */
-import fs from 'node:fs';
 import path from 'node:path';
-import { StringDecoder } from 'node:string_decoder';
-import { logPathFor, profileDir, WS } from './launcher.js';
+import { waitFor } from './wait.js';
+import { eventSampler, resolveEventFile, tailLines } from './wait-sources.js';
+import { logPathFor } from './launcher.js';
 
 export const POLL_MS = 200;
 export const DEFAULT_TIMEOUT_MS = 120000;
 export const TIMEOUT_TAIL_LINES = 10;
-const TAIL_MAX_BYTES = 262144;
 
 const USAGE = [
   '用法: node src/cli.js live --profile <名字> (--until \'<条件>\' | --last N) [选项]',
@@ -40,22 +44,6 @@ const USAGE = [
   '  --source events|log                      跟读事件文件（默认）还是 Player.log',
   '  --file <路径>                            直接指定要跟读的文件',
 ].join('\n');
-
-/**
- * 事件文件的默认位置。优先级（与 mod 侧 LiveChannel.ComputePath 的规则对齐）：
- *   1. `$DSH_LIVE_DIR/<profile>.ndjson` —— launcher.startGame() 会把这个变量交给游戏进程
- *   2. `<profile 存档目录>/dsh-live/game.ndjson` —— mod 在没有 DSH_LIVE_DIR 时的落点（存在才用）
- *   3. `<工作区>/runs/live/<profile>.ndjson` —— 本仓库的约定位置
- */
-export function resolveEventFile(profile = 'vanilla') {
-  const dir = process.env.DSH_LIVE_DIR;
-  if (dir) return path.join(dir, `${profile}.ndjson`);
-
-  const inProfile = path.join(profileDir(profile), 'dsh-live', 'game.ndjson');
-  if (fs.existsSync(inProfile)) return inProfile;
-
-  return path.join(WS, 'runs', 'live', `${profile}.ndjson`);
-}
 
 /**
  * 把 `--until` 文本拆成条件数组。
@@ -85,129 +73,28 @@ export function parsePredicate(text) {
   return conditions;
 }
 
-/** 字段转成可比较的字符串：数字/布尔按 JSON 字面量，对象转 JSON 文本，缺失返回 undefined。 */
-function fieldText(event, key) {
-  if (!Object.prototype.hasOwnProperty.call(event, key)) return undefined;
-  const v = event[key];
-  if (v === null) return 'null';
-  if (typeof v === 'object') return JSON.stringify(v);
-  return String(v);
-}
-
-export function matches(event, conditions) {
-  for (const c of conditions) {
-    const actual = fieldText(event, c.key);
-    if (actual === undefined) return false;
-    if (c.op === '=' ? actual !== c.value : !actual.includes(c.value)) return false;
-  }
-  return true;
-}
-
 /**
- * 增量跟读者：记住偏移量，每次 poll 只返回**新增**的完整行。
- * 文件还没出现时什么都不返回（游戏一起来就会自建目录和文件）；
- * 文件变小 = 被轮转/截断 ⇒ 从 0 重新读。
- * 用 StringDecoder 接半行/半个多字节字符，避免把中文字符劈成乱码。
+ * `--until` 谓词 → 条件 JSON（**纯翻译**，没有第二套判定）。
+ *
+ * 老实现把自己的字段**字符串化**再比（`fieldText`：数字/布尔按 JSON 字面量、对象转 JSON 文本、
+ * `null`→`"null"`），所以这里统一走采样器的 `texts` 视图（同样字符串化）：
+ *   `key=value` → `{"path":"result.texts.key","equals":"value"}`（两边都是字符串 ⇒ 与老实现同义）
+ *   `key~value` → `{"path":"result.texts.key","contains":"value"}`（`contains` 就是为此加的算子）
+ * 多个条件用 `all` 组合。字段缺失时 `equals`/`contains` 都按「路径取不到 = 未成立」处理，
+ * 与老实现的 `fieldText === undefined ⇒ 不匹配` 同义。
  */
-export function createFollower(file) {
-  const decoder = new StringDecoder('utf8');
-  let offset = 0;
-  let pending = '';
-
-  return {
-    /** 跳到当前末尾（`--new-only`）：只关心「从现在起」发生的事。 */
-    seekToEnd() {
-      try {
-        offset = fs.statSync(file).size;
-      } catch {
-        offset = 0;
-      }
-      pending = '';
-    },
-
-    poll() {
-      let stat;
-      try {
-        stat = fs.statSync(file);
-      } catch {
-        return [];
-      }
-
-      if (stat.size < offset) {
-        offset = 0;
-        pending = '';
-        decoder.end();
-      }
-      if (stat.size === offset) return [];
-
-      const length = stat.size - offset;
-      const buf = Buffer.alloc(length);
-      let fd;
-      let read = 0;
-      try {
-        fd = fs.openSync(file, 'r');
-        read = fs.readSync(fd, buf, 0, length, offset);
-      } catch {
-        return [];
-      } finally {
-        if (fd !== undefined) {
-          try {
-            fs.closeSync(fd);
-          } catch {
-            /* 关不掉就算了，下一次会重新开 */
-          }
-        }
-      }
-
-      offset += read;
-      pending += decoder.write(buf.subarray(0, read));
-      const parts = pending.split('\n');
-      pending = parts.pop();
-      return parts.map((s) => s.replace(/\r$/, '')).filter((s) => s.length > 0);
-    },
-  };
+export function predicatesToCondition(predicates) {
+  const leaves = predicates.map(({ key, op, value }) =>
+    op === '='
+      ? { path: `result.texts.${key}`, equals: value }
+      : { path: `result.texts.${key}`, contains: value },
+  );
+  if (leaves.length === 1) return leaves[0];
+  return { all: leaves };
 }
 
-/** 读文件最后 n 条（有上界：只读末尾 TAIL_MAX_BYTES，避免为了 10 行读几百 MB 日志）。 */
-export function tailLines(file, n, maxBytes = TAIL_MAX_BYTES) {
-  let fd;
-  try {
-    fd = fs.openSync(file, 'r');
-    const size = fs.fstatSync(fd).size;
-    const start = Math.max(0, size - maxBytes);
-    const buf = Buffer.alloc(size - start);
-    const read = fs.readSync(fd, buf, 0, buf.length, start);
-    const lines = buf
-      .subarray(0, read)
-      .toString('utf8')
-      .split(/\r?\n/)
-      .filter((s) => s.length > 0);
-    return lines.slice(-n);
-  } catch {
-    return [];
-  } finally {
-    if (fd !== undefined) {
-      try {
-        fs.closeSync(fd);
-      } catch {
-        /* 同上 */
-      }
-    }
-  }
-}
-
-/** 只按「事件」解释时，一行必须是合法 JSON 对象；半行/坏行直接跳过（轮转时可能撞上）。 */
-function toEvent(raw, source) {
-  // 个别 Windows 写入路径会给**第一行**加 BOM（PowerShell 的 UTF8 编码就是一例）；不是我们写的，但读的时候顺手容忍。
-  const line = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
-  if (source === 'log') return { kind: 'log', text: line };
-  try {
-    const parsed = JSON.parse(line);
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
-    return null;
-  }
-}
+/** 命中后才成立的条件：`lineMatch` 只在第一次命中时出现（不能用 null 冒充，`exists` 只看 hasOwnProperty） */
+const LINE_MATCH_CONDITION = { path: 'result.lineMatch', exists: true };
 
 function writeOut(line) {
   process.stdout.write(line + '\n');
@@ -240,10 +127,10 @@ export async function runLive({ profile = 'vanilla', flags = {} } = {}) {
     throw new Error(`要么给 --until，要么给 --last N\n\n${USAGE}`);
   }
 
-  let conditions = [];
+  let predicates = [];
   if (untilRaw !== null) {
-    conditions = parsePredicate(untilRaw);
-    if (!conditions.length) {
+    predicates = parsePredicate(untilRaw);
+    if (!predicates.length) {
       throw new Error(`--until 解析不出任何条件：「${untilRaw}」（形如 kind=colony_started）\n\n${USAGE}`);
     }
   }
@@ -273,42 +160,36 @@ export async function runLive({ profile = 'vanilla', flags = {} } = {}) {
   }
 
   note(
-    `[live] 等待 ${conditions.map((c) => `${c.key}${c.op}${c.value}`).join(' && ')}` +
+    `[live] 等待 ${predicates.map((c) => `${c.key}${c.op}${c.value}`).join(' && ')}` +
       `  ← profile=${profile} source=${source} from=${newOnly ? 'now' : 'start'} file=${file}`,
   );
 
-  const follower = createFollower(file);
-  if (newOnly) follower.seekToEnd();
-
-  const startedAt = Date.now();
-  let newEvents = 0;
-
-  return await new Promise((resolve) => {
-    const timer = setInterval(() => {
-      const lines = follower.poll();
-
-      for (const raw of lines) {
-        const event = toEvent(raw, source);
-        if (!event) continue;
-        newEvents++;
-        if (!matches(event, conditions)) continue;
-        clearInterval(timer);
-        writeOut(raw);
-        note(`[live] 命中（等待 ${Date.now() - startedAt}ms，共读到 ${newEvents} 条事件）`);
-        resolve(0);
-        return;
-      }
-
-      if (Date.now() - startedAt >= timeoutMs) {
-        clearInterval(timer);
-        const tail = tailLines(file, TIMEOUT_TAIL_LINES);
-        note(
-          `[live] 超时 ${timeoutMs}ms 没等到（读到 ${newEvents} 条事件）；` +
-            `下面是文件最后 ${tail.length} 条：`,
-        );
-        for (const line of tail) writeOut(line);
-        resolve(2);
-      }
-    }, POLL_MS);
+  const sampler = eventSampler({
+    file,
+    source,
+    fromNow: newOnly,
+    perLineCondition: predicatesToCondition(predicates),
   });
+
+  const result = await waitFor(sampler, {
+    condition: LINE_MATCH_CONDITION,
+    timeoutMs,
+    intervalMs: POLL_MS,
+    what: `事件（${file}）`,
+  });
+
+  if (result.ok) {
+    const hit = result.sample?.lineMatch;
+    writeOut(hit?.raw ?? '');
+    note(`[live] 命中（等待 ${result.elapsedMs}ms，共读到 ${result.sample?.readCount ?? 0} 条事件）`);
+    return 0;
+  }
+
+  const tail = tailLines(file, TIMEOUT_TAIL_LINES);
+  note(
+    `[live] 超时 ${timeoutMs}ms 没等到（读到 ${result.sample?.readCount ?? 0} 条事件）；` +
+      `下面是文件最后 ${tail.length} 条：`,
+  );
+  for (const line of tail) writeOut(line);
+  return 2;
 }

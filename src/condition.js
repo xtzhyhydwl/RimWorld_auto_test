@@ -297,3 +297,5 @@ function badCondition(message) {
  * 单独导出是因为采样层要「逐行预判」（拿到命中的那一行原文），而不只是知道真/假。
  */
 export { tryMatch };
+/** 字符串化规则（`contains` 与事件源的 `texts` 视图共用，保证两处答案一致） */
+export { stringForm };

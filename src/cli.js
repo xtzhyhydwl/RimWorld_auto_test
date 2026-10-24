@@ -17,6 +17,7 @@ import path from 'node:path';
 import { connectGabp, DEFAULT_REQUEST_TIMEOUT_MS } from './gabp.js';
 import { assertToolNameExists } from './toolname.js';
 import { waitFor } from './wait.js';
+import { buildSampler, resolveEventFile } from './wait-sources.js';
 import { CONDITIONS_FILE, fillArgs, listScenarios, loadRegistry, resolveScenario } from './conditions.js';
 import {
   startGame,
@@ -452,18 +453,35 @@ async function main() {
       if (scenario && source !== scenario.source) {
         throw new Error(`--source ${source} 与场景「${scenario.name}」的 source=${scenario.source} 冲突（场景身份不能覆盖）`);
       }
-      if (source === 'event' || source === 'process' || source === 'bridge-ready') {
-        throw new Error(
-          `--source ${source} 属于 P1 的下半段，尚未实现（wait 目前只支持 --source bridge）。` +
-            (scenario ? `\n  场景「${scenario.name}」就是这个来源，等它接上再用。` : '') +
-            '\n  · 等事件：先用 `node src/cli.js live --until <条件>`（退出码同为 0/2/1）；' +
-            '\n  · 等进程存活/退出：先用 `node src/cli.js status`。',
-        );
+      if (!['bridge', 'event', 'process', 'bridge-ready'].includes(source)) {
+        throw new Error(`--source 只认 bridge / event / process / bridge-ready，收到「${source}」\n\n${WAIT_USAGE}`);
       }
 
-      if (flags.probe === true) throw new Error(`--probe 需要一个工具名，例 rimworld/list_colonists\n\n${WAIT_USAGE}`);
-      const probeName = scenario ? scenario.probe : flags.probe === undefined ? positional[0] : String(flags.probe);
-      if (!probeName) throw new Error(`缺少 --probe（要反复调用的只读工具名），或用 --scenario <名字>\n\n${WAIT_USAGE}`);
+      // 四类来源各自的「指向谁」：bridge 要探针名，process 要 PID，event 要文件，bridge-ready 什么都不用
+      let probeName = null;
+      let pid = null;
+      let eventFile = null;
+      let eventFormat = 'events';
+      if (source === 'bridge') {
+        if (flags.probe === true) throw new Error(`--probe 需要一个工具名，例 rimworld/list_colonists\n\n${WAIT_USAGE}`);
+        probeName = scenario ? scenario.probe : flags.probe === undefined ? positional[0] : String(flags.probe);
+        if (!probeName) throw new Error(`缺少 --probe（要反复调用的只读工具名），或用 --scenario <名字>\n\n${WAIT_USAGE}`);
+      } else if (source === 'process') {
+        // 不给 --pid 就盯本 profile 记录里的那个 PID（`stop` 之后等它真的没了，就是这条）
+        const recordPid = flags.pid === undefined ? readProcessRecord(profile)?.pid : Number(flags.pid);
+        pid = Number(recordPid);
+        if (!Number.isInteger(pid) || pid <= 0) {
+          throw new Error(`--source process 需要 --pid <正整数>，或该 profile 有启动记录\n\n${WAIT_USAGE}`);
+        }
+      } else if (source === 'event') {
+        eventFile = flags.file === undefined ? resolveEventFile(profile) : path.resolve(String(flags.file));
+        // 事件文件有两种格式：DSH_GameLink 的 NDJSON（默认），以及整行当 `text` 的纯文本（Player.log）
+        const format = flags['event-format'] === undefined ? 'events' : String(flags['event-format']);
+        if (format !== 'events' && format !== 'log') {
+          throw new Error(`--event-format 只认 events|log，收到「${format}」\n\n${WAIT_USAGE}`);
+        }
+        eventFormat = format;
+      }
 
       // 参数：场景自带 args（`$名字` 占位由 --arg 填）；没有场景时整份来自 --args/--args-file
       const providedArgs = readJsonInput({
@@ -517,29 +535,56 @@ async function main() {
 
       // 总预算从这条命令开始算（含连接桥接的时间），单次调用也不许越过它
       const deadline = Date.now() + timeoutMs;
+      const target =
+        source === 'bridge' ? `probe=${probeName}` : source === 'process' ? `pid=${pid}` : source === 'event' ? `file=${eventFile}` : '(本 profile)';
       process.stderr.write(
-        `[wait] profile=${profile} probe=${probeName} timeout=${timeoutMs}ms interval=${intervalMs}ms\n`,
+        `[wait] profile=${profile} source=${source} ${target} timeout=${timeoutMs}ms interval=${intervalMs}ms\n`,
       );
 
-      const result = await withBridge(
+      // 四类来源共用**同一个** waitFor 循环：只有「取样器」与「谁提供 client」不同
+      const spec = {
+        source,
         profile,
-        async (client) => {
-          // 名字写错要立刻响亮失败，不要等满超时（与 call 同一条纪律）
-          await assertToolNameExists(client, probeName);
-          return waitFor(
-            // 单次调用不得超过剩余预算：否则一次挂住的调用就能越过总超时
-            () => client.callTool(probeName, args, { timeoutMs: Math.max(1, deadline - Date.now()) }),
-            { condition, timeoutMs: Math.max(1, deadline - Date.now()), intervalMs, what: probeName },
-          );
-        },
-        { requestTimeoutMs: timeoutMs },
-      );
+        probe: probeName,
+        args,
+        deadline,
+        pid,
+        file: eventFile,
+        eventSource: eventFormat,
+        fromNow: Boolean(flags['new-only']),
+        windowMs: flags['window-ms'] === undefined ? null : Number(flags['window-ms']),
+      };
+      const result =
+        source === 'bridge'
+          ? await withBridge(
+              profile,
+              async (client) => {
+                // 名字写错要立刻响亮失败，不要等满超时（与 call 同一条纪律）
+                await assertToolNameExists(client, probeName);
+                return waitFor(buildSampler(spec, { client }), {
+                  condition,
+                  timeoutMs: Math.max(1, deadline - Date.now()),
+                  intervalMs,
+                  what: probeName,
+                });
+              },
+              { requestTimeoutMs: timeoutMs },
+            )
+          : await waitFor(buildSampler(spec), {
+              condition,
+              timeoutMs,
+              intervalMs,
+              what: source === 'process' ? `PID ${pid}` : source === 'event' ? eventFile : `profile ${profile}`,
+            });
 
       const evidence = {
         ok: result.ok,
         elapsedMs: result.elapsedMs,
         attempts: result.attempts,
-        probe: probeName,
+        source,
+        ...(probeName ? { probe: probeName } : {}),
+        ...(source === 'process' ? { pid } : {}),
+        ...(source === 'event' ? { file: eventFile } : {}),
         ...(scenario ? { scenario: scenario.name, verifiedLevel: scenario.verifiedLevel } : {}),
         condition,
         ...(result.missingPath ? { missingPath: result.missingPath } : {}),
@@ -549,7 +594,7 @@ async function main() {
         ? `--args-file '${flags['args-file']}'`
         : `--args '${JSON.stringify(args)}'`;
       const printed = evidenceForPrint(evidence);
-      if (printed.sampleTruncated) {
+      if (printed.sampleTruncated && probeName) {
         // 采样截断只发生在打印层：真载荷动辄 8 KB，一次超时就能吃掉子代理半个上下文
         console.error(
           `[wait] 采样已截断（只印前 ${SAMPLE_PRINT_LIMIT} 字符）；` +
