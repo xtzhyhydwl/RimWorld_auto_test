@@ -2,7 +2,10 @@
 /**
  * RimWorld 自动测试桥 —— 命令行入口。
  *
- *   node src/cli.js start [--profile vanilla] [--port 5174] [--minimized] [--width 1600] [--height 900]
+ *   node src/cli.js --help                                                          看总表（不执行任何动作）
+ *   node src/cli.js <子命令> --help                                                 看该子命令用法（不执行任何动作）
+ *   node src/cli.js env-check --profile voiced [--json]                             开测先跑：本次实测环境事实
+ *   node src/cli.js start --profile voiced [--port 5174] [--minimized] [--width 1600] [--height 900]   （--profile 必填）
  *   node src/cli.js status [--profile vanilla]
  *   node src/cli.js bridge [--profile vanilla]
  *   node src/cli.js tools [关键词] [--profile vanilla]
@@ -10,7 +13,7 @@
  *   node src/cli.js wait --profile voiced --probe rimworld/list_colonists --condition '{"path":"result.colonists","countEquals":3}' [--timeout 60000]
  *   node src/cli.js logs [行数] [--profile vanilla]
  *   node src/cli.js live --profile voiced --until 'kind=colony_started' [--timeout 120000]
- *   node src/cli.js stop [--profile vanilla] [--force]
+ *   node src/cli.js stop --profile voiced [--force]                                  （--profile 必填）
  *   node src/cli.js base-mods [--profile vanilla]
  */
 import fs from 'node:fs';
@@ -34,6 +37,7 @@ import {
   tailFile,
   profileDir,
   gameRoot,
+  processRecordPath,
   WS,
 } from './launcher.js';
 import { baseModsFile, readBaseModsFile, diffBaseMods } from './base-mods.js';
@@ -151,7 +155,10 @@ const WAIT_USAGE = [
   '',
   '  --scenario 已进图可玩                 场景来自 src/conditions.json；探针/参数/条件都由它给，不许再给 --probe/--source',
   '  --arg x=139 [--arg z=231]            给场景 args 里的 $占位填值（可重复；也可 --arg x=139,z=231）',
-  '  --source bridge                      目前只认 bridge（event/process/bridge-ready 属 P1 未实现）',
+  '  --source bridge                      反复调一次只读桥接工具（要 --probe；不给 --source 时的默认）',
+  '  --source event                       跟读 NDJSON 事件文件或 Player.log（--file / --event-format / --new-only / --window-ms）',
+  '  --source process                     探一个 PID 的三态 alive|foreign|none（--pid，缺省用本 profile 记录里的 PID）',
+  '  --source bridge-ready                只校验「这个桥接是不是我的」（记录/PID 身份/端口/token 四道校验）',
   '  --probe rimworld/list_colonists      要反复调用的只读工具名',
   '  --args \'{"currentMapOnly":true}\'      探针参数（也可 --args-file f.json 或 \'@f.json\'）',
   '  --condition \'{"path":"result.colonists","countEquals":3}\'   条件 JSON（也可 --condition-file f.json 或 \'@f.json\'）',
@@ -179,9 +186,577 @@ function evidenceForPrint(evidence) {
   };
 }
 
+/**
+ * 每个子命令的 `--help`。**必须在任何动作之前拦下**：`node src/cli.js start --help` 曾经
+ * 真的起了一个 561 mod 的满配实例（2026-10-24 事故）——「查参数」是最便宜的操作，不该有副作用。
+ * 这里只放「用法 + 这条命令特有的坑」；详细用法留在实现里（`wait` 直接用上面的 WAIT_USAGE，
+ * 免得同一份用法写两遍然后各自漂移）。
+ */
+const COMMAND_HELP = {
+  start: [
+    '用法: node src/cli.js start --profile <名字> [--port 5174] [--minimized] [--width 1600] [--height 900]',
+    '                                  [--monitor 2] [--fullscreen|--windowed] [--doorstop]',
+    '',
+    '  --profile 必填：不填不会替你猜（默认值 vanilla 是 561 个 mod 的满配，代价最大）；可选值见 profiles\\ 目录。',
+    '  会真起一个游戏实例并等桥接就绪（抢一次窗口焦点）。底座 mod 按 base-mods.json 自动补齐（只加不删）。',
+    '  起了之后：node src/cli.js status --profile <名字> 看状态 / stop --profile <名字> 关掉它。',
+  ].join('\n'),
+  stop: [
+    '用法: node src/cli.js stop --profile <名字> [--force]',
+    '',
+    '  --profile 必填：默认只关「这个 profile 记录里的那个 PID」，不动你自己那一局。',
+    '  --force 会枚举全机 RimWorld 并强杀（含用户在玩的那局）——只有用户当次明确要求才用。',
+  ].join('\n'),
+  smoke: [
+    '用法: node src/cli.js smoke --profile <名字> [--ticks 300] [--attach] [--keep-running]',
+    '',
+    '  --profile 必填：它默认会起一个实例、跑完再关掉（--attach 表示连已经在跑的那个实例）。',
+    '  报告落 runs\\<时间戳>_smoke\\report.md；退出码 0=全过 / 1=有断言没过。',
+  ].join('\n'),
+  'env-check': [
+    '用法: node src/cli.js env-check --profile <名字> [--json]',
+    '',
+    '  **每次开测先跑它**：把「本次实测环境事实」（进程 / 桥接归属 / 激活 mod / 底座差额 / 加载顺序 /',
+    '  CE 能力 / 时间与强制暂停 / 路径 / 限制）一次问清，替代文档里写死的环境数字。',
+    '  只读、绝不启动游戏；游戏没起时除桥接相关项标 unknown 外其余照常输出。',
+    '  --json  给机器读的完整对象（默认是人读的短摘要）。',
+    '  退出码：0=没有阻塞项 / 1=有阻塞项（verdict.blockers 里是会让你照着做的一句话，不是崩溃）。',
+  ].join('\n'),
+  status: [
+    '用法: node src/cli.js status [--profile <名字>]',
+    '',
+    '  gameRunning 是三态 true/false/null（null=判据不足，不要当 false）；同时给出逐条判据与桥接归属校验。',
+  ].join('\n'),
+  bridge: ['用法: node src/cli.js bridge [--profile <名字>]', '', '  只打印「这个 profile 该连哪个桥接 + 凭什么这么认为」，不连它。'].join('\n'),
+  tools: [
+    '用法: node src/cli.js tools [关键词] [--profile <名字>]',
+    '',
+    '  关键词按「工具名 + 描述」子串匹配（大小写不敏感），结果分「名字命中 / 仅描述命中」两段显示。',
+    '  需要活桥接；没有游戏时只有 runs\\tools.json 那份旧导出可看。',
+  ].join('\n'),
+  describe: ['用法: node src/cli.js describe <工具名> [--profile <名字>]', '', '  打印单个工具的完整 schema。'].join('\n'),
+  'dump-tools': ['用法: node src/cli.js dump-tools [--profile <名字>]', '', '  把全部工具 schema 导出到 runs\\tools.json（离线时唯一可查的目录）。'].join('\n'),
+  call: [
+    '用法: node src/cli.js call <工具名> [\'{"参数":...}\'] [--args-file f.json | \'@f.json\'] [--profile <名字>] [--timeout 60000]',
+    '',
+    '  载荷原样打到 stdout；载荷里 success:false（动作失败）时 **exit 1**，别按 exit 0 写成通过。',
+    '  --timeout 默认 60 s（与 gabp.js 同一个常量）：桥接把调用排在游戏主线程上，长操作要显式给大值。',
+  ].join('\n'),
+  wait: WAIT_USAGE,
+  logs: ['用法: node src/cli.js logs [行数] [--profile <名字>]', '', '  打印该 profile 的 Player.log 尾部（1.7 起这份日志全机共用）。'].join('\n'),
+  live: [
+    '用法: node src/cli.js live --profile <名字> (--until \'<条件>\' | --last N) [选项]',
+    '',
+    '  --until \'kind=colony_started\'            条件成立即命中并退出 0（超时退出 2）',
+    '  --last N / --new-only / --timeout 120000 / --source events|log / --file <路径>',
+    '  挂成后台 job 时，job 完成的通知本身就是「事件到了」的推送 —— 别用固定 sleep 等游戏。',
+  ].join('\n'),
+  atoms: ['用法: node src/cli.js atoms', '', '  原子能力清单（算子 / 四类来源的快照字段 / 条件登记表统计），写测试前先看这个。'].join('\n'),
+  'base-mods': [
+    '用法: node src/cli.js base-mods [--profile <名字>]',
+    '',
+    '  打印 base-mods.json（全项目唯一一份底座清单）；带 --profile 才顺便对账，只报告不写文件。',
+  ].join('\n'),
+};
+
+/** 没有专门 help 时打这份总表；`node src/cli.js`（无参数）打的是同一份 */
+const GENERAL_USAGE = [
+  'RimWorld 自动测试桥',
+  '',
+  '  node src/cli.js <子命令> --profile <名字> [选项]   --profile 决定「操作哪个隔离实例」；start/stop/smoke/env-check 必须显式给',
+  '  node src/cli.js <子命令> --help                    只看用法，不执行任何动作（查参数不该有副作用）',
+  '  node src/cli.js --help                             看这一份总表',
+  '',
+  '  env-check 每次开测先跑：进程/桥接归属/激活 mod/加载顺序/CE/时间/路径 一次问清（不启动游戏）',
+  '  start    启动隔离测试实例并等待桥接就绪（--port N 显式指定端口，否则自动挑 5174..5183 里空闲的）',
+  '  status   查看该 profile 的进程 / 上次启动 / 日志中的桥接信息',
+  '  bridge   只打印该 profile 的桥接端口与 token',
+  '  tools    列出游戏暴露的工具（可加关键词过滤）',
+  '  describe 显示单个工具的完整参数 schema',
+  '  dump-tools  把所有工具 schema 导出到 runs/tools.json',
+  '  call     调用一个游戏内工具（载荷 success:false ⇒ exit 1）',
+  '  wait     等条件成立（反复调探针 + 条件 JSON；0 命中 / 2 超时 / 1 其它），见 docs/cli-wait-用法-20261024.md',
+  '  atoms    原子能力清单（算子 / 四类来源的快照字段 / 登记表统计）—— 写测试前先看这个',
+  '  base-mods 底座 mod 清单（base-mods.json）；带 --profile <p> 只报告该 profile 缺哪几个，不写文件',
+  '  logs     打印该 profile 的 Player.log 尾部',
+  '  live     等游戏侧事件（DSH_GameLink 的 NDJSON 或 Player.log），命中即返回',
+  '  stop     关闭该 profile 的测试实例（--force 才会强杀全机 RimWorld，破坏性）',
+  '  smoke    跑冒烟测试闭环',
+].join('\n');
+
+/**
+ * 这次 `--help` 该打谁的用法。
+ * `node src/cli.js --help start` 也能拿到 start 的用法（人常这么写），否则打总表。
+ */
+function helpTextFor(cmd, positional) {
+  const wanted = COMMAND_HELP[cmd] ? cmd : COMMAND_HELP[positional?.[0]] ? positional[0] : null;
+  return wanted ? COMMAND_HELP[wanted] : GENERAL_USAGE;
+}
+
+/**
+ * profiles\ 下有哪些 profile。清单写死在代码里会在「有人新建 profile」的那天过期，
+ * 所以每次现读盘 —— 拒绝执行时列出的「可用 profile」也来自这里。
+ */
+function listProfileNames() {
+  try {
+    return fs
+      .readdirSync(path.join(WS, 'profiles'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 会**真起游戏 / 真关游戏**或**只报某个 profile 的事实**的子命令：`--profile` 必须显式给。
+ *
+ * 为什么：`flags.profile || 'vanilla'` 这个默认值会把「想试试参数 / 打错一个子命令」变成
+ * 「起一个 561 mod 的满配实例并改写它的 Config」——2026-10-24 真发生过（拆开看：默认值 + 没有
+ * `--help` 拦截）。读类命令（status/tools/call/wait/logs/live/base-mods）保留原默认，
+ * 改它们的默认值会把已有脚本全弄坏。
+ */
+const PROFILE_REQUIRED = {
+  start: '会真起一个游戏实例（还会按 base-mods.json 改写该 profile 的 ModsConfig.xml）；缺省值 vanilla 是 561 个 mod 的满配，猜错代价最大',
+  stop: '会关掉一个游戏实例；缺省值 vanilla 是 561 个 mod 的满配，猜错代价最大',
+  smoke: '默认会起一个实例、跑完再关掉；缺省值 vanilla 是 561 个 mod 的满配，猜错代价最大',
+  'env-check': '报的是「某个 profile 的」环境事实，猜错了等于把别人的事实钉进你的上下文',
+};
+
+function requireExplicitProfile(cmd, flags) {
+  const why = PROFILE_REQUIRED[cmd];
+  if (!why) return;
+  if (typeof flags.profile === 'string' && flags.profile.trim()) return;
+  const names = listProfileNames();
+  // 照抄示例优先给 voiced：它是 AGENTS.md 资源约定里那条「只开轻 profile」的例子
+  const sample = names.includes('voiced') ? 'voiced' : (names[0] ?? '<名字>');
+  // package.json 里的 "start"/"stop"/"smoke" 就是 `node src/cli.js <同名>`，它们现在也会被这条拒绝：
+  // 把「npm 传参要 --」这个坑直接写在错误里，省得人去翻 npm 文档
+  const npmHint =
+    process.env.npm_lifecycle_event === cmd ? `  你是通过 npm run ${cmd} 跑的：改成 npm run ${cmd} -- --profile ${sample}\n` : '';
+  throw new Error(
+    `\`${cmd}\` ${why}，所以缺 --profile 时直接拒绝执行。\n` +
+      `  可用 profile（profiles\\ 下的目录）：${names.length ? names.join(', ') : '（一个都没有）'}\n` +
+      `  底座 mod 清单（所有 profile 共用，start 时自动补齐）：${baseModsFile(WS)}\n` +
+      npmHint +
+      `  照抄：node src/cli.js ${cmd} --profile ${sample}`,
+  );
+}
+
+/** 条件登记表的统计 —— `atoms` 与 `env-check` 共用一处，免得两个命令的计数各自漂移 */
+function summarizeRegistry(registry) {
+  return {
+    file: CONDITIONS_FILE,
+    scenarios: Object.keys(registry.scenarios).length,
+    byLevel: listScenarios(registry).reduce((acc, s) => {
+      acc[s.verifiedLevel] = (acc[s.verifiedLevel] ?? 0) + 1;
+      return acc;
+    }, {}),
+    errors: registry.errors,
+  };
+}
+
+/**
+ * 这份载荷是不是「工具自己报错」的形状。
+ *
+ * 真机实测（2026-10-25 试跑 B2）：探针自己 `success:false` 时，条件路径断在 `result` 那一层，
+ * 字段恰好是 `success, message, exception, operation`。这时「字段取不到」只是**后果**，
+ * 让人去「等进图 / 改字段名」会白等满一轮还把问题改到别处。
+ *
+ * 光看字段名会误报：成功载荷也可能带 `success + message + operation`
+ * （`start_debug_game_ready` 就是），所以能拿到本次采样时再确认一次 `success === false`。
+ * 只看名字像字段的项 —— condition.js 会在 available 末尾追加一句「…共 N 个」的摘要。
+ */
+function looksLikeToolErrorPayload(available = [], sample = null) {
+  const names = new Set(
+    available
+      .filter((key) => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key))
+      .map((key) => key.toLowerCase()),
+  );
+  const envelope = names.has('success') && (names.has('message') || names.has('exception') || names.has('operation'));
+  if (!envelope) return false;
+  if (sample && typeof sample === 'object' && !Array.isArray(sample) && sample.success !== undefined) {
+    return sample.success === false;
+  }
+  return true;
+}
+
+/** `call` 失败时那一行 stderr 要说的话：优先 message，其次 operation.Error / exception */
+function toolFailureText(res) {
+  const detail = res?.message ?? res?.operation?.Error ?? res?.exception ?? res?.error ?? null;
+  if (detail === null || detail === undefined) return null;
+  return typeof detail === 'string' ? detail : JSON.stringify(detail);
+}
+
+/**
+ * `profiles/<p>/Config/ModsConfig.xml` 里 `<activeMods>` 的内容 —— 游戏没起时唯一的事实来源。
+ *
+ * 为什么这里再读一次 XML：`src/base-mods.js` 的 `readActiveMods` 没导出，而本轮只允许改 cli.js；
+ * 等它导出后这里应改成调用它（同一件事只能有一处解析）。
+ */
+function readActiveModsInProfile(profile) {
+  const file = path.join(profileDir(profile), 'Config', 'ModsConfig.xml');
+  let xml;
+  try {
+    xml = fs.readFileSync(file, 'utf8');
+  } catch {
+    return { file, count: null, ids: null, reason: '没有 ModsConfig.xml（这个 profile 还没启动过）' };
+  }
+  const section = /<activeMods>([\s\S]*?)<\/activeMods>/.exec(xml);
+  if (!section) return { file, count: null, ids: null, reason: 'ModsConfig.xml 里没有 <activeMods> 段' };
+  const ids = [...section[1].matchAll(/<li>([^<]*)<\/li>/g)].map((m) => m[1].trim()).filter(Boolean);
+  return { file, count: ids.length, ids };
+}
+
+/** 显示用：读不到就是 'unknown'，别用 false/null 冒充「已确认」 */
+function knownOrUnknown(value) {
+  return value === undefined || value === null ? 'unknown' : value;
+}
+
+/** env-check 每条桥接调用的上限：开测自检不该被一个挂住的调用拖住（bridge 把调用排在游戏主线程上） */
+const ENV_CHECK_CALL_TIMEOUT_MS = 8000;
+
+/**
+ * 一次 env-check 的全部事实。**只读**：不 start / 不 stop、不写文件、不推时间。
+ *
+ * 每一项失败都降级成 `queried:false` / `'unknown'` + 原因，整条命令不因某一项而崩 ——
+ * 它的作用就是「把本次实测事实钉进 agent 自己的上下文」，崩掉就什么也钉不住。
+ * 判据全部复用已有能力：进程身份与桥接归属来自 launcher（同 status），底座差额来自 base-mods.js，
+ * 登记表统计与 atoms 共用 summarizeRegistry()。
+ */
+async function collectEnvCheck(profile) {
+  const blockers = [];
+  const profilePath = profileDir(profile);
+  const profileExists = fs.existsSync(profilePath);
+  const paths = {
+    profileDir: profilePath,
+    screenshotsDir: path.join(profilePath, 'Screenshots'),
+    eventsFile: resolveEventFile(profile),
+    recordPath: processRecordPath(profile),
+    logFile: logPathFor(profile),
+  };
+  if (!profileExists) {
+    blockers.push(
+      `profiles\\ 下没有「${profile}」这个目录（名字打错了？）—— 可用 profile：${listProfileNames().join(', ') || '（一个都没有）'}`,
+    );
+  }
+
+  // 进程 / 桥接：两条判据与 status 同源（进程身份 + 归属校验），不另写一套
+  const st = await gameStatus(profile);
+  const resolved = await resolveBridge(profile);
+  const probe = await probeBridge(profile);
+  // verifyInstance 的唯一判据就是命令行里的 -savedatafolder=…\profiles\<p>，
+  // 所以 identityOk 与 cmdlineHasProfile 同源（分两个字段只是为了让读报告的人不必再解释一遍）
+  const processFacts = {
+    running: Boolean(st.recordedAlive || probe.reachable),
+    runningState: st.state,
+    pid: st.recordedPid,
+    identityOk: Boolean(st.recordedAlive),
+    cmdlineHasProfile: Boolean(st.recordedAlive),
+    otherGamePids: st.otherGamePids,
+    evidence: st.evidence,
+  };
+  const bridge = {
+    reachable: Boolean(probe.reachable),
+    available: Boolean(probe.available),
+    host: probe.host ?? resolved.info?.host ?? null,
+    port: probe.port ?? resolved.info?.port ?? null,
+    source: probe.source ?? resolved.info?.source ?? null,
+    resolutionOk: Boolean(resolved.ok),
+    reason: resolved.ok
+      ? probe.reachable
+        ? resolved.reason
+        : `归属校验通过，但握手失败：${probe.reason ?? '未知原因'}`
+      : `归属校验未通过：${resolved.reason}`,
+  };
+
+  // mods：清单文件读（离线可用）+ 底座差额（base-mods.json 是唯一真源）
+  const baseMods = readBaseModsFile(WS);
+  const active = readActiveModsInProfile(profile);
+  const diff = baseMods.missingFile
+    ? { skipped: `没有 ${baseModsFile(WS)}` }
+    : diffBaseMods({ profileDir: profilePath, baseMods: baseMods.packageIds });
+  const mods = {
+    activeModsCount: active.count,
+    activeModsFile: active.file,
+    baseModsFile: baseMods.file,
+    baseModsRequired: baseMods.packageIds,
+    baseModsMissing: diff.missing ?? [],
+    baseModsNote: diff.skipped ?? null,
+    loadedInSession: [],
+  };
+
+  // 桥接侧：一次连接问完；任何一个工具失败只让该项降级（记在 errors 里）
+  let gameFacts = null;
+  if (probe.reachable) {
+    try {
+      gameFacts = await withBridge(
+        profile,
+        async (client) => {
+          const facts = { bridgeStatus: null, uiState: null, mods: null, toolCount: null, ceToolCount: null, errors: {} };
+          const tryCall = async (key, name) => {
+            try {
+              return await client.callTool(name, {}, { timeoutMs: ENV_CHECK_CALL_TIMEOUT_MS });
+            } catch (err) {
+              facts.errors[key] = err.message;
+              return null;
+            }
+          };
+          facts.bridgeStatus = await tryCall('bridgeStatus', 'rimbridge/get_bridge_status');
+          facts.uiState = await tryCall('uiState', 'rimworld/get_ui_state');
+          facts.mods = await tryCall('mods', 'rimworld/list_mods');
+          try {
+            const tools = await client.listTools();
+            facts.toolCount = tools.length;
+            facts.ceToolCount = tools.filter((t) => String(t.name ?? '').startsWith('ce/')).length;
+          } catch (err) {
+            facts.errors.tools = err.message;
+          }
+          return facts;
+        },
+        { requestTimeoutMs: ENV_CHECK_CALL_TIMEOUT_MS },
+      );
+    } catch (err) {
+      // 端口上有人答话但这次连接没成（归属校验不过 / 桥接被长调用挂住）：只降级桥接项，不整条崩
+      gameFacts = { errors: { connect: err.message } };
+    }
+  }
+
+  // 加载顺序：list_mods 一份载荷就能回答（restartRequired / 每条 mod 的 ordering 问题）
+  const listMods = gameFacts?.mods ?? null;
+  const loadOrder = {
+    queried: Boolean(listMods),
+    restartRequired: listMods?.restartRequired ?? null,
+    sessionMismatchCount: listMods?.sessionMismatchCount ?? null,
+    orderingIssues: [],
+    reason: listMods
+      ? null
+      : (gameFacts?.errors?.mods ??
+        gameFacts?.errors?.connect ??
+        (probe.reachable ? '没有查询（见 bridge 项）' : '桥接不可达，未查询（原因见桥接项）')),
+  };
+  if (Array.isArray(listMods?.mods)) {
+    for (const m of listMods.mods) {
+      if (!m.enabled) continue;
+      const issues = [];
+      if (m.hasOrderingIssues) issues.push('hasOrderingIssues=true');
+      if (Array.isArray(m.unsatisfiedDependencies) && m.unsatisfiedDependencies.length) {
+        issues.push(`前置未满足：${m.unsatisfiedDependencies.join(', ')}`);
+      }
+      if (issues.length) loadOrder.orderingIssues.push(`${m.packageId ?? m.name ?? '?'}：${issues.join('；')}`);
+    }
+    mods.loadedInSession = listMods.mods
+      .filter((m) => m.loadedInSession)
+      .map((m) => m.packageId ?? m.name ?? '?');
+    mods.activeModsCountFromGame = listMods.activeCount ?? null;
+  }
+
+  // 能力：清单文件决定「该有的有没有」，桥接决定「真的能不能调」
+  const activeIds = new Set((active.ids ?? []).map((id) => id.toLowerCase()));
+  const characterEditor = activeIds.has('void.charactereditor');
+  const ceToolCount = gameFacts?.ceToolCount ?? null;
+  const capabilities = {
+    gameLinkEvents: activeIds.has('dsh.gamelink'),
+    characterEditor,
+    ceToolCount,
+    toolCount: gameFacts?.toolCount ?? null,
+    ceProbeNote: !characterEditor
+      ? `底座缺 void.charactereditor：ce/* 工具不会存在（漏它的表现就是「工具凭空消失」）；跑 node src/cli.js start --profile ${profile} 会自动按 base-mods.json 补齐`
+      : ceToolCount === null
+        ? `本 profile 的 mod 清单里有 CharacterEditor；ce/* 能不能调要连桥接才知 —— 起了游戏后跑 node src/cli.js tools ce --profile ${profile}`
+        : `ce/* 工具 ${ceToolCount} 个（本次实测清单，可复跑 node src/cli.js tools ce --profile ${profile}）`,
+  };
+
+  // 时间：强制暂停窗口会让 play_for 静默跑 0 tick，所以它是「推时间」的前置事实
+  const status = gameFacts?.bridgeStatus ?? null;
+  const ui = gameFacts?.uiState ?? null;
+  const time = {
+    windowsForcePause: knownOrUnknown(ui?.windowsForcePause),
+    timeSpeed: knownOrUnknown(status?.state?.timeSpeed),
+    paused: knownOrUnknown(status?.state?.paused),
+    policyMaxSpeed: 'unknown',
+    policyMaxSpeedWhy:
+      '速度上限是 AGENTS.md 硬约束 6 的约定，代码里没有机器可读的策略文件 —— 这里不替文档猜值',
+    source: status || ui ? 'rimbridge/get_bridge_status + rimworld/get_ui_state' : '未连桥接（unknown）',
+  };
+
+  // 限制：tick/帧是引擎事实（实测 600 tick ↔ 600 帧）；tick/s 因帧率而异，env-check 不推时间去测
+  const limits = {
+    stepGameTicksTicksPerFrame: 1,
+    measuredTicksPerSecond: null,
+    measuredTicksPerSecondWhy: 'env-check 不推时间（那会改游戏状态）；要标定就自己跑 step_game_ticks 计时',
+  };
+
+  const registry = summarizeRegistry(loadRegistry());
+
+  // 阻塞项：每条都要写成「人能照着做的一句话」，只写 false 等于没诊断
+  if (baseMods.missingFile) {
+    blockers.push(
+      `没有 ${baseModsFile(WS)}：底座清单缺失，start 会跳过自动补齐 —— 先恢复这份文件（它是全项目唯一真源）。`,
+    );
+  }
+  if (mods.baseModsMissing.length) {
+    blockers.push(
+      `底座缺 ${mods.baseModsMissing.length} 个：${mods.baseModsMissing.join(', ')} —— 跑 node src/cli.js start --profile ${profile}` +
+        '（start 会按 base-mods.json 自动补齐，只加不删）。',
+    );
+  }
+  if (active.count === null && profileExists) {
+    blockers.push(`读不到 ${active.file}（${active.reason}）—— 先 node src/cli.js start --profile ${profile} 一次让它生成。`);
+  }
+  if (!processFacts.running) {
+    blockers.push(
+      `profile「${profile}」没有确认在运行的实例：要开测先跑 node src/cli.js start --profile ${profile}` +
+        '（会真起游戏、抢一次窗口焦点；先确认没在玩你自己那一局）。',
+    );
+    if (bridge.reachable) {
+      blockers.push(
+        `${bridge.host}:${bridge.port} 上有人答话，但本 profile 没有可信记录 —— 那是别的实例，别连它：` +
+          `先 node src/cli.js status --profile ${profile} 看清。`,
+      );
+    }
+  } else if (!bridge.resolutionOk) {
+    blockers.push(
+      `桥接归属校验未通过：${resolved.reason} —— 先 node src/cli.js status --profile ${profile} 看清判据；别拿别的 profile 的端口硬连。`,
+    );
+  } else if (!bridge.reachable) {
+    blockers.push(
+      `桥接不可达 ${bridge.host}:${bridge.port}（${probe.reason ?? '握手失败'}）：游戏可能还没到写日志那一步 —— ` +
+        `用 node src/cli.js live --profile ${profile} --until 'kind=colony_started' 等事件，别用固定 sleep。`,
+    );
+  }
+  if (probe.reachable && !loadOrder.queried) {
+    blockers.push(
+      `加载顺序查不到（${loadOrder.reason ?? '未知原因'}）—— 单独读一次：node src/cli.js call rimworld/list_mods --profile ${profile}`,
+    );
+  }
+  if (loadOrder.restartRequired) {
+    blockers.push(
+      'mod 配置改动还没在运行中的实例里生效（restartRequired=true）：先 node src/cli.js stop --profile ' +
+        `${profile} 再 start --profile ${profile}。`,
+    );
+  }
+  if (mods.activeModsCountFromGame !== undefined && active.count !== null && mods.activeModsCountFromGame !== active.count) {
+    blockers.push(
+      `运行中的实例激活了 ${mods.activeModsCountFromGame} 个 mod，而 ModsConfig.xml 里是 ${active.count} 个 —— ` +
+        '配置在启动后被改过，重启（stop 再 start）才会生效。',
+    );
+  }
+  if (loadOrder.orderingIssues.length) {
+    blockers.push(
+      `有 ${loadOrder.orderingIssues.length} 个 mod 的报告加载顺序问题（前 3 条：${loadOrder.orderingIssues.slice(0, 3).join(' | ')}）—— ` +
+        `完整的看 node src/cli.js call rimworld/list_mods --profile ${profile} 的 hasOrderingIssues/unsatisfiedDependencies。`,
+    );
+  }
+  if (time.windowsForcePause === true) {
+    blockers.push(
+      '有窗口在强制暂停（windowsForcePause=true）：play_for 会静默跑 0 tick —— 先 node src/cli.js call foodprobe/close_force_pause --profile ' +
+        `${profile}，回读 windowsForcePause=false 再推时间。`,
+    );
+  }
+  if (registry.errors.length) {
+    blockers.push(
+      `条件登记表有 ${registry.errors.length} 处错误：node src/cli.js wait --list 看明细（文件 ${registry.file}）。`,
+    );
+  }
+
+  return {
+    profile,
+    generatedAt: new Date().toISOString(),
+    verdict: { ok: blockers.length === 0, blockers },
+    process: processFacts,
+    bridge,
+    mods,
+    loadOrder,
+    capabilities,
+    time,
+    paths,
+    limits,
+    registry,
+  };
+}
+
+/** 中文标签在终端里占两列：按显示宽度补空格，几行摘要才对得齐 */
+function padLabel(label, width) {
+  const cols = [...label].reduce((n, ch) => n + (/[\u3000-\u9fff\uff00-\uffef]/.test(ch) ? 2 : 1), 0);
+  return label + ' '.repeat(Math.max(0, width - cols));
+}
+
+/** env-check 默认输出：先结论，再几行事实，最后是可照做的阻塞项 */
+function printEnvCheck(report) {
+  const { verdict } = report;
+  const shown = (value) => (value === null || value === undefined ? '-' : String(value));
+  const row = (label, text) => console.log(`  ${padLabel(label, 9)}${text}`);
+  console.log(`env-check profile=${report.profile}  ${report.generatedAt}`);
+  console.log(
+    `  结论     ${verdict.ok ? '✓ 没有阻塞项' : `✗ ${verdict.blockers.length} 个阻塞项（退出码 1，不是崩溃）`}`,
+  );
+  row(
+    '进程',
+    `running=${shown(report.process.running)} pid=${shown(report.process.pid)} ` +
+      `identityOk=${shown(report.process.identityOk)} cmdlineHasProfile=${shown(report.process.cmdlineHasProfile)} ` +
+      `runningState=${shown(report.process.runningState)}`,
+  );
+  row(
+    '桥接',
+    `reachable=${shown(report.bridge.reachable)} resolutionOk=${shown(report.bridge.resolutionOk)} ` +
+      `${shown(report.bridge.host)}:${shown(report.bridge.port)} source=${shown(report.bridge.source)}`,
+  );
+  if (report.bridge.reason) row('', `原因：${report.bridge.reason}`);
+  row(
+    'mods',
+    `activeModsCount=${shown(report.mods.activeModsCount)} 底座 ${report.mods.baseModsRequired.length} 个、` +
+      `缺 ${report.mods.baseModsMissing.length} 个` +
+      `${report.mods.baseModsNote ? `（${report.mods.baseModsNote}）` : ''} ` +
+      `本次已加载=${report.loadOrder.queried ? `${report.mods.loadedInSession.length} 个` : 'unknown（未连桥接）'}`,
+  );
+  row(
+    '加载顺序',
+    `queried=${shown(report.loadOrder.queried)} restartRequired=${shown(report.loadOrder.restartRequired)} ` +
+      `问题 ${report.loadOrder.orderingIssues.length} 条`,
+  );
+  if (report.loadOrder.reason) row('', `原因：${report.loadOrder.reason}`);
+  row(
+    '能力',
+    `GameLink 事件=${shown(report.capabilities.gameLinkEvents)} CharacterEditor=${shown(report.capabilities.characterEditor)} ` +
+      `ce/* 工具=${shown(report.capabilities.ceToolCount)} 工具总数=${shown(report.capabilities.toolCount)}`,
+  );
+  row(
+    '时间',
+    `windowsForcePause=${shown(report.time.windowsForcePause)} timeSpeed=${shown(report.time.timeSpeed)} ` +
+      `paused=${shown(report.time.paused)} 速度上限=${shown(report.time.policyMaxSpeed)}（AGENTS.md 硬约束 6）`,
+  );
+  row('登记表', `${report.registry.scenarios} 个场景 ${JSON.stringify(report.registry.byLevel)}，错误 ${report.registry.errors.length} 处`);
+  row('路径', `profile=${report.paths.profileDir}`);
+  row('', `截图=${report.paths.screenshotsDir}`);
+  row('', `事件=${report.paths.eventsFile}`);
+  row('', `记录=${report.paths.recordPath}`);
+  row('限制', `step_game_ticks=${report.limits.stepGameTicksTicksPerFrame} tick/帧；tick/s=${report.limits.measuredTicksPerSecond === null ? '未测（不推时间）' : report.limits.measuredTicksPerSecond}`);
+  if (verdict.blockers.length) {
+    console.log('  阻塞项（照着做就能清掉）：');
+    for (const b of verdict.blockers) console.log(`    - ${b}`);
+  } else {
+    console.log('  写测试时按上表这些数，不要按文档里写死的旧数字（机器一更新它们就过期）。');
+  }
+}
+
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   const { positional, flags } = parseArgs(rest);
+
+  /**
+   * `--help` 必须在任何动作之前拦下来：以前全文件没有 help 处理，`start --help` 直接把
+   * 「查参数」当成了「起游戏」（561 mod 满配，2026-10-24 事故）。这里统一拦，一律不改任何状态。
+   */
+  if (flags.help !== undefined || cmd === '--help' || cmd === '-h' || cmd === 'help' || positional[0] === '-h') {
+    console.log(helpTextFor(cmd, positional));
+    return;
+  }
+
+  // 会真起/真关游戏的命令不接受「猜一个 profile」——默认值 vanilla 正是那次事故的放大器
+  requireExplicitProfile(cmd, flags);
+
   const profile = flags.profile || 'vanilla';
 
   switch (cmd) {
@@ -199,15 +774,7 @@ async function main() {
           notes: OPERATOR_NOTES,
         },
         sources: SOURCE_SPECS,
-        registry: {
-          file: CONDITIONS_FILE,
-          scenarios: Object.keys(registry.scenarios).length,
-          byLevel: listScenarios(registry).reduce((acc, s) => {
-            acc[s.verifiedLevel] = (acc[s.verifiedLevel] ?? 0) + 1;
-            return acc;
-          }, {}),
-          errors: registry.errors,
-        },
+        registry: summarizeRegistry(registry),
         gameTools: '游戏内可用工具随 mod 变：node src/cli.js tools [关键词]；单个参数：describe <工具名>',
         docs: {
           usage: 'docs/cli-wait-用法-20261024.md',
@@ -283,6 +850,19 @@ async function main() {
           );
         }
       }
+      break;
+    }
+
+    case 'env-check': {
+      /**
+       * 每次开测先跑：把「本次实测环境事实」钉进 agent 自己的上下文，
+       * 替掉文档里写死的环境数字（机器一更新，写死的「事实」就成了最大的坑）。
+       * 只读、**绝不启动游戏**；桥接不通只降级相关项，不整条崩。
+       */
+      const report = await collectEnvCheck(profile);
+      if (flags.json !== undefined) out(report);
+      else printEnvCheck(report);
+      process.exitCode = report.verdict.ok ? 0 : 1;
       break;
     }
 
@@ -406,12 +986,39 @@ async function main() {
               `${t.name} ${t.description || ''}`.toLowerCase().includes(kw),
             )
           : tools;
-        console.log(`游戏: ${welcome?.app?.name} ${welcome?.app?.version}  agentId=${welcome?.agentId}`);
-        console.log(`能力方法: ${(welcome?.capabilities?.methods || []).join(', ')}`);
-        console.log(`工具总数: ${tools.length}${kw ? `（匹配 "${kw}" 的 ${filtered.length} 个）` : ''}\n`);
-        for (const t of filtered) {
+        /**
+         * 匹配集合不变（还是「名字+描述」子串），只是**分组显示**：
+         * `tools ce` 曾一次匹配 63 个，而真正的 `ce/*` 只有 9 个 —— 混在一行里读的人会以为
+         * CE 有 63 个工具，然后按错的计数写结论。名字命中才是「这个关键词的工具」。
+         */
+        const nameHits = kw ? filtered.filter((t) => String(t.name ?? '').toLowerCase().includes(kw)) : [];
+        const descOnly = kw ? filtered.filter((t) => !String(t.name ?? '').toLowerCase().includes(kw)) : [];
+        const printTool = (t) => {
           const desc = (t.description || '').replace(/\s+/g, ' ').slice(0, 90);
           console.log(`  ${t.name}${desc ? '  — ' + desc : ''}`);
+        };
+        console.log(`游戏: ${welcome?.app?.name} ${welcome?.app?.version}  agentId=${welcome?.agentId}`);
+        console.log(`能力方法: ${(welcome?.capabilities?.methods || []).join(', ')}`);
+        console.log(
+          `工具总数: ${tools.length}` +
+            (kw
+              ? `（匹配 "${kw}" 的 ${filtered.length} 个 = 名字命中 ${nameHits.length} + 仅描述命中 ${descOnly.length}）`
+              : '') +
+            '\n',
+        );
+        if (!kw) {
+          for (const t of filtered) printTool(t);
+        } else if (!filtered.length) {
+          console.log(`  （没有任何工具的名字或描述里含 "${kw}"）`);
+        } else {
+          if (nameHits.length) {
+            console.log(`—— 名字命中（${nameHits.length}），这些才是带 "${kw}" 的工具 ——`);
+            for (const t of nameHits) printTool(t);
+          }
+          if (descOnly.length) {
+            console.log(`${nameHits.length ? '\n' : ''}—— 仅描述命中（${descOnly.length}），名字里没有 "${kw}"，通常不是你要的 ——`);
+            for (const t of descOnly) printTool(t);
+          }
         }
       });
       break;
@@ -466,6 +1073,18 @@ async function main() {
         await assertToolNameExists(client, name);
         const res = await client.callTool(name, args, { timeoutMs: callTimeoutMs });
         out(res);
+        /**
+         * 动作失败 ≠ 命令失败：载荷照样全打（诊断要看 operation/message），但退出码必须非 0。
+         * 不改的话「success:false + exit 0」会被照着写成假通过（2026-10-25 试跑缺陷 A2）。
+         */
+        if (res && res.success === false) {
+          const detail = toolFailureText(res);
+          console.error(
+            `[call] 「${name}」返回 success:false${detail ? `：${detail}` : '（载荷里没有 message/exception）'}；` +
+              '退出码 1 —— 命令跑通了但动作失败了，别按 exit 0 写成通过。',
+          );
+          process.exitCode = 1;
+        }
       }, { requestTimeoutMs: callTimeoutMs });
       break;
     }
@@ -671,10 +1290,11 @@ async function main() {
         : `--args '${JSON.stringify(args)}'`;
       const printed = evidenceForPrint(evidence);
       if (printed.sampleTruncated && probeName) {
-        // 采样截断只发生在打印层：真载荷动辄 8 KB，一次超时就能吃掉子代理半个上下文
+        // 采样截断只发生在打印层：真载荷动辄 8 KB，一次超时就能吃掉子代理半个上下文。
+        // 复跑命令必须带 --profile：不带就会去打默认的 vanilla（561 mod 那个），白等一轮。
         console.error(
           `[wait] 采样已截断（只印前 ${SAMPLE_PRINT_LIMIT} 字符）；` +
-            `要看完整载荷：node src/cli.js call ${probeName} ${argsHint}`,
+            `要看完整载荷：node src/cli.js call ${probeName} ${argsHint} --profile ${profile}`,
         );
       }
       if (result.ok) {
@@ -687,14 +1307,28 @@ async function main() {
         if (result.missingPath) {
           // 字段一直没出现 ≠ 值不匹配：前者多半是还没进图，后者要改条件。分开说才不会让人去改错东西。
           const m = result.missingPath;
+          // available 的截断与「共 N 个」摘要在 condition.js 里一次做完，这里只照原样印，不再二次截断（A5）
           console.error(
             `路径 ${m.path} 从头到尾都没取到；断在 ${m.brokenAt} 这一段，` +
               `那一层的可用字段：${m.available.length ? m.available.join(', ') : '（空）'}`,
           );
-          console.error(
-            '通常是还没进图（先等 {"path":"result.state.playable","equals":true}），或字段名写错；' +
-              '这条不是参数错误，是条件一直没成立。',
-          );
+          if (looksLikeToolErrorPayload(m.available, result.sample)) {
+            /**
+             * 第三种来源（2026-10-25 试跑缺陷 B2）：探针**自己**报错了。
+             * 此时载荷是工具的错误信封（success/message/exception/operation），「字段取不到」只是后果；
+             * 按前两种去「等进图 / 改字段名」会白等满一轮，还把问题改到别的字段上。
+             */
+            console.error(
+              '这次是探针自己报错了（那层字段是 success/message/exception/operation 这套错误信封），' +
+                '不是「还没进图」，也不是字段名写错。下一步读它的 message：' +
+                `node src/cli.js call ${probeName ?? '<探针>'} ${argsHint} --profile ${profile}`,
+            );
+          } else {
+            console.error(
+              '通常是还没进图（先等 {"path":"result.state.playable","equals":true}），或字段名写错；' +
+                '这条不是参数错误，是条件一直没成立。',
+            );
+          }
         }
         console.error(JSON.stringify(printed, null, 2));
         process.exitCode = 2;
@@ -748,26 +1382,8 @@ async function main() {
     }
 
     default:
-      console.log(
-        [
-          'RimWorld 自动测试桥（每条命令都接受 --profile <名字>，默认 vanilla）',
-          '',
-          '  start    启动隔离测试实例并等待桥接就绪（--port N 显式指定端口，否则自动挑 5174..5183 里空闲的）',
-          '  status   查看该 profile 的进程 / 上次启动 / 日志中的桥接信息',
-          '  bridge   只打印该 profile 的桥接端口与 token',
-          '  tools    列出游戏暴露的工具（可加关键词过滤）',
-          '  describe 显示单个工具的完整参数 schema',
-          '  dump-tools  把所有工具 schema 导出到 runs/tools.json',
-          '  call     调用一个游戏内工具',
-          '  wait     等条件成立（反复调探针 + 条件 JSON；0 命中 / 2 超时 / 1 其它），见 docs/cli-wait-用法-20261024.md',
-          '  atoms    原子能力清单（算子 / 四类来源的快照字段 / 登记表统计）—— 写测试前先看这个',
-          '  base-mods 底座 mod 清单（base-mods.json）；带 --profile <p> 只报告该 profile 缺哪几个，不写文件',
-          '  logs     打印该 profile 的 Player.log 尾部',
-          '  live     等游戏侧事件（DSH_GameLink 的 NDJSON 或 Player.log），命中即返回',
-          '  stop     关闭该 profile 的测试实例（--force 才会强杀全机 RimWorld，破坏性）',
-          '  smoke    跑冒烟测试闭环',
-        ].join('\n'),
-      );
+      // 与 `--help` 打同一份总表：两处各写一份迟早漂移（`node src/cli.js <子命令> --help` 看单条用法）
+      console.log(GENERAL_USAGE);
   }
 }
 

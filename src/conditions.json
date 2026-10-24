@@ -10,7 +10,7 @@
         "path": "result.state.playable",
         "equals": true
       },
-      "description": "地图已载入、可以下操作；所有动作类用例的第一道门。",
+      "description": "地图已载入、可以下操作；只判 result.state.playable，不判 hasCurrentGame —— 所以它只是「便宜的第一道门」：要确保真的在局内（不是残留的旧游戏对象），用「进图且可玩」。",
       "evidence": "docs/cli-wait-实测-20261024.md:19 用例 A（真机 exit 0，attempts=1，elapsedMs=5）",
       "verifiedLevel": "wait-verified",
       "timeoutMs": 60000
@@ -108,11 +108,11 @@
       "probe": "rimworld/get_ui_state",
       "args": {},
       "condition": {
-        "path": "result.windowCount",
-        "equals": 0
+        "path": "result.nonImmediateDialogWindowOpen",
+        "equals": false
       },
-      "description": "截图/长跑前等屏幕上没有窗口挡着。",
-      "evidence": "docs/自动化测试-变化驱动设计.md:1097（get_ui_state 25 字段已确证，字段实测）；docs/cli-wait-用法-20261024.md:128-133 的 get_screen_targets 路径未实测（:152），docs/cli-wait-实测-20261024.md:52 记 windowCount 归零未确证",
+      "description": "截图/长跑前等屏幕上没有会挡住的对话框；判据 = result.nonImmediateDialogWindowOpen 为 false（不是 windowCount=0：进图后屏幕上恒有 2 个 Verse.ImmediateWindow，windowCount 永远归不了零）。",
+      "evidence": "条件已改、未真机复验（原条件 result.windowCount equals 0 在真机永不成立）。反证 + 判据同一次采样：runs/2026-10-25-skill试跑/A-CE-时间-截图/12-wait-无模态窗口.json（旧条件 attempts=18、elapsedMs=3681、exit 2；同一载荷 windowCount=2 且 nonImmediateDialogWindowOpen=false、两个窗口都是 Verse.ImmediateWindow/forcePause:false）与 runs/2026-10-25-skill试跑/A-CE-时间-截图/30-screenshot-paused-synced.json（截图载荷的 screenTargets.uiState 同样 windowCount=2、nonImmediateDialogWindowOpen=false、topWindowType=Verse.ImmediateWindow）；字段见 docs/自动化测试-变化驱动设计.md:1097（25 字段含 nonImmediateDialogWindowOpen）",
       "verifiedLevel": "field-verified",
       "timeoutMs": 60000
     },
@@ -125,7 +125,7 @@
         "equals": true
       },
       "description": "set_hover_target→click_ui_target 之后确认浮菜单真的弹出来。",
-      "evidence": "SKILL.md:328-330（判据是回读 floatMenuOpen:true，不是 changed:true，字段实测）；字段见 docs/自动化测试-变化驱动设计.md:1097",
+      "evidence": "旧引用「SKILL.md 第 328-330 行」已失效（旧 skill .dsh/skills/rimworld-auto-test 已删，其第 349 行才是这条判据）；现出处 docs/共享单车-机制真值表.md:503（click_ui_target 单独调会把 changed:true 骗到手而 floatMenuOpen 仍 false，必须先 set_hover_target）与 docs/食物自动化-技术侦察.md:374（execute_gizmo 后 floatMenuOpen=true）；字段见 docs/自动化测试-变化驱动设计.md:1097",
       "verifiedLevel": "field-verified",
       "timeoutMs": 60000
     },
@@ -138,7 +138,7 @@
         "equals": false
       },
       "description": "play_for/step_game_ticks 长跑之前必等，否则静默跑 0 tick。",
-      "evidence": "SKILL.md:141 与 :145-158（已知地雷，字段实测）；字段见 docs/自动化测试-变化驱动设计.md:1097；条件未跑",
+      "evidence": "旧引用「SKILL.md 第 141 行与第 145-158 行」已失效（旧 skill .dsh/skills/rimworld-auto-test 已删，其第 160/172 行才是这条）；现出处 docs/测试SOP/推时间.md:18（为 true 时 play_for 静默 0 tick、success 有时仍为 true）与 .dsh/skills/rimworld-auto-test-closed-loop/SKILL.md:66（推时间前先确认 windowsForcePause=false）；真机 windowsForcePause=true 见 docs/RimWorld-工具耗时与暂停行为测量-20261024.md:13；字段见 docs/自动化测试-变化驱动设计.md:1097；条件未跑",
       "verifiedLevel": "field-verified",
       "timeoutMs": 60000
     },
@@ -164,7 +164,7 @@
         "equals": 0
       },
       "description": "unforbid_all 之后等解禁真的生效，别信 success。",
-      "evidence": "SKILL.md:138（开局实测 54 件禁取，判据回读 remaining:0）与 :306（前置清单第 1 步，字段实测）",
+      "evidence": "旧引用「SKILL.md 第 138 行与第 306 行」已失效（旧 skill .dsh/skills/rimworld-auto-test 已删，其第 325 行才是这条）；现出处 docs/共享单车-机制真值表.md:502（调试殖民地开局地面资源默认全禁 = 54 件，unforbid_all 后回读 remaining:0）与 docs/生产自动化-扩展需求.md:20-34（同一事实的早期记录）；条件未跑，只验过字段有值",
       "verifiedLevel": "field-verified",
       "timeoutMs": 60000
     },
@@ -177,7 +177,7 @@
         "contains": "Building_"
       },
       "description": "click_cell 选工作台时先等『选中的是个建筑』再做 bill。",
-      "evidence": "SKILL.md:307 与 :479（selectedObjects[0].type 应为 Building_*，字段实测）；contains 算子见 docs/cli-wait-用法-20261024.md:82",
+      "evidence": "旧引用「SKILL.md 第 307 行与第 479 行」已失效（旧 skill .dsh/skills/rimworld-auto-test 已删，其第 326 行才是这条，第 479 行讲的是 CE 面板取带）；现出处 docs/共享单车-机制真值表.md:496（真机 selectedObjects[0].type = 类名「BikeProbe.MinifiedBike」、id/inspectString 同格可取）与 docs/RIMBRIDGE-技巧手册.md:137（选中语义走 get_selection_semantics，inspect 文本在 selectedObjects[].inspectString）；注意 type 的字符串格式没有工具手册定版，contains「Building_」只对原版类名成立；contains 算子见 docs/cli-wait-用法-20261024.md:82",
       "verifiedLevel": "field-verified",
       "timeoutMs": 60000
     },
@@ -188,7 +188,7 @@
         "greaterThanOrEqual": 1
       },
       "description": "不轮询桥接，等游戏侧报告进图（只报一次）。",
-      "evidence": "docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md:443-454（§4.2 作者自标『没在真机上跑过』）；kind 语义见 SKILL.md:69",
+      "evidence": "docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md:443-454（§4.2 作者自标『没在真机上跑过』）；kind 语义见 docs/等待机制-事件驱动-20261017.md:24（colony_started = 首次出现玩家主基地地图、只报一次；旧引用「SKILL.md 第 69 行」已失效，旧 skill .dsh/skills/rimworld-auto-test 的 kind 表在第 71-74 行）",
       "verifiedLevel": "inferred",
       "timeoutMs": 180000,
       "fromNow": false,

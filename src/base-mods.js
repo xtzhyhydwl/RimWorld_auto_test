@@ -109,26 +109,84 @@ function planBaseMods({ profileDir, baseMods }) {
   return { file, xml, active, already, missing };
 }
 
+/** `<activeMods>` 段的默认缩进（真 profile 由游戏自己写成 4 空格） */
+const DEFAULT_MOD_INDENT = '    ';
+
 /**
- * 把缺的 `<li>` 按行插到 `</activeMods>` 之前（每行缩进 4 空格）。
+ * 把 `<activeMods>` 重排成「底座在前 + 其余保持原相对顺序」，顺带补进缺的 `<li>`。
  *
- * 为什么用文本插入而不是 XML 序列化器：序列化器会把整个文件重排（属性引号、
- * 自闭合标签、knownExpansions 的位置都会变），真 profile 的 diff 会炸成整文件，
- * 而这种改动只该多出几行。
+ * 目标顺序 = `[base-mods.json 里的项，按该文件顺序]` + `[原有条目里不属于底座的，保持原顺序]`。
+ * 缺的项直接落在它该在的底座位置上（不再一律追加到段末）。
+ *
+ * 为什么必须重排、而不只是追加（**有意的行为变更**）：RimWorld 按 `<activeMods>` 的顺序加载，
+ * 「Core → 官方 DLC → 其它 mod」是唯一能工作的顺序。旧实现把缺的 `<li>` 一律插到 `</activeMods>`
+ * 之前，于是补进来的 5 个 DLC 会排在所有非官方 mod **后面** —— 按 DLC 内容写的 mod 会在 DLC 之前
+ * 加载（拿不到那些 Def，表现为静默失效或红字），而清单本身看不出错误。
+ * 代价：已有 profile 的 activeMods 顺序会被改动一次（每条 packageId 不变，只是位置变）。
+ *
+ * 幂等：算出来的顺序与文件里已有的完全一致时，**原样返回传进来的字符串**（调用方据此不写文件）。
+ * 没有 `<activeMods>` 段时也原样返回 —— 不猜位置。
+ * 用文本重排而不是 XML 序列化器：序列化器会把整个文件重排（属性引号、自闭合标签、
+ * knownExpansions 的位置都会变），真 profile 的 diff 会炸成整文件。
  */
-function insertBaseMods(xml, missing) {
-  const at = xml.indexOf('</activeMods>');
-  const head = xml.slice(0, at);
-  const tail = xml.slice(at);
-  const lines = missing.map((packageId) => `    <li>${packageId}</li>`).join('\n');
-  const lineStart = head.lastIndexOf('\n') + 1;
-  const closingIndent = head.slice(lineStart);
-  if (/^[ \t]*$/.test(closingIndent)) {
-    // 常见形态：`</activeMods>` 独占一行、前面是它的缩进 —— 插在这行之前，闭标签原样保留
-    return head.slice(0, lineStart) + lines + '\n' + closingIndent + tail;
+export function insertBaseMods(xml, baseMods) {
+  const section = /<activeMods>([\s\S]*?)<\/activeMods>/.exec(xml);
+  if (!section) return xml;
+  const inner = section[1];
+  const eol = xml.includes('\r\n') ? '\r\n' : '\n';
+
+  // 每个已存在条目连它这一行的缩进一起记住：重排时原样搬，不重排格式（diff 只该是行位置变化）
+  const entries = [];
+  for (const m of inner.matchAll(/<li>([^<]*)<\/li>/g)) {
+    const id = m[1].trim();
+    if (!id) continue;
+    const before = inner.slice(inner.lastIndexOf('\n', m.index) + 1, m.index);
+    entries.push({ id, text: m[0], indent: /^[ \t]*$/.test(before) ? before : null });
   }
-  // 单行写的 ModsConfig：没有可用的缩进，退化成「新起一行、闭标签按两空格收尾」
-  return head + '\n' + lines + '\n  ' + tail;
+
+  const baseIds = [];
+  const baseKeys = new Set();
+  for (const raw of Array.isArray(baseMods) ? baseMods : []) {
+    const id = String(raw ?? '').trim();
+    if (!id || baseKeys.has(id.toLowerCase())) continue;
+    baseKeys.add(id.toLowerCase());
+    baseIds.push(id);
+  }
+  if (!baseIds.length) return xml; // 没有清单就没有「该在前面的东西」
+
+  const ordered = [];
+  const consumed = new Set();
+  for (const id of baseIds) {
+    const key = id.toLowerCase();
+    const at = entries.findIndex((e, i) => !consumed.has(i) && e.id.toLowerCase() === key);
+    if (at >= 0) {
+      consumed.add(at);
+      ordered.push(entries[at]);
+    } else {
+      ordered.push({ id, text: `<li>${id}</li>`, indent: null });
+    }
+  }
+  // 底座之外的条目原样留在后面；底座项的重复行也一并留在这里（只加不删，不替 profile 主人做减法）
+  entries.forEach((e, i) => {
+    if (!consumed.has(i)) ordered.push(e);
+  });
+
+  if (ordered.length === entries.length && ordered.every((e, i) => e.text === entries[i].text)) {
+    return xml;
+  }
+
+  const indent = entries.find((e) => e.indent !== null)?.indent ?? DEFAULT_MOD_INDENT;
+  const closingIndent = inner.slice(inner.lastIndexOf('\n') + 1);
+  // 段里若有 `<li>` 以外的东西（注释等），原样留在段末，不因为重排把它吃掉
+  const leftover = inner.replace(/<li>[^<]*<\/li>/g, '').trim();
+  const body =
+    eol +
+    ordered.map((e) => (e.indent === null ? indent : e.indent) + e.text).join(eol) +
+    (leftover ? eol + leftover : '') +
+    eol +
+    (/^[ \t]*$/.test(closingIndent) ? closingIndent : DEFAULT_MOD_INDENT.slice(0, 2));
+
+  return `${xml.slice(0, section.index)}<activeMods>${body}</activeMods>${xml.slice(section.index + section[0].length)}`;
 }
 
 /**
@@ -142,16 +200,25 @@ export function diffBaseMods({ profileDir, baseMods }) {
 }
 
 /**
- * 补齐底座 mod（幂等，只加不删）。返回 `{ added, already, modsConfigPath }`；
+ * 补齐底座 mod（幂等，只加不删；顺带把底座项排到最前面，理由见 `insertBaseMods`）。
+ * 返回 `{ added, already, reordered, modsConfigPath }`；
  * ModsConfig.xml 不存在或没有 `<activeMods>` 时不写文件，返回 `{ added: [], already: [], skipped }`。
+ *
+ * **变才写**：`insertBaseMods` 在顺序已经规范时原样返回，所以这里可以直接比字符串 ——
+ * 没变化就不动文件（每次 start 都摸一遍文件会把 mtime、git 状态、用户的备份工具全都弄脏）。
  */
 export function ensureBaseMods({ profileDir, baseMods }) {
   const plan = planBaseMods({ profileDir, baseMods });
   if (plan.skipped) return { added: [], already: [], skipped: plan.skipped };
-  if (!plan.missing.length) {
-    return { added: [], already: plan.already, modsConfigPath: plan.file };
-  }
+  const nextXml = insertBaseMods(plan.xml, baseMods);
+  const changed = nextXml !== plan.xml;
   // 'utf8' 写出去就是无 BOM；游戏与 Read 工具都按 UTF-8 读这份 XML
-  fs.writeFileSync(plan.file, insertBaseMods(plan.xml, plan.missing), 'utf8');
-  return { added: plan.missing, already: plan.already, modsConfigPath: plan.file };
+  if (changed) fs.writeFileSync(plan.file, nextXml, 'utf8');
+  return {
+    added: plan.missing,
+    already: plan.already,
+    // 只重排、没新增：启动器现在只打印 `added`，这一项留给后续的调用方/report 用
+    reordered: changed && plan.missing.length === 0,
+    modsConfigPath: plan.file,
+  };
 }

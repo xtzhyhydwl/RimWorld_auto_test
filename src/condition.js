@@ -19,6 +19,15 @@ const ROOT = 'result';
 /** 路径这一轮取不到（字段还没出现 / 名字写错）——只有 waitFor 认这个 code，见 tryMatch */
 const MISSING_PATH_CODE = 'CONDITION_PATH_MISSING';
 
+/**
+ * 「那层可用字段」最多列几项。
+ *
+ * 为什么不是「列满」：真机上 `state` 有 18 个字段，一行打印太长；但**静默截断**更坏 ——
+ * 2026-10-24 真机出现过 `mapDataReady/currentMapReady/playable` 恰好被截掉，读的人据此
+ * 断定「没有这个字段」，比不打印还误导。所以截断可以，末尾必须带总数（见 availableWithTotal）。
+ */
+const AVAILABLE_PREVIEW_LIMIT = 12;
+
 /** 组合子：节点里只有这一个键，值是子条件（数组或单个节点） */
 const COMBINATORS = ['all', 'any', 'not'];
 /** 叶子算子：与 `path` 并列，值是被比较的目标 */
@@ -215,11 +224,31 @@ function readPath(scope, pathText) {
   return { ok: true, value: cur };
 }
 
+/**
+ * 把「那层可用字段」压成「最多 N 个」；**只在真被截断时**才追加一句总数与取全量的提示。
+ *
+ * 返回值仍是 `string[]`（`missingPath.available` 的形态与语义不变，cli/wait 照旧 `join(', ')`），
+ * 这样**所有**打印这份列表的地方（含 `src\cli.js` 的超时报错）在截断时都会自动带上「还有多少没列」，
+ * 不会各自再实现一遍截断。
+ *
+ * 没截断时不加摘要：字段本来就在眼前，再来一句「共 10 个（还有 0 个未列出）」纯是噪音。
+ */
+function availableWithTotal(available) {
+  if (!available.length) return [];
+  const shown = available.slice(0, AVAILABLE_PREVIEW_LIMIT);
+  const hidden = available.length - shown.length;
+  if (hidden <= 0) return shown;
+  return [
+    ...shown,
+    `…共 ${available.length} 个（还有 ${hidden} 个未列出）；要拿全量先跑 node src/cli.js call <探针> --profile <profile> 看完整载荷`,
+  ];
+}
+
 function missingPathError(pathText, r, scope) {
   const lines = [
     `条件里的路径取不到：${pathText}`,
     `  断在「${r.brokenAt}」这一段；那层的实际内容是 ${r.actualType}，可用字段：${
-      r.available.length ? r.available.slice(0, 12).join(', ') : '（空）'
+      r.available.length ? availableWithTotal(r.available).join(', ') : '（空）'
     }`,
   ];
   const guesses = r.available
@@ -233,7 +262,9 @@ function missingPathError(pathText, r, scope) {
   const err = new Error(lines.join('\n'));
   // 机器可判：waitFor 靠这个 code 把「字段还没出现」降级成「这次没成立」，其它错误照旧抛
   err.code = MISSING_PATH_CODE;
-  err.missingPath = { path: pathText, brokenAt: r.brokenAt, segment: r.segment, available: r.available.slice(0, 12) };
+  // `available` 仍是「那层有哪些字段」的字符串数组（被截断时末尾才带「共 N 个 / 还有 M 个未列出」摘要），
+  // 这样 wait 超时打印时不会把「被截断」误读成「没有这个字段」
+  err.missingPath = { path: pathText, brokenAt: r.brokenAt, segment: r.segment, available: availableWithTotal(r.available) };
   return err;
 }
 

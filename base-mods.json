@@ -1,9 +1,14 @@
 {
   "schema": 1,
-  "description": "所有测试 profile 共用的底座 mod。start 前自动补齐到 profiles/<p>/Config/ModsConfig.xml，只加不删。",
+  "description": "所有测试 profile 共用的底座 mod。start 前自动补齐到 profiles/<p>/Config/ModsConfig.xml，只加不删。顺序即补齐顺序：Harmony 最前、Core 紧随，官方 DLC 按发布顺序排在所有非官方 mod 之前。",
   "mods": [
-    { "packageId": "brrainz.harmony", "why": "绝大多数 mod 的前置" },
-    { "packageId": "ludeon.rimworld", "why": "Core" },
+    { "packageId": "brrainz.harmony", "why": "绝大多数 mod 的前置；必须最靠前" },
+    { "packageId": "ludeon.rimworld", "why": "Core；紧跟 Harmony" },
+    { "packageId": "ludeon.rimworld.royalty", "why": "DLC Royalty（官方第 1 个扩展，按发布顺序紧跟 Core）——底座要「原版 + 全部 DLC」，缺它测出的原版语义不完整" },
+    { "packageId": "ludeon.rimworld.ideology", "why": "DLC Ideology（官方第 2 个扩展，排在 Royalty 之后）；给开局加意识形态/戒律系统，影响小人行为类判据" },
+    { "packageId": "ludeon.rimworld.biotech", "why": "DLC Biotech（官方第 3 个扩展，排在 Ideology 之后）；机械族/基因/儿童会改小人属性与死亡语义" },
+    { "packageId": "ludeon.rimworld.anomaly", "why": "DLC Anomaly（官方第 4 个扩展，排在 Biotech 之后）；异常实体事件会改地图与时间线，测试要不被它干扰就得让它也在场" },
+    { "packageId": "ludeon.rimworld.odyssey", "why": "DLC Odyssey（官方第 5 个扩展，按发布顺序排在所有非官方 mod 之前）；重力/飞船相关系统是目前最新的原版内容" },
     { "packageId": "brrainz.rimbridgeserver", "why": "桥接本体：cli tools/call/wait" },
     { "packageId": "dsh.gamelink", "why": "事件通道：runs/live/<p>.ndjson" },
     { "packageId": "void.charactereditor", "why": "Character Editor：摆/读小人（ce/* 工具依赖它）" },
