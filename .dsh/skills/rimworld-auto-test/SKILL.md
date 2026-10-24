@@ -107,8 +107,21 @@ node src/cli.js wait --profile <p> --source bridge --probe rimbridge/get_bridge_
 node src/cli.js wait --profile <p> --source bridge --probe rimworld/list_colonists --condition-file n.json
 ```
 
+**优先查登记表，再考虑手写条件**（2026-10-24 起）：
+
+```powershell
+node src/cli.js wait --list                          # 有哪些场景、各自证据等级（不连桥接）
+node src/cli.js wait --profile <p> --scenario 已进图可玩
+node src/cli.js wait --profile <p> --scenario 选中的是目标建筑 --arg x=139 --arg z=231
+```
+
+登记表在 `src/conditions.json`：**加场景 = 加一条数据**。场景身份（`source`/`probe`）不许命令行覆盖，
+`--scenario` 之后别再给 `--probe`；`--timeout`/`--interval` 可覆盖。`verifiedLevel` 四档
+（`wait-verified`/`field-verified`/`doc-example`/`inferred`），非 `wait-verified` 会在 stderr 点名提醒「未经真机验证 + 出处」。
+表里没有的场景再走下面的手写路。
+
 - 退出码：`0` 命中（stdout 一个 JSON：`attempts` / `elapsedMs` / `sample`）、`2` 超时（stderr 打条件 + 最后一次采样 + `attempts`）、
-  `1` 参数或算子写错、工具名不存在、桥接没起来。
+  `1` 参数或算子写错、工具名不存在、桥接没起来、场景名不存在。
 - **字段路径取不到 = 条件未成立，继续轮询**（不是参数错）：超时会点名断在哪一段 + 那层有哪些字段，
   所以「还没进图就去等 `colonists`」这类事不会伪装成「条件写错」，而是到点报「路径从头到尾没取到」。
 - **PowerShell 吞引号**：条件和参数一律走文件 —— `--condition-file cond.json` / `--args-file a.json`

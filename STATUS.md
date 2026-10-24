@@ -27,13 +27,16 @@
   - 超时：`gabp.js` 唯一常量 `DEFAULT_REQUEST_TIMEOUT_MS = 60_000`，`cli call` 不再写死 300 s。
   - 记录：[docs/多实例并发安全-修复记录-20261024.md](docs/多实例并发安全-修复记录-20261024.md)、[docs/并发安全-进程身份原语与call超时-修复-20261024.md](docs/并发安全-进程身份原语与call超时-修复-20261024.md)。
   - **未验证**：`startGame` 全链路仍未在真机跑（本轮禁止起停游戏）；`stop --force` 没真杀过；`resolveBridge` 的「活实例全部通过」分支没跑到（写完时游戏已被关掉）。
-- **下一步（P1）**：`--source event/process` 接进同一 `waitFor` 并与 `live.js` 合并；条件登记表落 `src\conditions.json`（路径已由用户拍板）。
-  - **已完成的第一步**：求值器拆到 `src/condition.js`（原子判定，依赖单向），`wait.js` 只剩等待循环 —— `4250ac8`；
-    算子按「原子只做单值判定、聚合进采样层」定边界（设计稿 §2.4，`f4fedbc`），并加了 `contains`（`665ce88`）。
-  - **数据已备好、未落盘**：[docs/条件登记表-候选数据-20261024.md](docs/条件登记表-候选数据-20261024.md) —— 16 条候选
-    （4 条真机 wait 命中过、9 条字段真机读到但条件没跑、3 条推断），含可直接落盘的 `conditions.json` 草稿。
-  - **卡在三个待拍板上**（见设计稿 §6.1）：Q6 `args` 要不要支持运行期参数（不做则带坐标/pawnId/Letter_0 的场景一条都登记不了）、
-    Q7 `verified` 改不改三档、Q8 场景键中文还是 ASCII；另有 Q1 模块切分（推荐 a1）与 Q2 `waitForBridge` 是否搬出 `launcher.js`。
+- **下一步（P1 剩最后一块）**：`--source event/process/bridge-ready` 接进同一 `waitFor`，并与 `live.js` 合并（别留两套判定）。
+  - **已完成**：
+    - 求值器拆到 `src/condition.js`（原子判定，依赖单向），`wait.js` 只剩等待循环 —— `4250ac8`；
+      算子边界「原子只做单值判定、聚合进采样层」见设计稿 §2.4（`f4fedbc`），并加了 `contains`（`665ce88`）。
+    - **条件登记表已落地**：`src\conditions.json` + `wait --scenario / --list / --arg`（`f620d7b`）。
+      16 个场景（4 条真机 wait 验过、9 条字段真机读过、3 条推断），证据分级 `verifiedLevel` 四档，
+      `args` 支持 `$占位` 由 `--arg` 填。用法见 [docs/cli-wait-用法-20261024.md](docs/cli-wait-用法-20261024.md)；
+      候选来源与缺口见 [docs/条件登记表-候选数据-20261024.md](docs/条件登记表-候选数据-20261024.md)。
+  - **仍待用户拍板**（不阻塞已落地部分）：Q1 模块切分（推荐 a1：新增 `wait-sources.js`，`events.js` 以后再说）、
+    Q2 `waitForBridge` 是否搬出 `launcher.js`、Q6/Q7/Q8 已按推荐做成了**可回退的增量**（占位参数、`verifiedLevel` 四档、中文场景键）。
 - **多实例硬规矩（仍然有效）**：发命令前先证明「我连的是自己那一局」——现在可以直接看 `status` 的 `bridgeResolution`，但**不要**用 `logs` 判断自己死活（共用日志会看到别人的行）。`--force`/`--all` 仍会杀用户的局，只有用户明确要求才用。
 - **交接**：[docs/HANDOFF-闭环等待-交接-20261024.md](docs/HANDOFF-闭环等待-交接-20261024.md)。
 
