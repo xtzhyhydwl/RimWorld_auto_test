@@ -7,6 +7,7 @@
  *   node src/cli.js bridge [--profile vanilla]
  *   node src/cli.js tools [关键词] [--profile vanilla]
  *   node src/cli.js call <工具名> ['{"参数":...}'] [--profile vanilla]
+ *   node src/cli.js wait --profile voiced --probe rimworld/list_colonists --condition '{"path":"result.colonists","countEquals":3}' [--timeout 60000]
  *   node src/cli.js logs [行数] [--profile vanilla]
  *   node src/cli.js live --profile voiced --until 'kind=colony_started' [--timeout 120000]
  *   node src/cli.js stop [--profile vanilla] [--force]
@@ -14,7 +15,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { connectGabp } from './gabp.js';
-import { checkToolName } from './toolname.js';
+import { assertToolNameExists } from './toolname.js';
+import { waitFor } from './wait.js';
 import {
   startGame,
   stopGame,
@@ -74,52 +76,58 @@ async function withBridge(profile, fn, opts = {}) {
 }
 
 /**
- * 2026-10-13 新增：`call` 路径的**工具名预校验**，在真正发起调用之前执行。
+ * 读一段 JSON 参数：优先文件，其次行内文本，其次位置参数。
  *
- * 为什么要有它：`tmp/audit-test/AUDIT.md`（2.7 / A8）记录了一次**静默失效**——
- * `scripts/verify-5-actions.mjs:201/220` 调用了**不存在**的工具
- * `rimworld/wait_for_long_event_idle`（该工具只在 `rimbridge/` 命名空间下，
- * 见 `tmp/audit-test/tool-names.txt:26`），失败又被 `.catch(() => {})` 吞掉，
- * 脚本「以为自己等过了」，实际零等待、零记录，报告看起来有效却什么都没发生。
- * 这比固定等待更糟，所以把校验提到 CLI 层：写错名字必须**响亮地失败**。
- *
- * 判据：**优先用实时清单** `client.listTools()`（与 `describe` 分支同一用法）。
- * 拿不到实时清单（桥接未连接 / 查询失败）就**跳过校验**并提示一句——
- * 宁可漏报，也不用 2026-10-03 的 `runs/tools.json` 过期快照硬判，那会产生假失败。
- *
- * 明确**不**做的事：不自动把名字改成「最接近的那个」再继续调用。人必须知道名字写错了。
+ * 为什么要文件这一路：PowerShell 会把 JSON 里的双引号吃掉（`'{"a":1}'` 到手可能已经变形），
+ * 所以 `--args-file` / `--condition-file` 与 `'@文件'` 不是可选项，而是让命令能被
+ * 子代理稳定敲出来的唯一保险；`@` 写法在 PowerShell 里**必须带引号**，否则会被当成 splatting。
  */
-async function assertToolNameExists(client, name) {
-  let names;
-  try {
-    const tools = await client.listTools();
-    names = (tools ?? []).map((t) => t.name);
-  } catch (err) {
-    console.warn(`[警告] 取不到实时工具清单（${err.message}），跳过工具名预校验，直接发起调用。`);
-    return;
-  }
-  if (!names.length) {
-    console.warn('[警告] 实时工具清单为空，跳过工具名预校验，直接发起调用。');
-    return;
-  }
-
-  const r = checkToolName(name, names);
-  if (r.ok) return;
-
-  console.error(`工具名不存在：${name}`);
-  console.error(`  清单来源：实时清单 client.listTools()（共 ${names.length} 个工具）`);
-  if (r.candidates?.length) {
-    console.error('  最接近的候选名（按相似度）：');
-    for (const c of r.candidates) {
-      console.error(`    - ${c.name}${c.namespaceDiffers ? '   ← 子名相同，命名空间不同' : ''}`);
+function readJsonInput({ inline, file, positional, flag }) {
+  const fromFile = (path) => readJsonFile(path);
+  const fromText = (text) => {
+    if (text === true) throw new Error(`${flag} 需要一个值（JSON 文本，或 '@文件.json'）`);
+    try {
+      return text.startsWith('@') ? fromFile(text.slice(1)) : JSON.parse(text);
+    } catch (err) {
+      throw new Error(`${flag} 的 JSON 解析失败：${err.message}\n  收到：${String(text).slice(0, 300)}`);
     }
-  } else {
-    console.error('  最接近的候选名：没找到相近的（名字可能整体写错了）');
-  }
-  for (const h of r.hints ?? []) console.error(`  提示：${h}`);
-  console.error('  本次调用未发起；也不会自动改用上面任何一个候选名。');
-  process.exitCode = 1;
-  throw new Error(`未知工具「${name}」——已阻止调用（不会自动改用候选名）`);
+  };
+
+  if (file !== undefined) return fromFile(file);
+  if (inline !== undefined) return fromText(inline);
+  if (positional !== undefined) return fromText(positional);
+  return undefined;
+}
+
+const WAIT_USAGE = [
+  "用法: node src/cli.js wait --profile <p> --probe <工具名> (--condition '<JSON>' | --condition-file <文件>) [选项]",
+  '',
+  '  --source bridge                      目前只认 bridge（event/process 属 P1 未实现）',
+  '  --probe rimworld/list_colonists      要反复调用的只读工具名',
+  '  --args \'{"currentMapOnly":true}\'      探针参数（也可 --args-file f.json 或 \'@f.json\'）',
+  '  --condition \'{"path":"result.colonists","countEquals":3}\'   条件 JSON（也可 --condition-file f.json 或 \'@f.json\'）',
+  '  --timeout 60000                      等多久（毫秒，默认 60000）',
+  '  --interval 200                       两次采样的间隔（毫秒，默认 200）',
+  '  退出码：0=条件命中 / 2=超时（打印条件+最后采样+attempts+elapsedMs）/ 1=参数错、工具名不存在、桥接未就绪等',
+  '  条件与路径写法见 docs/cli-wait-用法-20261024.md',
+].join('\n');
+
+/** `wait` 打印采样时的上限：真载荷（get_bridge_status 带 companions/operation）能有 8 KB */
+const SAMPLE_PRINT_LIMIT = 2000;
+
+/**
+ * 打印层的采样截断。为什么要截：一次超时把整个载荷糊到 stderr，子代理的上下文就被吃掉
+ * 一大截，而它要看的只是条件涉及的那几个字段；完整载荷随时能用 `call` 重取。
+ * 只截这一层——`src/wait.js` 返回的 `sample` 保持完整，离线测试与调用方都拿原对象。
+ */
+function evidenceForPrint(evidence) {
+  const sampleJson = JSON.stringify(evidence.sample) ?? String(evidence.sample);
+  if (sampleJson.length <= SAMPLE_PRINT_LIMIT) return { ...evidence, sampleTruncated: false };
+  return {
+    ...evidence,
+    sampleTruncated: true,
+    sample: `${sampleJson.slice(0, SAMPLE_PRINT_LIMIT)}…`,
+  };
 }
 
 async function main() {
@@ -299,24 +307,128 @@ async function main() {
     case 'call': {
       const name = positional[0];
       if (!name) throw new Error('用法: node src/cli.js call <工具名> [\'{"参数":...}\'] [--args-file f.json]');
-      let args;
-      if (flags['args-file']) {
-        // 从文件读参数：绕开 PowerShell/bash 对 JSON 双引号的吞引号问题
-        args = readJsonFile(flags['args-file']);
-      } else if (positional[1]) {
-        // 也支持 @file.json 简写
-        args = positional[1].startsWith('@')
-          ? readJsonFile(positional[1].slice(1))
-          : JSON.parse(positional[1]);
-      } else {
-        args = {};
-      }
+      // 从文件读参数：绕开 PowerShell/bash 对 JSON 双引号的吞引号问题
+      const args =
+        readJsonInput({ inline: flags.args, file: flags['args-file'], positional: positional[1], flag: '--args' }) ?? {};
       await withBridge(profile, async (client) => {
         // 2026-10-13：先校验工具名再调用，避免「调用不存在的工具名 + 吞掉错误」的静默失效。
         await assertToolNameExists(client, name);
         const res = await client.callTool(name, args, { timeoutMs: Number(flags.timeout || 300000) });
         out(res);
       }, { requestTimeoutMs: Number(flags.timeout || 300000) });
+      break;
+    }
+
+    case 'wait': {
+      /**
+       * 等「探针采样满足条件」，而不是睡固定时长（设计稿 §3.2.5 的替代做法）。
+       * 退出码与 live 同一套：0=命中 / 2=超时 / 1=参数错、工具名不存在、桥接未就绪等。
+       * 判定只在 Node 侧做一套（src/wait.js），条件 JSON 与游戏内 rb.poll 的算子同构，
+       * 以后可以原样下发；本轮只做 --source bridge。
+       */
+      const source = flags.source === undefined ? 'bridge' : String(flags.source);
+      if (source === 'event' || source === 'process') {
+        throw new Error(
+          `--source ${source} 属于 P1，本轮未实现（wait 目前只支持 --source bridge）。\n` +
+            '  · 等事件（NDJSON / Player.log）：先用 `node src/cli.js live --until <条件>`，退出码同为 0/2/1；\n' +
+            '  · 等进程存活/退出：先用 `node src/cli.js status`。\n' +
+            '  排期见 docs/HANDOFF-自动化闭环改造.md §4「必修清单」里 P1 的两行。',
+        );
+      }
+      if (source !== 'bridge') {
+        throw new Error(`--source 只认 bridge（event/process 属 P1 未实现），收到「${source}」\n\n${WAIT_USAGE}`);
+      }
+
+      if (flags.probe === true) throw new Error(`--probe 需要一个工具名，例 rimworld/list_colonists\n\n${WAIT_USAGE}`);
+      const probeName = flags.probe === undefined ? positional[0] : String(flags.probe);
+      if (!probeName) throw new Error(`缺少 --probe（要反复调用的只读工具名）\n\n${WAIT_USAGE}`);
+
+      const args =
+        readJsonInput({ inline: flags.args, file: flags['args-file'], positional: positional[1], flag: '--args' }) ?? {};
+      const condition = readJsonInput({
+        inline: flags.condition,
+        file: flags['condition-file'],
+        positional: undefined,
+        flag: '--condition',
+      });
+      if (condition === undefined) {
+        throw new Error(`缺少 --condition（条件 JSON，例 '{"path":"result.colonists","countEquals":3}'）\n\n${WAIT_USAGE}`);
+      }
+      if (condition === null || typeof condition !== 'object' || Array.isArray(condition)) {
+        throw new Error(`--condition 必须是一个 JSON 对象，收到：${JSON.stringify(condition).slice(0, 200)}\n\n${WAIT_USAGE}`);
+      }
+
+      const timeoutMs = flags.timeout === undefined ? 60_000 : Number(flags.timeout);
+      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+        throw new Error(`--timeout 必须是正数（毫秒），收到「${flags.timeout}」\n\n${WAIT_USAGE}`);
+      }
+      const intervalMs = flags.interval === undefined ? 200 : Number(flags.interval);
+      if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+        throw new Error(`--interval 必须是正数（毫秒），收到「${flags.interval}」\n\n${WAIT_USAGE}`);
+      }
+
+      // 总预算从这条命令开始算（含连接桥接的时间），单次调用也不许越过它
+      const deadline = Date.now() + timeoutMs;
+      process.stderr.write(
+        `[wait] profile=${profile} probe=${probeName} timeout=${timeoutMs}ms interval=${intervalMs}ms\n`,
+      );
+
+      const result = await withBridge(
+        profile,
+        async (client) => {
+          // 名字写错要立刻响亮失败，不要等满超时（与 call 同一条纪律）
+          await assertToolNameExists(client, probeName);
+          return waitFor(
+            // 单次调用不得超过剩余预算：否则一次挂住的调用就能越过总超时
+            () => client.callTool(probeName, args, { timeoutMs: Math.max(1, deadline - Date.now()) }),
+            { condition, timeoutMs: Math.max(1, deadline - Date.now()), intervalMs, what: probeName },
+          );
+        },
+        { requestTimeoutMs: timeoutMs },
+      );
+
+      const evidence = {
+        ok: result.ok,
+        elapsedMs: result.elapsedMs,
+        attempts: result.attempts,
+        probe: probeName,
+        condition,
+        ...(result.missingPath ? { missingPath: result.missingPath } : {}),
+        sample: result.sample,
+      };
+      const argsHint = flags['args-file']
+        ? `--args-file '${flags['args-file']}'`
+        : `--args '${JSON.stringify(args)}'`;
+      const printed = evidenceForPrint(evidence);
+      if (printed.sampleTruncated) {
+        // 采样截断只发生在打印层：真载荷动辄 8 KB，一次超时就能吃掉子代理半个上下文
+        console.error(
+          `[wait] 采样已截断（只印前 ${SAMPLE_PRINT_LIMIT} 字符）；` +
+            `要看完整载荷：node src/cli.js call ${probeName} ${argsHint}`,
+        );
+      }
+      if (result.ok) {
+        out(printed);
+      } else {
+        // 超时必须能诊断：条件、最后一次采样、attempts、elapsedMs 一个都不能少
+        console.error(
+          `[wait] 超时：${timeoutMs}ms 内没等到条件成立（attempts=${result.attempts}，elapsedMs=${result.elapsedMs}）`,
+        );
+        if (result.missingPath) {
+          // 字段一直没出现 ≠ 值不匹配：前者多半是还没进图，后者要改条件。分开说才不会让人去改错东西。
+          const m = result.missingPath;
+          console.error(
+            `路径 ${m.path} 从头到尾都没取到；断在 ${m.brokenAt} 这一段，` +
+              `那一层的可用字段：${m.available.length ? m.available.join(', ') : '（空）'}`,
+          );
+          console.error(
+            '通常是还没进图（先等 {"path":"result.state.playable","equals":true}），或字段名写错；' +
+              '这条不是参数错误，是条件一直没成立。',
+          );
+        }
+        console.error(JSON.stringify(printed, null, 2));
+        process.exitCode = 2;
+      }
       break;
     }
 
@@ -377,6 +489,7 @@ async function main() {
           '  describe 显示单个工具的完整参数 schema',
           '  dump-tools  把所有工具 schema 导出到 runs/tools.json',
           '  call     调用一个游戏内工具',
+          '  wait     等条件成立（反复调探针 + 条件 JSON；0 命中 / 2 超时 / 1 其它），见 docs/cli-wait-用法-20261024.md',
           '  logs     打印该 profile 的 Player.log 尾部',
           '  live     等游戏侧事件（DSH_GameLink 的 NDJSON 或 Player.log），命中即返回',
           '  stop     关闭该 profile 的测试实例（--force 才会强杀全机 RimWorld，破坏性）',

@@ -26,9 +26,10 @@
 |进度、待办、已知坑|`STATUS.md`（**顶部留 ≤30 行"现在"摘要**，历史往下堆）|
 |测试产物、报告、截图|`runs/`|
 
-5. **等游戏状态一律事件驱动，禁止 `Start-Sleep`。**
-用 `node src/cli.js live --profile <p> --until '<条件>' --timeout <ms>` 挂后台 job，**job 完成通知就是推送**。
-参数、`kind` 表与「为什么固定延时是错的」见 skill `rimworld-auto-test` 的「等游戏状态：事件驱动」一节。
+5. **等游戏状态只准两种形式，禁止 `Start-Sleep`。** 等**事件**（进程/桥接就绪、进图、窗口、日志、心跳）用
+`node src/cli.js live --until '<条件>'` 挂后台 job（job 完成通知就是推送）；等**游戏内状态**（tick / 小人 / 物件 / UI / 地图是否可用）用
+`node src/cli.js wait --source bridge` 反复采样只读探针直到断言成立。
+参数、`kind` 表与「为什么固定延时是错的」见 skill `rimworld-auto-test` 的「等游戏状态」一节。
 
 6. **自动化测试的机器资源约定**（用户可能同时在玩他自己那一局；数字见 `docs/多实例改造-实现-20261017.md`）：
 - **只开轻 profile**（例 `voiced` 6 个 mod）；满配 `vanilla`（561 个）要当次用户许可。

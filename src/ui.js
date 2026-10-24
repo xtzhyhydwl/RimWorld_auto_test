@@ -90,22 +90,6 @@ export async function clickRowByLabel(client, needle, { surfaceType = null, exac
   return { clicked: true, targetId: button.targetId, matchedLabel: labelEl.label };
 }
 
-/** 带重试的等待：轮询某个条件成立（默认每 250ms） */
-export async function waitUntil(fn, { timeoutMs = 30_000, intervalMs = 250, what = '条件' } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  let lastErr = null;
-  while (Date.now() < deadline) {
-    try {
-      const v = await fn();
-      if (v) return v;
-    } catch (err) {
-      lastErr = err;
-    }
-    await new Promise((r) => setTimeout(r, intervalMs));
-  }
-  throw new Error(`等待「${what}」超时（${timeoutMs}ms）${lastErr ? `：${lastErr.message}` : ''}`);
-}
-
 /** 关掉当前最上层窗口 */
 export async function closeTopWindow(client) {
   return client.callTool('rimworld/close_window', {});

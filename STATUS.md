@@ -13,6 +13,11 @@
 - **本轮踩的坑**（细节见 [docs/RimWorld-工具耗时与暂停行为测量-20261024.md](docs/RimWorld-工具耗时与暂停行为测量-20261024.md)）：推游戏时间用 `step_game_ticks`（能穿 forcePause，实测 600/600），`play_for` 在 forcePause 下静默 0 tick；信件对话框开着会冻结游戏时间（30 秒 Δ=0，`ESC` 无效）；`search_debug_actions` 常态 349–437 ms，曾一次 68 秒主线程停摆（占用者未定性）。
 - **下一步**：0008 的调研（原版「被困 → 凿墙」接入点）与实施；其后按 `EXECUTION-PLAN.md` §2 的顺序推进其余票。
 
+### 闭环等待（独立一条线，2026-10-24）
+
+- **P0 已落地**：`node src/cli.js wait`（判定只在 `src/wait.js`，本轮只做 `--source bridge`；`src/ui.js` 的旧 `waitUntil` 已删）。真机 9 个用例见 [docs/cli-wait-实测-20261024.md](docs/cli-wait-实测-20261024.md)，语法/15 算子见 [docs/cli-wait-用法-20261024.md](docs/cli-wait-用法-20261024.md)；P1/P2 清单见 [docs/HANDOFF-自动化闭环改造.md](docs/HANDOFF-自动化闭环改造.md) §4。skill 与 AGENTS.md 硬约束 5 已同步。
+- **新踩的坑（实测）**：① **起游戏的命令一退出，游戏就被连进程树杀掉**（`start` 单独跑：桥接 7 s 就绪后游戏死）⇒ 多步驱动要把启动命令挂成**保活 job**；② `src/proc.js:125 isAlive` 把 `EPERM` 当活着，PID 复用后会误判「已有实例在运行」而挡住 `start`（本轮删 `runs\game-process.<profile>.json` 绕过，**未修**）。
+
 | 线 | 是什么 | 状态文件 | 当前一句话 |
 | --- | --- | --- | --- |
 | 自动化测试 | 顶层线：用户用自然语言描述测试流程 → 翻译成游戏操作；测试用的机器（启动器/桥接/调试殖民地/UI 驱动/断言）都属于它 | [自动化测试/STATUS.md](自动化测试/STATUS.md) | 待用户确认（原文件没有单独写这条线的进度，只留下"桥接与测试基础设施"一节） |

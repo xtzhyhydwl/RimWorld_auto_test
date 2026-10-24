@@ -8,7 +8,10 @@
  * 调用不存在的工具名在桥接层不会给出响亮的错误，所以校验放在 CLI 这一层，
  * 让写错的名字在**发起调用之前**就暴露出来。
  *
- * 本模块刻意做成**纯函数**（不碰网络/文件），这样在没有游戏在跑的情况下也能离线单测。
+ * 上半部分（splitToolName / editDistance / suggestToolNames / checkToolName）刻意做成**纯函数**
+ * （不碰网络/文件），这样在没有游戏在跑的情况下也能离线单测；末尾的
+ * `assertToolNameExists` 是唯一碰网络的入口（它要主动拉实时清单），放在本模块是因为
+ * 「工具名检查」只有这一件事，`call` 与 `wait` 都从同一个地方拿它，避免两份文案。
  */
 
 /** 拆出命名空间与子名：`rimbridge/wait_for_long_event_idle` → {namespace:'rimbridge', local:'wait_for_long_event_idle'} */
@@ -113,4 +116,53 @@ export function checkToolName(name, names) {
   hints.push('查实时清单：`node src/cli.js tools <关键词>`（或 `node src/cli.js describe <工具名>`）。');
 
   return { checked: true, ok: false, name: String(name), candidates, hints, namespaces };
+}
+
+/**
+ * 调用前的工具名预校验（`call` 与 `wait` 共用）。
+ *
+ * 为什么要有它：`tmp/audit-test/AUDIT.md`（2.7 / A8）记录了一次**静默失效**——
+ * `scripts/verify-5-actions.mjs:201/220` 调用了**不存在**的工具
+ * `rimworld/wait_for_long_event_idle`（该工具只在 `rimbridge/` 命名空间下，
+ * 见 `tmp/audit-test/tool-names.txt:26`），失败又被 `.catch(() => {})` 吞掉，
+ * 脚本「以为自己等过了」，实际零等待、零记录，报告看起来有效却什么都没发生。
+ * 这比固定等待更糟，所以把校验提到调用之前：写错名字必须**响亮地失败**。
+ *
+ * 判据：**优先用实时清单** `client.listTools()`（与 `describe` 分支同一用法）。
+ * 拿不到实时清单（桥接未连接 / 查询失败）就**跳过校验**并提示一句——
+ * 宁可漏报，也不用 2026-10-03 的 `runs/tools.json` 过期快照硬判，那会产生假失败。
+ *
+ * 明确**不**做的事：不自动把名字改成「最接近的那个」再继续调用。人必须知道名字写错了。
+ */
+export async function assertToolNameExists(client, name) {
+  let names;
+  try {
+    const tools = await client.listTools();
+    names = (tools ?? []).map((t) => t.name);
+  } catch (err) {
+    console.warn(`[警告] 取不到实时工具清单（${err.message}），跳过工具名预校验，直接发起调用。`);
+    return;
+  }
+  if (!names.length) {
+    console.warn('[警告] 实时工具清单为空，跳过工具名预校验，直接发起调用。');
+    return;
+  }
+
+  const r = checkToolName(name, names);
+  if (r.ok) return;
+
+  console.error(`工具名不存在：${name}`);
+  console.error(`  清单来源：实时清单 client.listTools()（共 ${names.length} 个工具）`);
+  if (r.candidates?.length) {
+    console.error('  最接近的候选名（按相似度）：');
+    for (const c of r.candidates) {
+      console.error(`    - ${c.name}${c.namespaceDiffers ? '   ← 子名相同，命名空间不同' : ''}`);
+    }
+  } else {
+    console.error('  最接近的候选名：没找到相近的（名字可能整体写错了）');
+  }
+  for (const h of r.hints ?? []) console.error(`  提示：${h}`);
+  console.error('  本次调用未发起；也不会自动改用上面任何一个候选名。');
+  process.exitCode = 1;
+  throw new Error(`未知工具「${name}」——已阻止调用（不会自动改用候选名）`);
 }

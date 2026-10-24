@@ -43,7 +43,8 @@ node src/cli.js tools | Select-String '工具总数'
 
 ## 等游戏状态：事件驱动，禁止 `Start-Sleep`
 
-**规则**：要等「游戏到了某状态 / 某事件发生」，用事件推送；**不要**用固定秒数的 `Start-Sleep` 去赌。
+**规则**：等**事件**用事件推送；等**游戏内状态**用 `node src/cli.js wait` 反复采样一个只读探针；
+**不要**用固定秒数的 `Start-Sleep` 去赌。
 
 ```powershell
 # 挂成后台 job；命中打印那条事件并 exit 0，超时 exit 2，参数错 exit 1
@@ -64,16 +65,55 @@ node src/cli.js live --profile <profile> --until 'kind=colony_started' --timeout
 | `heartbeat` | 每 3 秒一条（`tick` / `programState` / `speed`，暂停 = 0） | `kind=heartbeat speed=1` |
 | `error` | mod 自己捕获到异常（`where` / `message`） | `kind=error` |
 
+> ⚠ **主菜单阶段几乎一条事件都没有**（2026-10-24 在 1.7 实测，1.6 同理）：
+> 除 `log` 以外，上面这些事件都由 `DSH_GameLink` 的 `GameComponent` 发，而 `GameComponent` 只在
+> **有 `Game` 之后**才被 `Game.FillComponents()` 创建 ⇒ 停在主菜单（entry scene）时
+> `runs\live\<profile>.ndjson` **不会被创建、也不会更新**。这是设计，不是 mod 挂了。
+> 实测：进程 18:02:01 起、桥接 18:02:19 就绪、18:02:57 进图，**18:03:00 才写第一条事件**（seq=1 从 1 重来）；
+> 中间那 59 秒里事件文件一个字节都没动。
+>
+> **等主菜单** ⇒ 跟 `Player.log`（不是事件文件）：
+> `node src/cli.js live --profile <p> --source log --until 'text~GABP server connected to GABS' --timeout 180000`
+> （1.7 的日志落在默认存档目录，`logPathFor` 已按版本分流，命令不用改。）
+
 **为什么固定延时是错的**：延时**既不必要**（状态早到了还在白等）**也不充分**（机器忙/加载慢就没到，后面全错）；
 一次性命令挂死还会被外部超时**掐死**，等于什么都没干。能不能往下走，由**可观测条件**决定，不由墙钟决定
 （与第一原则 2「回读状态确认」同源）。
 
-**兜底**：事件通道没覆盖的（进程/桥接是否活），只读能力 + 有界超时轮询：
-`node src/cli.js status`、`rimworld/get_game_info`、`rimworld/get_ui_state`；
-库里已有 `src/ui.js:94` 的 `waitUntil(fn, { timeoutMs, intervalMs })`。
-**等待逻辑只准出现在一个地方**（一条 `live` 命令 / 一个 `waitUntil`），不要散成一堆 sleep。
+**要等什么 → 哪条命令**：
 
-**派子代理**：用全新上下文的子代理做游戏侧测试时，提示词里**必须显式给出这条规则与具体 `live` 命令**
+| 要等的 | 用哪条 |
+| --- | --- |
+| 进程 / 桥接就绪 | `node src/cli.js start`（自带等待）/ `status` |
+| 主菜单（entry scene，**没有事件**） | `live --source log --until 'text~GABP server connected to GABS'` |
+| 游戏侧事件（进图 / 窗口 / 日志 / 心跳） | `live --until ...`（见上表） |
+| **游戏内状态**（tick / 小人 / 物件 / UI / 地图可用） | `node src/cli.js wait --source bridge ...` |
+| 日志文本 / 进程存活 | `wait` 的探针只要是个只读采样就能用，但 CLI 目前**只有** `--source bridge` ⇒ 用 `live --source log` / `status` |
+
+```powershell
+# 等进图：playable 字段任何时刻都在（未进图时 list_colonists 可能连 colonists 字段都没有）
+# cond.json = {"path":"result.state.playable","equals":true}
+node src/cli.js wait --profile <p> --source bridge --probe rimbridge/get_bridge_status --condition-file cond.json
+
+# 等殖民地人数到 3：先过了上面那道门再等这个
+# n.json = {"path":"result.colonists","countEquals":3}
+node src/cli.js wait --profile <p> --source bridge --probe rimworld/list_colonists --condition-file n.json
+```
+
+- 退出码：`0` 命中（stdout 一个 JSON：`attempts` / `elapsedMs` / `sample`）、`2` 超时（stderr 打条件 + 最后一次采样 + `attempts`）、
+  `1` 参数或算子写错、工具名不存在、桥接没起来。
+- **字段路径取不到 = 条件未成立，继续轮询**（不是参数错）：超时会点名断在哪一段 + 那层有哪些字段，
+  所以「还没进图就去等 `colonists`」这类事不会伪装成「条件写错」，而是到点报「路径从头到尾没取到」。
+- **PowerShell 吞引号**：条件和参数一律走文件 —— `--condition-file cond.json` / `--args-file a.json`
+  （或 `--condition '@cond.json'`，**`@` 必须带引号**；PowerShell 里裸写 `@cond.json` 会当 splatting 解析错）。
+- 条件算子与 `rb.poll` 的 15 个同构，另有本仓库扩展 `not`；路径根 `result.` = **这次探针调用的载荷根**（`get_bridge_status` 的 `state`、`list_colonists` 的 `colonists`）。
+- 探针必须是**只读工具**；探针挂住 = `GABP_TIMEOUT` ⇒ exit 1，会话已废，**重启游戏而不是重试**。
+- 细节（15 个算子逐个举例、文件传参、实测记录）见 [docs/cli-wait-用法-20261024.md](../../../docs/cli-wait-用法-20261024.md)；
+  真机 9 个用例（命中 / 超时 / 字段缺失 / 算子写错 / 动作后闭环）见 [docs/cli-wait-实测-20261024.md](../../../docs/cli-wait-实测-20261024.md)。
+
+**等待逻辑只准出现在一处**（一条 `live` 命令 / 一条 `cli wait`），不要散成一堆 sleep。
+
+**派子代理**：用全新上下文的子代理做游戏侧测试时，提示词里**必须显式给出这条规则与具体命令（`live` / `wait`）**
 （它看不到本 skill 之外的对话）；子代理自己发明 `Start-Sleep` ⇒ **视为不合格**。
 
 ---
@@ -431,7 +471,7 @@ await ce.getSkillLevel(client, 'Shooting');
 
 现成机制，优先用，不要另写等待：
 
-- **库里**：`src/ui.js:94` 的 `waitUntil(fn, { timeoutMs = 30000, intervalMs = 250, what })` —— `fn` 返回真值即通过，超时抛错并带上 `lastErr`。
+- **统一原语**：`src/wait.js` 的 `waitFor(probe, { condition, timeoutMs, intervalMs, what })` —— `probe` 是一次只读采样，`condition` 写法见上文「等游戏状态」；命令行版就是 `node src/cli.js wait`。全仓**只此一处**等待逻辑，别再写第二套循环。
 - **桥接自带的「等它画出来」有界等待**：`rimworld/get_ui_layout` 的 `timeoutMs`（描述原文 *"Maximum time to wait for the requested UI surface to draw on screen"*，默认 2000）与 `rimworld/click_ui_target` 的 `timeoutMs`（*"Maximum time to wait for the target control to be redrawn so the click can be injected"*，默认 2000）。
 - **Lua 侧**：`rb.poll(alias, argsTable?, policyTable)`，其中 `policyTable = { timeoutMs, pollIntervalMs, timeoutMessage, condition }`（`runs/food-recon/lua_reference.json:321-345`）；官方范式原文同文件 `:609` ——
   **"Mutate first, then poll."**（动作只发一次，然后轮询只读能力直到条件成立）。
