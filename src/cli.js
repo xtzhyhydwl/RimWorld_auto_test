@@ -586,8 +586,10 @@ async function main() {
         file: eventFile,
         eventSource: eventFormat,
         verifyIdentity: Boolean(flags.verify),
-        fromNow: Boolean(flags['new-only']),
-        windowMs: flags['window-ms'] === undefined ? null : Number(flags['window-ms']),
+        // 场景可以自带事件语义：从「现在」开始 / 只看最近 N 毫秒。命令行显式给了就以命令行为准。
+        fromNow: flags['new-only'] !== undefined ? Boolean(flags['new-only']) : Boolean(scenario?.fromNow),
+        windowMs:
+          flags['window-ms'] !== undefined ? Number(flags['window-ms']) : (scenario?.windowMs ?? null),
       };
       const result =
         source === 'bridge'

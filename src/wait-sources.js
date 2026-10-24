@@ -156,7 +156,13 @@ export function eventSampler({
       const event = toEvent(raw, source);
       if (!event) continue;
       readCount += 1;
-      recent.push({ raw, event, ts: Date.now() });
+      /**
+       * 窗口裁剪用**事件自己的时间戳**（`ts`，Unix 秒），没有才退回到达时间。
+       * 为什么不能一律用到达时间：扫历史文件时所有事件都是「刚才读到的」，
+       * 用到达时间会让 `--window-ms` 形同虚设（实测：旧文件也能命中「最近 1 秒内出现过」）。
+       */
+      const ownTs = Number(event.ts);
+      recent.push({ raw, event, ts: Number.isFinite(ownTs) ? ownTs * 1000 : Date.now() });
       if (perLineCondition && !lineMatch) {
         const texts = Object.fromEntries(Object.entries(event).map(([k, v]) => [k, stringForm(v)]));
         if (matchesCondition(perLineCondition, { texts })) {
