@@ -262,7 +262,7 @@ namespace DSH.CEBridge
         [Tool(
             "ce/set_skills",
             Description = "Overwrite a colonist's whole skill table using Character Editor's native separated-string format. Read the format first with ce/get_skills, edit it, and pass it back. This is the same operation as using Character Editor's UI.",
-            ResultDescription = "Whether the write was applied, plus the value read back afterwards.")]
+            ResultDescription = "success/applied = (readback == wrote, compared character by character); mismatch = !applied; plus the value read back afterwards. Character Editor silently drops malformed entries, so a mismatch means part of the string did not land.")]
         public object SetSkills(
             [ToolParameter(Description = "The full separated skill string, in Character Editor's format", Required = true)] string skills,
             [ToolParameter(Description = "Colonist short name, e.g. Alex")] string pawnName = null,
@@ -277,22 +277,38 @@ namespace DSH.CEBridge
             var setter = FindMethod(skillTool, "SetSkillsFromSeparatedString", true);
             if (setter == null) return new { success = false, error = "SkillTool.SetSkillsFromSeparatedString 不存在" };
 
+            // 实测（runs\2026-10-25-回归\C2-CE技能\C2-报告.md §2）：这个方法**只有 2 个参数** (Pawn, String)，
+            // 没有 bool 开关。以前这里还会在 3 个参数时补一个 false —— 那是死代码，猜错参数只会把
+            // "根本没写"伪装成"写了"，所以参数个数不对就明确失败。
             var ps = setter.GetParameters();
-            object[] args;
-            if (ps.Length == 2) args = new object[] { pawn, skills };
-            else if (ps.Length == 3) args = new object[] { pawn, skills, false };
-            else return new { success = false, error = "SetSkillsFromSeparatedString 参数个数不认识：" + ps.Length };
+            if (ps.Length != 2)
+            {
+                return new
+                {
+                    success = false,
+                    applied = false,
+                    mismatch = true,
+                    error = "SkillTool.SetSkillsFromSeparatedString 期望 2 个参数 (Pawn, String)，实际 " + ps.Length + " 个；未调用",
+                    wrote = skills
+                };
+            }
 
-            setter.Invoke(null, args);
+            setter.Invoke(null, new object[] { pawn, skills });
 
-            // 立刻回读，别相信"调用没抛异常就成功"
+            // 立刻回读：CE 会静默丢弃坏段（列数≠5 / DefName 大小写不对），也不抛异常，
+            // 所以"调用没抛"不能当成功 —— 只有逐字相等才算写进去了。
             var readback = Static(skillTool, "GetAllSkillsAsSeparatedString", new object[] { pawn });
+            bool applied = string.Equals(readback as string, skills, StringComparison.Ordinal);
             return new
             {
-                success = true,
+                success = applied,
+                applied,
+                mismatch = !applied,
                 pawn = PawnLabel(pawn),
                 wrote = skills,
                 readback,
+                // ⚠ 语义是反的：true = 读回来和写进去不一样 = 没写对。保留它只为兼容已有调用方，
+                // 新代码请判 applied / mismatch（或等价地判 success）。
                 changed = !Equals(readback, skills)
             };
         }

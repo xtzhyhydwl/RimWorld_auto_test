@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- DSH.CEBridge 的编译描述。以前这个伴生 DLL 是用 Roslyn csc.exe + /nostdlib+ + 直接引用
+       游戏 RimWorldWin64_Data\Managed\ 里的程序集编出来的（build-cebridge.mjs，早就删了）；
+       1.7 更新把那个目录删了，托管程序集平铺在游戏根目录、Unity 只剩 UnityStubs.dll，
+       所以改成和 mods\DSH_GameLink 同一套路：SDK 风格 net10.0 工程。
+       产物 DSH.CEBridge.dll 由人手工拷到部署位置（游戏侧 BridgeTools\DSH.CEBridge 是指向本目录的 junction）。 -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <AssemblyName>DSH.CEBridge</AssemblyName>
+    <RootNamespace>DSH.CEBridge</RootNamespace>
+    <Nullable>disable</Nullable>
+    <Deterministic>true</Deterministic>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <NuGetAudit>false</NuGetAudit>
+    <!-- 游戏根目录（1.7 的 Assembly-CSharp.dll / UnityStubs.dll 就在这里）。换机器时改这一行或传 /p:GameDir=... -->
+    <GameDir Condition="'$(GameDir)' == ''">D:\SteamLibrary\steamapps\common\RimWorld</GameDir>
+    <!-- 桥接 SDK：伴生 DLL 只认桥接进程里已加载的那一份，所以引用游戏侧实际部署的 dll。 -->
+    <RimBridgeServerDir Condition="'$(RimBridgeServerDir)' == ''">D:\SteamLibrary\steamapps\common\RimWorld\Mods\RimBridgeServer\1.6\Assemblies</RimBridgeServerDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="DSH.CEBridge.cs" />
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(GameDir)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityStubs">
+      <HintPath>$(GameDir)\UnityStubs.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="RimBridgeServer.Sdk">
+      <HintPath>$(RimBridgeServerDir)\RimBridgeServer.Sdk.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

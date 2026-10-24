@@ -1,10 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- 和 VoiceDeputy / BikeProbe 同一套路：1.6 跑在 Unity 的 Mono 上（net472 谱系），
-         本机没装 net472 目标包也不拉 NuGet 包，所以 /nostdlib+ + 直接引用游戏 Managed\ 里的程序集，
-         保证基础库和游戏运行时是同一套。 -->
-    <TargetFramework>net472</TargetFramework>
+    <!-- 1.7（Waylith / .NET 10）编译链。原来这里是 net472 + 直接引用游戏 RimWorldWin64_Data\Managed\ 里的程序集；
+         1.7 更新把那个目录删了，托管程序集平铺在**游戏根目录**，Unity 也只剩 UnityStubs.dll
+         ⇒ net472 那条链在这台机器上已无法重建。改法见 docs\RimWorld-1.7模组侧适配-20261024.md §3.4 / §5。
+         net10.0 的 BCL 由 SDK 的 packs\Microsoft.NETCore.App.Ref 提供，所以下面不再引用 mscorlib/System/netstandard。 -->
+    <TargetFramework>net10.0</TargetFramework>
     <LangVersion>7.3</LangVersion>
     <AssemblyName>DSH_GameLink</AssemblyName>
     <RootNamespace>DSH_GameLink</RootNamespace>
@@ -13,49 +14,28 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateDependencyFile>false</GenerateDependencyFile>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <NoStdLib>true</NoStdLib>
-    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
-    <AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages>
     <NuGetAudit>false</NuGetAudit>
     <OutputPath>..\Assemblies\</OutputPath>
-    <!-- 游戏目录写在这里；换机器时改这一行或传 /p:RimWorldManagedDir=... -->
-    <RimWorldManagedDir Condition="'$(RimWorldManagedDir)' == ''">D:\SteamLibrary\steamapps\common\RimWorld\RimWorldWin64_Data\Managed</RimWorldManagedDir>
-    <!-- Harmony：运行靠 Harmony mod（About.xml 已依赖 brrainz.harmony），编译只借它的 dll；
-         游戏自带 Managed\ 里没有 0Harmony.dll。换机器时改这一行或传 /p:HarmonyDir=... -->
-    <HarmonyDir Condition="'$(HarmonyDir)' == ''">D:\SteamLibrary\steamapps\workshop\content\294100\2009463077\1.6\Assemblies</HarmonyDir>
-    <!-- 这两个私有属性填上，GetReferenceAssemblyPaths 就不会去找 net472 目标包（否则 MSB3644） -->
-    <_TargetFrameworkDirectories>$(RimWorldManagedDir)</_TargetFrameworkDirectories>
-    <_FullFrameworkReferenceAssemblyPaths>$(RimWorldManagedDir)</_FullFrameworkReferenceAssemblyPaths>
+    <!-- 游戏根目录（1.7 的 Assembly-CSharp.dll / UnityStubs.dll 就在这里）。换机器时改这一行或传 /p:GameDir=... -->
+    <GameDir Condition="'$(GameDir)' == ''">D:\SteamLibrary\steamapps\common\RimWorld</GameDir>
+    <!-- Harmony：运行靠 Harmony mod（About.xml 已依赖 brrainz.harmony），编译只借它的 dll。
+         1.7 的 Harmony 是 3.0.0.0，在工坊 Harmony mod 的 1.7\Assemblies 下。换机器时改这一行或传 /p:HarmonyDir=... -->
+    <HarmonyDir Condition="'$(HarmonyDir)' == ''">D:\SteamLibrary\steamapps\workshop\content\294100\2009463077\1.7\Assemblies</HarmonyDir>
   </PropertyGroup>
 
   <ItemGroup>
-    <Reference Include="mscorlib">
-      <HintPath>$(RimWorldManagedDir)\mscorlib.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="System">
-      <HintPath>$(RimWorldManagedDir)\System.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="System.Core">
-      <HintPath>$(RimWorldManagedDir)\System.Core.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="netstandard">
-      <HintPath>$(RimWorldManagedDir)\netstandard.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
     <Reference Include="Assembly-CSharp">
-      <HintPath>$(RimWorldManagedDir)\Assembly-CSharp.dll</HintPath>
+      <HintPath>$(GameDir)\Assembly-CSharp.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="0Harmony">
       <HintPath>$(HarmonyDir)\0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <!-- 心跳用 UnityEngine.Time.realtimeSinceStartup：主菜单里没有 tick，只能靠实时时间。 -->
-    <Reference Include="UnityEngine.CoreModule">
-      <HintPath>$(RimWorldManagedDir)\UnityEngine.CoreModule.dll</HintPath>
+    <!-- 心跳用 UnityEngine.Time.realtimeSinceStartup：1.7 没有 UnityEngine.*Module，Unity 被 UnityStubs 取代
+         （RimWorld.runtimeconfig.json 里有 UnityEngine*=UnityStubs 的重定向）。 -->
+    <Reference Include="UnityStubs">
+      <HintPath>$(GameDir)\UnityStubs.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
