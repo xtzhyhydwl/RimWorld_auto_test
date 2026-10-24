@@ -5,6 +5,11 @@
 
 ## 现在（2026-10-24）
 
+- **加被测 mod 有受支持入口了（2026-10-24 22:3x，`1b6ce38`）**：`node src/cli.js mods add|remove|apply|list --profile <p>`。
+  被测 mod 清单存 `profiles\<p>\tested-mods.json`（用户拍板单独一份），ModsConfig 顺序 = **底座 → 被测 → 其余保持原序**，幂等。
+  真机端到端验过：临时 profile（底座 11 + 1 个额外 mod）→ `env-check` ✓ 无阻塞项、`activeMods 12`、**本次已加载 12**、ordering 0、`restartRequired=false`、桥接 15.3 s 就绪；临时 profile 已删。
+  **仍未做**：依赖预检（只查了「装没装」，漏前置要靠活桥接时的 `unsatisfiedDependencies` / 加载顺序事后发现）。
+
 - **缺陷第一批已修并真机复验（2026-10-24 21:5x）**：回滚基线 `b5d7143`（只含分诊文档、代码未动），之后分批提交：`e500132`(AGENTS 写文件编码) / `67697e3`(代码批) / 文档批（见 `git log`）。要退某一批就 `git revert <该提交>`。
   复验：**离线 12 项 + 真机 14 项全过**，清单与证据 `runs\2026-10-25-skill试跑\verify\VERIFY-RESULT.md`；反证成立——`start --help` 只打用法不再起游戏、`runs\game-process.*.json` mtime 一个没变、RimWorld 进程数 0。
   真机确认：底座 **13 mod（Harmony→Core→5 DLC→工具→用户 mod，规范顺序）**、`无模态窗口` exit 2→**0**、`call` 动作失败 **exit 1**（载荷照打）、CE `{"part":"Leg","index":0}`=**右腿**且 `restore` **秒回**（中文 label 曾挂 60 s）、`step_game_ticks 600` = 600 帧（坐实 **1 tick/帧**）、`wait` 第三类提示实测命中。
