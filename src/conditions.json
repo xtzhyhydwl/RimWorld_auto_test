@@ -163,7 +163,7 @@
         "path": "result.remaining",
         "equals": 0
       },
-      "description": "unforbid_all 之后等解禁真的生效，别信 success。",
+      "description": "unforbid_all 之后等解禁真的生效，别信 success。⚠ 探针来自 **foodcontrol** mod，不在 `base-mods.json` 的 11 项底座里 ⇒ 在只按底座起的 profile 上会报「未知工具」（exit 1）。",
       "evidence": "旧引用「SKILL.md 第 138 行与第 306 行」已失效（旧 skill .dsh/skills/rimworld-auto-test 已删，其第 325 行才是这条）；现出处 docs/共享单车-机制真值表.md:502（调试殖民地开局地面资源默认全禁 = 54 件，unforbid_all 后回读 remaining:0）与 docs/生产自动化-扩展需求.md:20-34（同一事实的早期记录）；条件未跑，只验过字段有值",
       "verifiedLevel": "field-verified",
       "timeoutMs": 60000
@@ -221,9 +221,9 @@
         "path": "result.message",
         "equals": "pong"
       },
-      "description": "要确认桥接真的能连（不只是记录校验通过）时用；`start` 之后、进图之前的最可靠门槛。⚠ 本场景**没有在真机上跑过**：判据与载荷形状来自 B6-ping.txt 的真机 `call rimbridge/ping`（message:\"pong\"），但这个场景本身没被 `wait --scenario` 命中验证过。",
-      "evidence": "runs/2026-10-25-skill试跑/verify/B6-ping.txt（真机 `call rimbridge/ping` 返回 message:\"pong\"，timestamp 2026-10-24T13:43:51Z；字段实测、条件未跑）；反证为什么要它：runs/2026-10-25-skill试跑/verify/A6-envcheck-voiced.txt 与 B1-envcheck-live.txt（桥接已就绪 exit 0 之后仍 ECONNREFUSED）",
-      "verifiedLevel": "field-verified",
+      "description": "要确认桥接真的能连（不只是记录校验通过）时用；`start` 之后、进图之前的最可靠门槛。2026-10-24 真机命中（`attempts=1`、`elapsedMs=1`、message:\"pong\"，证据 `runs/2026-10-25-回归/A-六阶段/02c-wait-桥接可连-retry.txt`）。**注意：桥接还没监听时本场景会立刻 exit 1（ECONNREFUSED），它不能用来\"等桥接\"**，要等请外层反复 `call rimbridge/ping` 到 exit 0。",
+      "evidence": "2026-10-24 真机命中 `wait --scenario 桥接可连` exit 0、attempts=1、elapsedMs=1、message:\"pong\"（`runs/2026-10-25-回归/A-六阶段/02c-wait-桥接可连-retry.txt`）；桥接未监听时立刻 exit 1，不能用来等桥接。",
+      "verifiedLevel": "wait-verified",
       "timeoutMs": 60000
     },
     "游戏进程已退出": {

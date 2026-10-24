@@ -238,7 +238,7 @@ const COMMAND_HELP = {
     '用法: node src/cli.js start --profile <名字> [--port 5174] [--minimized] [--width 1600] [--height 900]',
     '                                  [--monitor 2] [--fullscreen|--windowed] [--doorstop]',
     '',
-    '  --profile 必填：不填不会替你猜（默认值 vanilla 是 561 个 mod 的满配，代价最大）；可选值见 profiles\\ 目录。',
+    '  --profile 必填：不填不会替你猜（缺省值 vanilla 是满配 profile（几百个 mod，代价最大））；可选值见 profiles\\ 目录。',
     '  会真起一个游戏实例并等桥接就绪（抢一次窗口焦点）。底座 mod 按 base-mods.json 自动补齐（只加不删）。',
     '  起了之后：node src/cli.js status --profile <名字> 看状态 / stop --profile <名字> 关掉它。',
   ].join('\n'),
@@ -361,9 +361,9 @@ function listProfileNames() {
  * 改它们的默认值会把已有脚本全弄坏。
  */
 const PROFILE_REQUIRED = {
-  start: '会真起一个游戏实例（还会按 base-mods.json 改写该 profile 的 ModsConfig.xml）；缺省值 vanilla 是 561 个 mod 的满配，猜错代价最大',
-  stop: '会关掉一个游戏实例；缺省值 vanilla 是 561 个 mod 的满配，猜错代价最大',
-  smoke: '默认会起一个实例、跑完再关掉；缺省值 vanilla 是 561 个 mod 的满配，猜错代价最大',
+  start: '会真起一个游戏实例（还会按 base-mods.json 改写该 profile 的 ModsConfig.xml）；缺省值 vanilla 是满配 profile（几百个 mod），猜错代价最大',
+  stop: '会关掉一个游戏实例；缺省值 vanilla 是满配 profile（几百个 mod），猜错代价最大',
+  smoke: '默认会起一个实例、跑完再关掉；缺省值 vanilla 是满配 profile（几百个 mod），猜错代价最大',
   'env-check': '报的是「某个 profile 的」环境事实，猜错了等于把别人的事实钉进你的上下文',
   mods: '读写的是「某个 profile 的被测 mod 清单」并会改写它的 ModsConfig.xml，猜错了就是把 mod 加进别人的环境',
 };

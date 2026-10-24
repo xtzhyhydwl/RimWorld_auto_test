@@ -33,7 +33,7 @@
 写测试的流程骨架见 skill `rimworld-auto-test-closed-loop`。
 
 6. **自动化测试的机器资源约定**（用户可能同时在玩他自己那一局；数字见 `docs/多实例改造-实现-20261017.md`）：
-- **只开轻 profile**（例 `voiced`：6 项底座 + 被测 mod，2026-10-24 已是 8 个）；满配 `vanilla`（561 个）要当次用户许可。
+- **只开轻 profile**（例 `voiced`）——**底座 11 项**（清单见 `base-mods.json`）+ 人工加入的条目；**本次激活数用 `node src/cli.js env-check --profile <p>` 看 `mods.activeModsCount`，本文不写数字**。满配 `vanilla` 是几百个 mod（本机实测 562），要当次用户许可。
 - **推时间速度上限 `Fast`**；禁 `Superfast` / `Ultrafast` / `ultraSpeedBoost:true` / `forceRequestedSpeed:true`，除非用户当次允许。
 - 用**独立 profile** 与用户那一局并存（记录/端口/`stop` 都已按 profile 隔离）；一个 profile 只起一个实例。
 - `stop` 默认只关本 profile；**`--force` 会强杀全机 RimWorld（含用户在玩的那局），只有用户明确要求才用**。
