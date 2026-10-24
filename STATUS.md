@@ -3,7 +3,26 @@
 > 本仓库有多条独立的线，各自的状态在各自目录里。**本文只是索引。**
 > 协作约定见 [AGENTS.md](AGENTS.md)。
 
-## 现在（2026-10-24）
+## 现在（2026-10-25）
+
+- **干净上下文回归已跑完（2026-10-24 22:4x–23:0x，4 个无历史代理 A/B/C/D）**。报告：[docs/2026-10-25-回归缺陷.md](docs/2026-10-25-回归缺陷.md)；
+  原始证据 `runs\2026-10-25-回归\`（A-六阶段 / B-文档审计 / C-mods / D-list-saves / O-编排观察，`runs\` 已 gitignore）。
+- **八项：7 通过、第 4 项部分通过**（CE 写技能等级不生效），共 **24 条缺陷**（阻塞 11 / 绕得过 10 / 口误 3）；上一轮修的 31 条**全部复验通过**。
+- **八项结果**：1 环境自检 ✅（`activeMods=13`、底座 11 缺 0、`loadedInSession` 13、ordering 0、`restartRequired=false`）；
+  2 起实例+进门 ✅（ping 第 5 次 @14.0 s；进图 6017 ms/84 attempts；**新场景 `桥接可连` 首次真机 exit 0**）；
+  3 `mods` 端到端 ✅（临时 profile：底座 11 → 加 achtung → **12/12**、ordering 0、幂等、stop+删 profile+机器清零）；
+  4 CE ⚠️ 部分（`{"part":"Leg","index":0}`=右腿；截肢/`restore` 各 371 ms；**`ce/set_skills` 写等级不生效且整表清零**）；
+  5 推时间 ✅（`step 600`→600 tick/600 帧/6365 ms≈94.3 tick/s；`play_for Fast 1000ms`→182 tick）；
+  6 失败判读 ✅（exit 2 超时 / exit 1 未知工具与坏 JSON / `call` 动作失败 / `missingPath` 第三类，全对上）；
+  7 缺原子模板 ✅（假需求「等某封信被处理掉」判为**补数据**，不是补采样层）；8 存档读档 ✅（阶段 2–7 真跑 + `list_saves` 补验：坏档不抛错而是 `metadata_unavailable`、空目录 `count=0`、**可当 `wait --probe` 用 `result.saves.0.name` 断言**，`wait 游戏进程已退出` 真机 exit 0）。
+- **两处环境事实改正**：游戏进程名是 **`RimWorld`**（`RimWorldWin64` 已随 1.7 删除，拿它判存活会永远「没在跑」）；
+  `vanilla` 的 `activeMods` 实测 **562**（不是 561）。场景登记表 **17 个** `{wait-verified:4, field-verified:10, inferred:3}`。
+- **已知坑补充（比 AGENTS 硬约束 7 更窄、更准）**：存 CLI 输出时**只有 stderr 的中文会坏**（PS 5.1 把原生 stderr 转 ErrorRecord 时按 GBK 解码；stdout 的 JSON 按字节直通，完好）；
+  把 `2>&1` 混进证据就会让「失败判读最需要的那几行提示」变成乱码。解法见 `runs\2026-10-25-回归\O-编排观察.md` O1，或给 CLI 加 `--out` 由 node 自己写 UTF-8。
+- **仍未做**（不算这轮任务）：`[DSH-TEST]` 埋点进 ndjson（要改 LogTap，日志验收链路仍未真机走通）、E 类（强制暂停窗口下 `step`/`play_for`、`GABP_TIMEOUT`、中文 label `restore` 挂 60 s 的根因）、依赖预检。
+- **机器状态**：无 RimWorld 进程、5174 空闲；`runs\game-process._regress.json` / `runs\live\_regress.ndjson` 两条残留已删。
+
+## 2026-10-24（上一轮，留作历史）
 
 - **下一轮：回归重跑（用户决定，2026-10-24 22:5x）**。改完 31 条之后**还没用干净上下文走过一次**，等于未经测试的改动。
   交接说明在 `C:\Users\MikanseiP\AppData\Local\Temp\HANDOFF-回归-20261024.md`（**故意不进仓库**，免得下一轮把它当"历史交接文档"读而污染判断）。
