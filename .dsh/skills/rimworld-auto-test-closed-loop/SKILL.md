@@ -27,6 +27,7 @@ node src/cli.js tools --profile <p>        # 游戏内工具；单个参数用 d
 - 起实例：`node src/cli.js start --profile <p> --width 1600 --height 900 --monitor <n>`。**必须显式给 `--profile`**，否则起的是默认的满配 `vanilla`。
 - 底座 mod 的唯一真源是仓库根 `base-mods.json`：`start` 前自动幂等补进 `profiles/<p>/Config/ModsConfig.xml`（只加不删）；加/查用 `node src/cli.js base-mods --profile <p>`（只读对账）。
 - 环境事实别凭记忆，跑 `node src/cli.js env-check --profile <p>`（一次输出进程 / 桥接 / 激活 mod / 加载顺序 / 能力 / 路径）。
+- 加被测 mod 用 `node src/cli.js mods add --profile <p> --package-id <id> --apply`（清单存 `profiles/<p>/tested-mods.json`，`mods list` 看漂移与下一步）——别手改 `ModsConfig.xml`。
 
 | 检查 | 判据 |
 | --- | --- |

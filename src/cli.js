@@ -15,6 +15,7 @@
  *   node src/cli.js live --profile voiced --until 'kind=colony_started' [--timeout 120000]
  *   node src/cli.js stop --profile voiced [--force]                                  （--profile 必填）
  *   node src/cli.js base-mods [--profile vanilla]
+ *   node src/cli.js mods list|add|remove|apply --profile voiced [--package-id <id>] [--apply]   被测 mod 清单（--profile 必填）
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -40,7 +41,7 @@ import {
   processRecordPath,
   WS,
 } from './launcher.js';
-import { baseModsFile, readBaseModsFile, diffBaseMods } from './base-mods.js';
+import { baseModsFile, readBaseModsFile, diffBaseMods, rewriteActiveMods } from './base-mods.js';
 
 function parseArgs(argv) {
   const positional = [];
@@ -190,6 +191,24 @@ const WAIT_USAGE = [
   '  条件与路径写法见 docs/cli-wait-用法-20261024.md',
 ].join('\n');
 
+/** `mods` 的四条子命令 —— 用法文案与「缺 --profile」的示例都从这里取，免得两处各写一份 */
+const MODS_SUBCOMMANDS = ['list', 'add', 'remove', 'apply'];
+
+const MODS_USAGE = [
+  '用法:',
+  '  node src/cli.js mods list   --profile <p> [--json]',
+  '  node src/cli.js mods add    --profile <p> --package-id <id> [--name <显示名>] [--why <一句话>] [--apply]',
+  '  node src/cli.js mods remove --profile <p> --package-id <id> [--apply]',
+  '  node src/cli.js mods apply  --profile <p>',
+  '',
+  '  被测 mod 的清单存在 profiles\\<p>\\tested-mods.json（不存在 ⇒ 空清单）；底座在仓库根 base-mods.json。',
+  '  add/remove 只改清单数据文件，**只有 --apply 才动 ModsConfig.xml**（顺序 = 底座 → 被测 → 其余，幂等）。',
+  '  --profile 必填：mods 改的是「某个 profile 的文件」，猜一个就等于改错别人的清单。',
+  '  packageId 按大小写不敏感比较；写入保留你给的原写法；重复 add 幂等（只更新 name/why，不重复追加）。',
+  '  退出码：0=成功 / 1=参数错或数据文件坏了（tested-mods.json 不是合法 JSON、packageId 形状不对）。',
+  '  加一个被测 mod 的最小闭环：mods add … --apply → start --profile <p> → env-check --profile <p>',
+].join('\n');
+
 /** `wait` 打印采样时的上限：真载荷（get_bridge_status 带 companions/operation）能有 8 KB */
 const SAMPLE_PRINT_LIMIT = 2000;
 
@@ -279,6 +298,7 @@ const COMMAND_HELP = {
     '',
     '  打印 base-mods.json（全项目唯一一份底座清单）；带 --profile 才顺便对账，只报告不写文件。',
   ].join('\n'),
+  mods: MODS_USAGE,
 };
 
 /** 没有专门 help 时打这份总表；`node src/cli.js`（无参数）打的是同一份 */
@@ -300,6 +320,7 @@ const GENERAL_USAGE = [
   '  wait     等条件成立（反复调探针 + 条件 JSON；0 命中 / 2 超时 / 1 其它），见 docs/cli-wait-用法-20261024.md',
   '  atoms    原子能力清单（算子 / 四类来源的快照字段 / 登记表统计）—— 写测试前先看这个',
   '  base-mods 底座 mod 清单（base-mods.json）；带 --profile <p> 只报告该 profile 缺哪几个，不写文件',
+  '  mods     被测 mod 清单（profiles/<p>/tested-mods.json）：list / add / remove / apply —— 只有 --apply 才改 ModsConfig',
   '  logs     打印该 profile 的 Player.log 尾部',
   '  live     等游戏侧事件（DSH_GameLink 的 NDJSON 或 Player.log），命中即返回',
   '  stop     关闭该 profile 的测试实例（--force 才会强杀全机 RimWorld，破坏性）',
@@ -344,15 +365,18 @@ const PROFILE_REQUIRED = {
   stop: '会关掉一个游戏实例；缺省值 vanilla 是 561 个 mod 的满配，猜错代价最大',
   smoke: '默认会起一个实例、跑完再关掉；缺省值 vanilla 是 561 个 mod 的满配，猜错代价最大',
   'env-check': '报的是「某个 profile 的」环境事实，猜错了等于把别人的事实钉进你的上下文',
+  mods: '读写的是「某个 profile 的被测 mod 清单」并会改写它的 ModsConfig.xml，猜错了就是把 mod 加进别人的环境',
 };
 
-function requireExplicitProfile(cmd, flags) {
+function requireExplicitProfile(cmd, flags, positional = []) {
   const why = PROFILE_REQUIRED[cmd];
   if (!why) return;
   if (typeof flags.profile === 'string' && flags.profile.trim()) return;
   const names = listProfileNames();
   // 照抄示例优先给 voiced：它是 AGENTS.md 资源约定里那条「只开轻 profile」的例子
   const sample = names.includes('voiced') ? 'voiced' : (names[0] ?? '<名字>');
+  // mods 的四条子命令要的参数各不相同，示例里带上子命令，「照抄」才有意义
+  const exampleCmd = cmd === 'mods' && MODS_SUBCOMMANDS.includes(positional[0]) ? `mods ${positional[0]}` : cmd;
   // package.json 里的 "start"/"stop"/"smoke" 就是 `node src/cli.js <同名>`，它们现在也会被这条拒绝：
   // 把「npm 传参要 --」这个坑直接写在错误里，省得人去翻 npm 文档
   const npmHint =
@@ -362,7 +386,7 @@ function requireExplicitProfile(cmd, flags) {
       `  可用 profile（profiles\\ 下的目录）：${names.length ? names.join(', ') : '（一个都没有）'}\n` +
       `  底座 mod 清单（所有 profile 共用，start 时自动补齐）：${baseModsFile(WS)}\n` +
       npmHint +
-      `  照抄：node src/cli.js ${cmd} --profile ${sample}`,
+      `  照抄：node src/cli.js ${exampleCmd} --profile ${sample}`,
   );
 }
 
@@ -414,8 +438,7 @@ function toolFailureText(res) {
 /**
  * `profiles/<p>/Config/ModsConfig.xml` 里 `<activeMods>` 的内容 —— 游戏没起时唯一的事实来源。
  *
- * 为什么这里再读一次 XML：`src/base-mods.js` 的 `readActiveMods` 没导出，而本轮只允许改 cli.js；
- * 等它导出后这里应改成调用它（同一件事只能有一处解析）。
+ * 解析只有一处（`activeModIdsInXml`）；这里负责「读盘 + 把读不到的原因说清楚」，不另写一套正则。
  */
 function readActiveModsInProfile(profile) {
   const file = path.join(profileDir(profile), 'Config', 'ModsConfig.xml');
@@ -423,12 +446,20 @@ function readActiveModsInProfile(profile) {
   try {
     xml = fs.readFileSync(file, 'utf8');
   } catch {
-    return { file, count: null, ids: null, reason: '没有 ModsConfig.xml（这个 profile 还没启动过）' };
+    return {
+      file,
+      count: null,
+      ids: null,
+      xml: null,
+      missingFile: true,
+      reason: '没有 ModsConfig.xml（这个 profile 还没启动过）',
+    };
   }
-  const section = /<activeMods>([\s\S]*?)<\/activeMods>/.exec(xml);
-  if (!section) return { file, count: null, ids: null, reason: 'ModsConfig.xml 里没有 <activeMods> 段' };
-  const ids = [...section[1].matchAll(/<li>([^<]*)<\/li>/g)].map((m) => m[1].trim()).filter(Boolean);
-  return { file, count: ids.length, ids };
+  const ids = activeModIdsInXml(xml);
+  if (ids === null) {
+    return { file, count: null, ids: null, xml, missingFile: false, reason: 'ModsConfig.xml 里没有 <activeMods> 段' };
+  }
+  return { file, count: ids.length, ids, xml, missingFile: false }; // xml 给「顺序是否已规范」的判定复用，避免二次读盘
 }
 
 /** 显示用：读不到就是 'unknown'，别用 false/null 冒充「已确认」 */
@@ -436,8 +467,757 @@ function knownOrUnknown(value) {
   return value === undefined || value === null ? 'unknown' : value;
 }
 
+/* ═══════════════════ `mods` 子命令：被测 mod 清单与 ModsConfig 对齐 ═══════════════════ */
+
+/**
+ * 被测 mod 的清单落在 `profiles/<p>/tested-mods.json`，底座在仓库根 `base-mods.json` ——
+ * 两份数据文件各管一段，谁也不抄谁：
+ *   base-mods.json  所有 profile 共用，start 前自动补齐（只加不删）；
+ *   tested-mods.json 单个 profile 自己的被测 mod，由 `mods` 子命令读写。
+ * 好处是加一个被测 mod 变成「往一份数据文件里加一条」，不用手改 XML（手改没有校验、不幂等、
+ * 写坏了要等游戏启动才发现）。
+ */
+const TESTED_MODS_FILENAME = 'tested-mods.json';
+const TESTED_MODS_DESCRIPTION = '本 profile 的被测 mod；底座见仓库根 base-mods.json';
+
+function testedModsFile(profile) {
+  return path.join(profileDir(profile), TESTED_MODS_FILENAME);
+}
+
+/**
+ * 读 `profiles/<p>/tested-mods.json`。
+ *
+ * 文件不存在 ⇒ 空清单（不是错误：新 profile 还没有被测 mod 是正常状态，`mods list` 不该因此报错）。
+ * 文件存在但 JSON 坏了 ⇒ **抛错**，绝不退化成空清单：那样下一次 `mods add` 会把用户手写的内容整体覆盖掉，
+ * 而覆盖是静默的（文件照样写得成功）。
+ */
+function readTestedMods(profile) {
+  const file = testedModsFile(profile);
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return { file, missingFile: true, mods: [] };
+    throw err;
+  }
+  let data;
+  try {
+    data = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+  } catch (err) {
+    throw new Error(
+      `${file} 不是合法 JSON：${err.message}\n` +
+        '  它是手写数据文件，CLI 不把它当空清单（那样下一次 mods add 会把你的内容覆盖掉）。\n' +
+        `  先修好它，或改名备份后再跑：Move-Item '${file}' '${file}.bak'`,
+    );
+  }
+  const mods = [];
+  for (const entry of Array.isArray(data?.mods) ? data.mods : []) {
+    const packageId = String(entry?.packageId ?? '').trim();
+    if (!packageId) continue;
+    // 同一条写两遍是数据笔误：按第一处只留一个，否则 apply 会把它算两次
+    if (mods.some((m) => m.packageId.toLowerCase() === packageId.toLowerCase())) continue;
+    mods.push({ packageId, name: String(entry?.name ?? ''), why: String(entry?.why ?? '') });
+  }
+  /**
+   * Windows 上的老坑（仓库级，见 AGENTS.md）：用 PowerShell 5.1 的 `Set-Content` / 重定向写这份文件，
+   * 中文会落成 GBK，读进来是 U+FFFD。**JSON 照样解析成功**——只有 name/why 变乱码，packageId 是 ASCII
+   * 不受影响，所以排序与加载都没事；但不说一句，用户只会看到「名字变成一片问号」而不知道原因。
+   * 只警告不拒绝：乱码不是数据损坏到不能用，拒绝会把人挡在门外。
+   */
+  const garbled = mods.filter((m) => m.name.includes('\ufffd') || m.why.includes('\ufffd'));
+  if (garbled.length || String(data?.description ?? '').includes('\ufffd')) {
+    console.error(
+      `[警告] ${file} 里的中文是乱码（U+FFFD）${garbled.length ? `：${garbled.map((m) => m.packageId).join(', ')}` : ''}\n` +
+        '  通常是写这份文件时用了 GBK（PowerShell 5.1 的 Set-Content / shell 重定向）。' +
+        'packageId 是 ASCII，排序与加载不受影响；要修就用能写 UTF-8 的工具（本仓库：write/edit 工具）重写 name/why。',
+    );
+  }
+  return { file, missingFile: false, schema: data?.schema ?? null, description: String(data?.description ?? ''), mods };
+}
+
+/**
+ * 写 `tested-mods.json`（无 BOM UTF-8）。
+ *
+ * 形状固定成 `{ schema, profile, description, mods: [{ packageId, name, why }] }` ——
+ * 空字符串的 name/why 不落盘，免得手改时被一堆空字段淹掉；`packageId` 一律排第一。
+ */
+function writeTestedMods(profile, mods) {
+  const file = testedModsFile(profile);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const data = {
+    schema: 1,
+    profile,
+    description: TESTED_MODS_DESCRIPTION,
+    mods: mods.map(({ packageId, name, why }) => ({
+      packageId,
+      ...(name ? { name } : {}),
+      ...(why ? { why } : {}),
+    })),
+  };
+  fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  return file;
+}
+
+/**
+ * packageId 的形状检查：非空、无空白、无 `<` `>`。
+ *
+ * 为什么只查这三样：`<li>${packageId}</li>` 是直接拼进 XML 的，一个 `<` 就能把整段 activeMods 写坏，
+ * 而写坏的表现是「游戏启动后 mod 列表里少几条」，很难反推到一条手输命令。除此之外不猜作者的命名习惯
+ * ——mod 作者的写法什么都有（点分、下划线、大小写混排）。
+ */
+function assertPackageIdShape(raw) {
+  const example = 'node src/cli.js mods add --profile <p> --package-id xiayuan2004.VoiceDeputy --name 副官语音';
+  const given = raw === true ? '' : String(raw ?? '').trim();
+  if (!given) throw new Error(`--package-id 必填（mod 的 packageId，不是显示名）。\n  照抄：${example}`);
+  const bad = [];
+  if (/\s/.test(given)) bad.push('含空格/空白');
+  if (/[<>]/.test(given)) bad.push('含 < 或 >');
+  if (bad.length) throw new Error(`--package-id「${given}」形状不对（${bad.join('、')}）。\n  照抄：${example}`);
+  return given;
+}
+
+/** 一次进程内只扫一遍本机 mod 目录（一条 `mods` 子命令只会问一次「装没装」） */
+let installedModsScan = null;
+
+/** `<游戏>` = `<库>\steamapps\common\RimWorld` ⇒ 工坊内容在 `<库>\steamapps\workshop\content\294100` */
+function workshopContentDir(root) {
+  return path.join(path.dirname(path.dirname(root)), 'workshop', 'content', '294100');
+}
+
+/**
+ * 从一份 `About/About.xml` 里取**这个 mod 自己**的 `<packageId>`。
+ *
+ * 必须先挖掉 `<li>…</li>`：`<modDependencies>` 的每一项也是 `<li><packageId>…</packageId>…</li>`，
+ * 而且**可能排在真 packageId 之前**——实测工坊 `1195427067`（Architect Icons）就是这样，
+ * 直接取第一个 `<packageId>` 会把它报成 Harmony，于是「装没装」查到了错目录。
+ */
+function aboutPackageId(xml) {
+  const withoutListItems = xml.replace(/<li>[\s\S]*?<\/li>/g, '');
+  return /<packageId>\s*([^<]+?)\s*<\/packageId>/i.exec(withoutListItems)?.[1];
+}
+
+/**
+ * 扫「本机装了哪些 mod」：游戏自己的 `Mods\` 与 Steam 工坊 `content\294100\`，逐个读 `About\About.xml` 的
+ * `<packageId>`。
+ *
+ * 路径全部从 `gameRoot()` 推，**不新建配置文件**存它：gameRoot() 已经由 `RIMWORLD_ROOT` 管着，
+ * 再存一份路径就是又一处会漂的真源。
+ * 只代表「盘上有这个文件夹」，不代表「已订阅」——本地 ACF 只是下载账本，订阅列表在 Steam 服务器端
+ * （见 `docs\mod列表整理-结论.md`）；所以没扫到只警告、不拒绝。
+ */
+function scanInstalledMods() {
+  if (installedModsScan) return installedModsScan;
+  const root = gameRoot();
+  const roots = [path.join(root, 'Mods'), workshopContentDir(root)];
+  const byId = new Map();
+  let scanned = 0;
+  for (const dir of roots) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue; // 目录不存在：由 existingRoots 决定「unknown」还是「没装」
+    }
+    for (const entry of entries) {
+      // 游戏 Mods\ 下的本地 mod 常是 junction（LinkType=Junction），要一起认
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+      const modDir = path.join(dir, entry.name);
+      let xml;
+      try {
+        xml = fs.readFileSync(path.join(modDir, 'About', 'About.xml'), 'utf8');
+      } catch {
+        continue;
+      }
+      const packageId = aboutPackageId(xml);
+      if (!packageId) continue;
+      scanned += 1;
+      const key = packageId.toLowerCase();
+      if (byId.has(key)) continue; // 同一 mod 在 Mods\ 与工坊各有一份：记第一次看到的
+      byId.set(key, { packageId, dir: modDir, name: /<name>\s*([^<]+?)\s*<\/name>/i.exec(xml)?.[1] ?? '' });
+    }
+  }
+  installedModsScan = { roots, existingRoots: roots.filter((d) => fs.existsSync(d)), byId, scanned };
+  return installedModsScan;
+}
+
+/**
+ * 这个 packageId 在本机装没装。三态：`true` / `false`（扫过、没命中）/ `'unknown'`（连 mod 目录都没找到）。
+ * `false` 不拒绝 add：用户可能还没订阅，或游戏装在别的路径（`RIMWORLD_ROOT` 能指）。
+ */
+function locateInstalledMod(packageId) {
+  const scan = scanInstalledMods();
+  if (!scan.existingRoots.length) {
+    return {
+      installed: 'unknown',
+      dir: null,
+      name: '',
+      reason: `本机没找到 mod 目录（找过：${scan.roots.join(' / ')}）—— 游戏可能装在别处，用 RIMWORLD_ROOT 指过去再试`,
+    };
+  }
+  const hit = scan.byId.get(packageId.toLowerCase());
+  if (!hit) {
+    return {
+      installed: false,
+      dir: null,
+      name: '',
+      reason: `扫过 ${scan.existingRoots.join(' / ')} 里的 ${scan.scanned} 份 About.xml，没有 packageId「${packageId}」`,
+    };
+  }
+  return { installed: true, dir: hit.dir, name: hit.name, reason: null };
+}
+
+/**
+ * 从一个 ModsConfig.xml 文本里取 `<activeMods>` 的条目；没有这一段返回 null。
+ * `readActiveModsInProfile`（读盘）与 `applyModsConfig`（算完顺序后回读）共用这一处解析。
+ */
+function activeModIdsInXml(xml) {
+  const section = /<activeMods>([\s\S]*?)<\/activeMods>/.exec(xml);
+  if (!section) return null;
+  return [...section[1].matchAll(/<li>([^<]*)<\/li>/g)].map((m) => m[1].trim()).filter(Boolean);
+}
+
+/**
+ * 把 ModsConfig.xml 的 `<activeMods>` 对齐成「底座（base-mods.json 顺序）→ 被测 mod（tested-mods.json 顺序）
+ * → 其余保持原相对顺序」，返回是否真写了文件。
+ *
+ * 重排本身复用 `base-mods.js` 的 `rewriteActiveMods`（与 `start` 前补齐底座**同一处实现**），
+ * 所以「谁排最前」只有一份代码；幂等也由它保证（顺序已规范就原样返回），这里直接比字符串。
+ *
+ * `drop` 只给 `mods remove --apply` 用（理由见 `dropFromActiveMods`）。
+ */
+function applyModsConfig(profile, { drop = null } = {}) {
+  const base = readBaseModsFile(WS);
+  if (base.missingFile) {
+    throw new Error(
+      `没有 ${baseModsFile(WS)}：底座清单是「谁排最前」的唯一真源，缺了它算不出顺序。先恢复这份文件。`,
+    );
+  }
+  // 测试清单坏了会抛：不许拿空清单去重排（那会把被测 mod 排到「其余」里去）
+  const tested = readTestedMods(profile);
+  const file = path.join(profileDir(profile), 'Config', 'ModsConfig.xml');
+  let original;
+  try {
+    original = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') {
+      return {
+        modsConfigPath: file,
+        written: false,
+        skipped: `没有 ${file}（这个 profile 还没启动过）—— 先 node src/cli.js start --profile ${profile} 让它生成`,
+      };
+    }
+    throw err;
+  }
+  if (activeModIdsInXml(original) === null) {
+    return { modsConfigPath: file, written: false, skipped: `${file} 里没有 <activeMods> 段（不猜位置，没写文件）` };
+  }
+
+  let xml = original;
+  let dropped = 0;
+  if (drop) {
+    const result = dropFromActiveMods(xml, drop);
+    xml = result.xml;
+    dropped = result.dropped;
+  }
+  const beforeIds = activeModIdsInXml(xml) ?? [];
+  const beforeKeys = new Set(beforeIds.map((id) => id.toLowerCase()));
+  const nextXml = rewriteActiveMods(xml, {
+    front: base.packageIds,
+    then: tested.mods.map((m) => m.packageId),
+  });
+  const written = nextXml !== original;
+  // 'utf8' 写出去就是无 BOM；游戏与 read 工具都按 UTF-8 读这份 XML
+  if (written) fs.writeFileSync(file, nextXml, 'utf8');
+  const afterIds = activeModIdsInXml(nextXml) ?? [];
+  const afterKeys = new Set(afterIds.map((id) => id.toLowerCase()));
+  return {
+    modsConfigPath: file,
+    written,
+    // null = 这次根本没要求删行（`mods apply` / `add --apply`），0 = 要求删但没找到
+    dropped: drop ? dropped : null,
+    activeIds: afterIds,
+    added: afterIds.filter((id) => !beforeKeys.has(id.toLowerCase())),
+    removed: beforeIds.filter((id) => !afterKeys.has(id.toLowerCase())),
+    baseCount: base.packageIds.length,
+    testedCount: tested.mods.length,
+  };
+}
+
+/**
+ * 从 `<activeMods>` 里**删掉**一条 —— 全仓库**唯一**会删 activeMods 的地方。
+ *
+ * 为什么别处一律只加不删、而这里可以删：底座补齐（`ensureBaseMods`）与 `mods apply` 是在「替 profile
+ * 补齐/排序」，替人做减法会让用户的 mod 静默消失；而 `mods remove --apply` 的语义就是**用户亲口说删掉它**。
+ * 不删的后果更糟：那条 `<li>` 会从「被测 mod」掉进「其余条目」，apply 之后依旧被游戏加载，
+ * 于是「remove 了却还在跑」。
+ */
+function dropFromActiveMods(xml, packageId) {
+  const section = /<activeMods>([\s\S]*?)<\/activeMods>/.exec(xml);
+  if (!section) return { xml, dropped: 0 };
+  const want = String(packageId).toLowerCase();
+  let dropped = 0;
+  const inner = section[1].replace(/[ \t]*<li>([^<]*)<\/li>[ \t]*(\r?\n)?/g, (line, id) => {
+    if (id.trim().toLowerCase() !== want) return line;
+    dropped += 1;
+    return '';
+  });
+  if (!dropped) return { xml, dropped: 0 };
+  const next = `${xml.slice(0, section.index)}<activeMods>${inner}</activeMods>${xml.slice(section.index + section[0].length)}`;
+  return { xml: next, dropped };
+}
+
+/**
+ * 游戏侧的真实状态（要活桥接）：`list_mods` 每条 mod 的 `enabled` / `loadedInSession` /
+ * `unsatisfiedDependencies`，以及 `get_mod_configuration_status` 的 `restartRequired`。
+ *
+ * 没有实例时**不崩**：返回 `{ queried: false, reason }`，让上层把这几项标 `unknown` 并说明原因。
+ * 两个工具分开 try：一个挂住只让那一项降级（它们都排在游戏主线程上，超时值复用 env-check 那个 8 s 上限
+ * ——同一个「桥接调用别把 CLI 拖住」的约定，不另立一个数字）。
+ */
+async function collectGameModFacts(profile) {
+  const probe = await probeBridge(profile);
+  if (!probe.reachable) {
+    return {
+      queried: false,
+      reason: `桥接不可达 —— ${probe.reason ?? '没有实例在跑'}（enabled / loadedInSession / unsatisfiedDependencies 是 unknown，不是 false）`,
+      byId: new Map(),
+      restartRequired: null,
+      configStatus: null,
+    };
+  }
+  try {
+    const facts = await withBridge(
+      profile,
+      async (client) => {
+        const errors = {};
+        const call = async (name) => {
+          try {
+            return await client.callTool(name, {}, { timeoutMs: ENV_CHECK_CALL_TIMEOUT_MS });
+          } catch (err) {
+            errors[name] = err.message;
+            return null;
+          }
+        };
+        // 顺序给：先拿清单再拿配置状态；任何一条失败只丢它自己
+        const listMods = await call('rimworld/list_mods');
+        const configStatus = await call('rimworld/get_mod_configuration_status');
+        return { listMods, configStatus, errors };
+      },
+      { requestTimeoutMs: ENV_CHECK_CALL_TIMEOUT_MS },
+    );
+    const byId = new Map();
+    for (const m of Array.isArray(facts.listMods?.mods) ? facts.listMods.mods : []) {
+      const key = String(m?.packageId ?? '').toLowerCase();
+      if (key && !byId.has(key)) byId.set(key, m);
+    }
+    return {
+      queried: byId.size > 0,
+      reason: byId.size ? null : Object.values(facts.errors).join('；') || 'list_mods 没返回 mods 数组',
+      byId,
+      restartRequired: facts.listMods?.restartRequired ?? facts.configStatus?.restartRequired ?? null,
+      configStatus: facts.configStatus,
+    };
+  } catch (err) {
+    // 端口上有人答话但连接没成（归属校验不过 / 桥接被长调用挂住）：只降级，不整条崩
+    return {
+      queried: false,
+      reason: `桥接连接失败：${err.message}`,
+      byId: new Map(),
+      restartRequired: null,
+      configStatus: null,
+    };
+  }
+}
+
 /** env-check 每条桥接调用的上限：开测自检不该被一个挂住的调用拖住（bridge 把调用排在游戏主线程上） */
 const ENV_CHECK_CALL_TIMEOUT_MS = 8000;
+
+/**
+ * `mods list` 的全部事实（人读表与 `--json` 用同一份对象，两处不各算一遍）。
+ *
+ * 三件事各自有来源，别混：
+ *   底座 = `base-mods.json`（唯一真源）；被测 = `tested-mods.json`（本 profile 的数据文件）；
+ *   「人工加入」= ModsConfig 里有、但两份清单都不认领的条目。
+ * 游戏侧（enabled / loadedInSession / unsatisfiedDependencies）要活桥接，没有就标 unknown + 原因。
+ */
+async function collectModsList(profile) {
+  const base = readBaseModsFile(WS);
+  const tested = readTestedMods(profile);
+  const active = readActiveModsInProfile(profile);
+  const gameFacts = await collectGameModFacts(profile);
+  const activeKeys = new Set((active.ids ?? []).map((id) => id.toLowerCase()));
+
+  const baseRows = base.mods.map((m) => ({
+    packageId: m.packageId,
+    why: m.why,
+    inConfig: activeKeys.has(m.packageId.toLowerCase()),
+  }));
+
+  const testedRows = tested.mods.map((m) => {
+    const hit = locateInstalledMod(m.packageId);
+    const game = gameFacts.byId.get(m.packageId.toLowerCase()) ?? null;
+    return {
+      packageId: m.packageId,
+      // 名字优先级：清单里写的（人给的）> About.xml 里的 > 空
+      name: m.name || hit.name || '',
+      why: m.why,
+      inConfig: activeKeys.has(m.packageId.toLowerCase()),
+      installed: hit.installed,
+      installedDir: hit.dir,
+      installedNote: hit.reason,
+      game:
+        game === null
+          ? null
+          : {
+              enabled: game.enabled ?? null,
+              loadedInSession: game.loadedInSession ?? null,
+              unsatisfiedDependencies: Array.isArray(game.unsatisfiedDependencies) ? game.unsatisfiedDependencies : [],
+              hasOrderingIssues: game.hasOrderingIssues ?? null,
+            },
+    };
+  });
+
+  // 「人工加入」= ModsConfig 里有、却不在任何清单里（手改留下的）；只报告，绝不删
+  const claimed = new Set([...base.packageIds, ...tested.mods.map((m) => m.packageId)].map((id) => id.toLowerCase()));
+  const unmanaged = [];
+  const seenUnmanaged = new Set();
+  for (const id of active.ids ?? []) {
+    const key = id.toLowerCase();
+    if (claimed.has(key) || seenUnmanaged.has(key)) continue;
+    seenUnmanaged.add(key);
+    unmanaged.push(id);
+  }
+
+  // 顺序是否已经是「底座 → 被测 → 其余」：用同一处重排实现算一遍再比字符串（不另写一套判据）
+  const orderNormalized =
+    active.ids === null
+      ? null
+      : rewriteActiveMods(active.xml, { front: base.packageIds, then: tested.mods.map((m) => m.packageId) }) ===
+        active.xml;
+
+  const missingBase = baseRows.filter((r) => !r.inConfig).map((r) => r.packageId);
+  const missingTested = testedRows.filter((r) => !r.inConfig).map((r) => r.packageId);
+  const uninstalled = testedRows.filter((r) => r.installed === false).map((r) => r.packageId);
+
+  // 漂移：每条都写成「照着做」的一句话，只报「不一致」等于没诊断
+  const drift = [];
+  if (!fs.existsSync(profileDir(profile))) {
+    // profile 名字打错是最常见的「什么都查不到」；直接说清，别让人以为是 ModsConfig 坏了
+    drift.push(
+      `profiles\\ 下没有「${profile}」这个目录（名字打错了？）—— 现有 profile：` +
+        `${listProfileNames().join(', ') || '（一个都没有）'}`,
+    );
+  }
+  if (active.ids === null) {
+    drift.push(
+      `${active.file}：${active.reason}` +
+        (active.missingFile
+          ? ` —— 先 node src/cli.js start --profile ${profile} 一次让它生成`
+          : ' —— 不猜位置，先把这一段写回来（游戏启动时自己会写）'),
+    );
+  }
+  if (missingBase.length) {
+    drift.push(
+      `底座缺 ${missingBase.length} 个：${missingBase.join(', ')} ⇒ node src/cli.js mods apply --profile ${profile}` +
+        '（start 之前也会自动补齐，只加不删）',
+    );
+  }
+  if (missingTested.length) {
+    drift.push(
+      `被测 mod 不在 ModsConfig 里：${missingTested.join(', ')} ⇒ node src/cli.js mods apply --profile ${profile}`,
+    );
+  }
+  if (orderNormalized === false && !missingBase.length && !missingTested.length) {
+    drift.push(
+      `顺序不是「底座 → 被测 → 其余」 ⇒ node src/cli.js mods apply --profile ${profile}` +
+        '（同一批 packageId 只换位置）',
+    );
+  }
+  if (unmanaged.length) {
+    drift.push(
+      `ModsConfig 里有 ${unmanaged.length} 条既不是底座也不是被测（人工加入，不在任何清单里）：` +
+        `${unmanaged.join(', ')} —— mods 子命令不会动它们`,
+    );
+  }
+  if (uninstalled.length) {
+    drift.push(
+      `本机没扫到 ${uninstalled.join(', ')}：可能还没订阅，或游戏装在别的路径 —— ` +
+        'mods 不拦你，但起来之后它不会出现在 list_mods 里',
+    );
+  }
+  if (gameFacts.queried) {
+    for (const row of testedRows) {
+      if (!row.game) {
+        drift.push(`${row.packageId} 不在 list_mods 的返回里 —— 没装/没启用/没重启，先 mods apply 再重启实例`);
+        continue;
+      }
+      if (row.game.enabled === false) {
+        drift.push(
+          `${row.packageId} 在游戏侧 enabled=false ⇒ node src/cli.js stop --profile ${profile} 后 start` +
+            '（改了 ModsConfig 必须重启才生效）',
+        );
+      } else if (row.game.loadedInSession === false) {
+        drift.push(`${row.packageId} enabled=true 但 loadedInSession=false：本次没加载成功，看 Player.log 的红字`);
+      }
+      if (row.game.unsatisfiedDependencies.length) {
+        drift.push(`${row.packageId} 前置未满足：${row.game.unsatisfiedDependencies.join(', ')}`);
+      }
+    }
+    if (gameFacts.restartRequired === true) {
+      drift.push(
+        `restartRequired=true：配置改动还没在运行中的实例里生效 ⇒ node src/cli.js stop --profile ${profile} 后 start`,
+      );
+    }
+  } else {
+    drift.push(`游戏侧状态未查（${gameFacts.reason}）`);
+  }
+
+  return {
+    profile,
+    testedModsFile: tested.file,
+    testedModsMissing: Boolean(tested.missingFile),
+    modsConfigFile: active.file,
+    activeModsCount: active.count,
+    modsConfigNote: active.reason ?? null,
+    base: { file: base.file, missingFile: Boolean(base.missingFile), mods: baseRows, missing: missingBase },
+    tested: testedRows,
+    unmanaged,
+    orderNormalized,
+    game: {
+      queried: gameFacts.queried,
+      reason: gameFacts.reason,
+      restartRequired: gameFacts.restartRequired,
+      activeModCountFromGame: gameFacts.configStatus?.activeModCount ?? null,
+    },
+    drift,
+  };
+}
+
+function printModsList(s) {
+  console.log(`profile ${s.profile}`);
+  console.log(
+    `  被测 mod 清单 ${s.testedModsFile}` +
+      `${s.testedModsMissing ? '（不存在 ⇒ 按空清单处理）' : `（${s.tested.length} 项）`}`,
+  );
+  console.log(
+    `  ModsConfig    ${s.modsConfigFile}` +
+      `${s.activeModsCount === null ? `（${s.modsConfigNote}）` : `（activeMods ${s.activeModsCount} 条）`}`,
+  );
+  console.log(
+    `  游戏侧状态    ${
+      s.game.queried ? `已查询（restartRequired=${knownOrUnknown(s.game.restartRequired)}）` : `unknown —— ${s.game.reason}`
+    }`,
+  );
+
+  const width = Math.max(0, ...s.base.mods.map((m) => m.packageId.length));
+  console.log('');
+  console.log(`底座（base-mods.json，${s.base.mods.length} 项；√=已在 ModsConfig 里）`);
+  if (s.base.missingFile) console.log(`  [警告] 没有 ${s.base.file}：底座清单缺失，start 会跳过自动补齐`);
+  for (const m of s.base.mods) console.log(`  ${m.inConfig ? '√' : '✗'} ${m.packageId.padEnd(width)}  ${m.why}`);
+
+  console.log('');
+  console.log(`被测 mod（tested-mods.json，${s.tested.length} 项）`);
+  if (!s.tested.length) {
+    console.log(
+      `  （空）加一个：node src/cli.js mods add --profile ${s.profile} --package-id <packageId> --name <显示名> --apply`,
+    );
+  }
+  for (const m of s.tested) {
+    console.log(`  ${m.inConfig ? '√' : '✗'} ${m.packageId}${m.name ? `（${m.name}）` : ''}${m.why ? `  why：${m.why}` : ''}`);
+    const installedText =
+      m.installed === true ? `√ 已装 ${m.installedDir}` : m.installed === false ? `✗ 本机没扫到` : 'unknown';
+    console.log(`      installed=${m.installed}  ${installedText}`);
+    if (m.game) {
+      const deps = m.game.unsatisfiedDependencies.length ? m.game.unsatisfiedDependencies.join(', ') : '无';
+      console.log(
+        `      game：enabled=${knownOrUnknown(m.game.enabled)} loadedInSession=${knownOrUnknown(m.game.loadedInSession)} ` +
+          `unsatisfiedDependencies=${deps}`,
+      );
+    } else {
+      console.log(`      game：unknown（${s.game.queried ? 'list_mods 里没有它' : '桥接不可达'}）`);
+    }
+  }
+
+  console.log('');
+  console.log(`人工加入（ModsConfig 里有、不在任何清单里 —— mods 子命令不会动它们；共 ${s.unmanaged.length} 条）`);
+  if (!s.unmanaged.length) console.log('  （没有）');
+  for (const id of s.unmanaged) console.log(`  ${id}`);
+
+  console.log('');
+  console.log('漂移 / 下一步');
+  if (!s.drift.length) console.log('  无（底座、被测、顺序都对得上）');
+  for (const d of s.drift) console.log(`  - ${d}`);
+}
+
+/** `--apply` 之后统一的一句话（add / remove / apply 三条命令共用，免得三处各写一遍） */
+function printApplyResult(r) {
+  if (r.skipped) {
+    console.log(`  ModsConfig 未改：${r.skipped}`);
+    return;
+  }
+  if (!r.written) {
+    console.log(`  ModsConfig 已是「底座 → 被测 → 其余」，没写文件（幂等）：${r.modsConfigPath}`);
+  } else {
+    const rest = Math.max(0, r.activeIds.length - r.baseCount - r.testedCount);
+    console.log(
+      `  ModsConfig 已重写：${r.modsConfigPath}\n` +
+        `    activeMods ${r.activeIds.length} 条 = 底座 ${r.baseCount} + 被测 ${r.testedCount} + 其余 ${rest}`,
+    );
+    if (r.added.length) console.log(`    新补进：${r.added.join(', ')}`);
+    if (r.removed.length) console.log(`    不再包含：${r.removed.join(', ')}`);
+  }
+  // dropped 只在「明确 remove --apply」时才不是 null；其余命令不该出现「没有可删的」这种话
+  if (r.dropped) console.log(`    从 <activeMods> 删掉 ${r.dropped} 行（你明确 remove + --apply 才会走到这里）`);
+  else if (r.dropped === 0) console.log('    <activeMods> 里本来就没有这一条（没有可删的）');
+}
+
+/** 三条命令共用的「下一步能照抄的命令」尾巴 */
+function printModsNextSteps(profile, { applied }) {
+  console.log('下一步（照抄）：');
+  if (!applied) {
+    console.log(`  node src/cli.js mods apply --profile ${profile}        # 排进 ModsConfig（底座 → 被测 → 其余）`);
+  }
+  console.log(`  node src/cli.js start --profile ${profile}`);
+  console.log(`  node src/cli.js env-check --profile ${profile}`);
+}
+
+async function modsList({ flags, profile }) {
+  const report = await collectModsList(profile);
+  if (flags.json !== undefined) out(report);
+  else printModsList(report);
+  return { exitCode: 0 };
+}
+
+async function modsAdd({ flags, positional, profile }) {
+  if (flags['package-id'] === undefined && positional[0]) {
+    throw new Error(
+      `packageId 用 --package-id 给（不是位置参数）：\n` +
+        `  照抄：node src/cli.js mods add --profile ${profile} --package-id ${positional[0]}`,
+    );
+  }
+  const packageId = assertPackageIdShape(flags['package-id']);
+  const optedName = typeof flags.name === 'string' ? flags.name.trim() : '';
+  const optedWhy = typeof flags.why === 'string' ? flags.why.trim() : '';
+  // 先查「装没装」再写文件：警告要在结果那一行之前出现，才知道该不该继续往下走
+  const located = locateInstalledMod(packageId);
+  const existing = readTestedMods(profile);
+  const at = existing.mods.findIndex((m) => m.packageId.toLowerCase() === packageId.toLowerCase());
+  const previous = at >= 0 ? existing.mods[at] : null;
+  const entry = {
+    // 保留用户第一次给的原写法（比较是大小写不敏感的，但清单该长得像用户自己写的）
+    packageId: previous?.packageId ?? packageId,
+    // 幂等：这次没给的字段沿用已有的；都没给就借用 About.xml 里的显示名
+    name: optedName || previous?.name || located.name || '',
+    why: optedWhy || previous?.why || '',
+  };
+  const mods = existing.mods.slice();
+  if (at >= 0) mods[at] = entry;
+  else mods.push(entry);
+  const profileExisted = fs.existsSync(profileDir(profile));
+  const unchanged = at >= 0 && JSON.stringify(entry) === JSON.stringify(existing.mods[at]);
+  const file = unchanged ? existing.file : writeTestedMods(profile, mods);
+
+  console.log(
+    `✓ ${unchanged ? '无变化（幂等，清单文件没动）' : at >= 0 ? '已更新' : '已登记'} ${file}：` +
+      `${entry.packageId}${entry.name ? `（${entry.name}）` : ''} 第 ${mods.indexOf(entry) + 1} 项 / 共 ${mods.length} 项`,
+  );
+  if (entry.why) console.log(`  why：${entry.why}`);
+  if (!profileExisted) {
+    console.log(`[警告] profiles\\${profile}\\ 原来不存在，已随这次写入新建（start 时会补齐其余文件）`);
+  }
+  const base = readBaseModsFile(WS);
+  if (base.packageIds.some((id) => id.toLowerCase() === entry.packageId.toLowerCase())) {
+    console.log(
+      `[警告]「${entry.packageId}」已经在底座清单（base-mods.json）里：它会按底座顺序排最前，塞进被测清单没有意义`,
+    );
+  }
+  if (located.installed === true) {
+    console.log(`  装没装：√ 本机有这个 mod（${located.dir}）`);
+  } else if (located.installed === false) {
+    console.log(
+      `[警告] 装没装：本机没扫到「${entry.packageId}」，但**已登记**（不拦你 —— 可能还没订阅，或游戏装在别的路径）。\n` +
+        `  依据：${located.reason}\n` +
+        '  没装的话 start 之后 list_mods 里不会有它，先装/订阅再跑。',
+    );
+  } else {
+    console.log(`[警告] 装没装：unknown —— ${located.reason}`);
+  }
+
+  let applied = null;
+  if (flags.apply !== undefined) {
+    applied = applyModsConfig(profile);
+    printApplyResult(applied);
+  } else {
+    console.log('  没给 --apply：ModsConfig 没动，所以它现在还不会进游戏（add 只登记清单）。');
+  }
+  printModsNextSteps(profile, { applied });
+  return { exitCode: 0 };
+}
+
+async function modsRemove({ flags, positional, profile }) {
+  if (flags['package-id'] === undefined && positional[0]) {
+    throw new Error(
+      `packageId 用 --package-id 给（不是位置参数）：\n` +
+        `  照抄：node src/cli.js mods remove --profile ${profile} --package-id ${positional[0]} --apply`,
+    );
+  }
+  const packageId = assertPackageIdShape(flags['package-id']);
+  const existing = readTestedMods(profile);
+  const at = existing.mods.findIndex((m) => m.packageId.toLowerCase() === packageId.toLowerCase());
+  if (at < 0) {
+    console.log(`「${packageId}」本来就不在 ${existing.file} 里（幂等，清单文件没动）`);
+    if (flags.apply !== undefined) {
+      console.log(
+        `[警告] 它不在被测清单里（很可能是你手加进 ModsConfig 的）：--apply 仍会把它从 <activeMods> 删掉 ——` +
+          ' 这是本条命令唯一会删行的路径，删之前请确认你确实要它消失。',
+      );
+    }
+  } else {
+    const removed = existing.mods[at];
+    const mods = existing.mods.filter((_, i) => i !== at);
+    const file = writeTestedMods(profile, mods);
+    console.log(`✓ 已从 ${file} 移除 ${removed.packageId}${removed.name ? `（${removed.name}）` : ''}（剩 ${mods.length} 项）`);
+  }
+  const base = readBaseModsFile(WS);
+  if (base.packageIds.some((id) => id.toLowerCase() === packageId.toLowerCase())) {
+    console.log(`[警告]「${packageId}」在底座清单（base-mods.json）里：下一次 start 还会把它补回来（底座只加不删）`);
+  }
+
+  let applied = null;
+  if (flags.apply !== undefined) {
+    applied = applyModsConfig(profile, { drop: packageId });
+    printApplyResult(applied);
+  } else {
+    console.log('  没给 --apply：ModsConfig 没动 —— 它可能还在 <activeMods> 里，游戏照样会加载它。');
+  }
+  printModsNextSteps(profile, { applied });
+  return { exitCode: 0 };
+}
+
+async function modsApply({ profile }) {
+  const tested = readTestedMods(profile); // 坏 JSON 在这里就抛，不带着空清单去重排
+  const r = applyModsConfig(profile);
+  console.log(`✓ mods apply：profile ${profile}`);
+  console.log(
+    `  被测 mod 清单 ${tested.file}` +
+      `${tested.missingFile ? '（不存在 ⇒ 只有底座会被排到前面）' : `（${tested.mods.length} 项）`}`,
+  );
+  printApplyResult(r);
+  console.log('下一步（照抄）：');
+  console.log(`  node src/cli.js start --profile ${profile}`);
+  console.log(`  node src/cli.js env-check --profile ${profile}`);
+  return { exitCode: 0 };
+}
+
+async function runMods({ sub, positional, flags, profile }) {
+  if (sub === 'list') return modsList({ flags, profile });
+  if (sub === 'add') return modsAdd({ flags, positional: positional.slice(1), profile });
+  if (sub === 'remove') return modsRemove({ flags, positional: positional.slice(1), profile });
+  if (sub === 'apply') return modsApply({ profile });
+  // 没给子命令（或打错）：打用法并 exit 1 —— 不猜「你是想 list 还是 add」
+  console.log(MODS_USAGE);
+  return { exitCode: 1 };
+}
 
 /**
  * 一次 env-check 的全部事实。**只读**：不 start / 不 stop、不写文件、不推时间。
@@ -792,7 +1572,7 @@ async function main() {
   }
 
   // 会真起/真关游戏的命令不接受「猜一个 profile」——默认值 vanilla 正是那次事故的放大器
-  requireExplicitProfile(cmd, flags);
+  requireExplicitProfile(cmd, flags, positional);
 
   const profile = flags.profile || 'vanilla';
 
@@ -850,6 +1630,20 @@ async function main() {
       console.log('');
       console.log(`桥接就绪：127.0.0.1:${info.port}  (等待 ${(info.waitedMs / 1000).toFixed(1)}s，来源=${info.source ?? 'log'})`);
       out({ bridge: { host: info.host, port: info.port }, tokenPreview: info.token.slice(0, 8) + '…' });
+      break;
+    }
+
+    case 'mods': {
+      /**
+       * 被测 mod 的清单入口：list / add / remove / apply。
+       *
+       * 这一条命令替掉「手改 profiles\<p>\Config\ModsConfig.xml」——手改没有校验（写坏一个 `<` 就少几条 mod）、
+       * 不幂等（重复加会多一行）、也不告诉你「这个 packageId 本机装没装」。顺序仍由 base-mods.js 的
+       * `rewriteActiveMods` 一处决定（与 start 前补底座同一份实现）。
+       * 只有带 `--apply` 才碰 ModsConfig.xml；`list` 与不带 --apply 的 add/remove 只读或只改清单数据文件。
+       */
+      const result = await runMods({ sub: positional[0], positional, flags, profile });
+      process.exitCode = result.exitCode ?? 0;
       break;
     }
 

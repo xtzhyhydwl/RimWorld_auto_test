@@ -112,11 +112,31 @@ function planBaseMods({ profileDir, baseMods }) {
 /** `<activeMods>` 段的默认缩进（真 profile 由游戏自己写成 4 空格） */
 const DEFAULT_MOD_INDENT = '    ';
 
+/** 清单去重：trim、丢掉空项、按 packageId **大小写不敏感**只留第一次出现的位置 */
+function normalizePackageIds(list) {
+  const ids = [];
+  const seen = new Set();
+  for (const raw of Array.isArray(list) ? list : []) {
+    const id = String(raw ?? '').trim();
+    if (!id || seen.has(id.toLowerCase())) continue;
+    seen.add(id.toLowerCase());
+    ids.push(id);
+  }
+  return ids;
+}
+
 /**
- * 把 `<activeMods>` 重排成「底座在前 + 其余保持原相对顺序」，顺带补进缺的 `<li>`。
+ * 把 `<activeMods>` 重排成「前置清单（front）→ 第二段清单（then）→ 其余保持原相对顺序」，顺带补进缺的 `<li>`。
  *
- * 目标顺序 = `[base-mods.json 里的项，按该文件顺序]` + `[原有条目里不属于底座的，保持原顺序]`。
- * 缺的项直接落在它该在的底座位置上（不再一律追加到段末）。
+ * 两个调用方共用这一处实现（**「谁排最前」全项目只有这一份代码**）：
+ *   - `ensureBaseMods`（start 前补齐底座）：`{ front: base-mods.json, then: [] }`；
+ *   - `mods apply` / `mods add|remove --apply`（被测 mod）：`{ front: 底座, then: tested-mods.json }`。
+ * 改一处就同时改两条路，不会一条改到、另一条漏掉。
+ *
+ * 目标顺序 = `[front 里的项，按该数组顺序]` + `[then 里的项，按该数组顺序]` +
+ * `[原有条目里两段都不属于的，保持原顺序]`。
+ * 缺的项直接落在它该在的位置上（不一律追加到段末）；`front` 里已有的 id 再出现在 `then` 里时忽略
+ * —— 同一条 mod 只该被排一次，以底座为准。
  *
  * 为什么必须重排、而不只是追加（**有意的行为变更**）：RimWorld 按 `<activeMods>` 的顺序加载，
  * 「Core → 官方 DLC → 其它 mod」是唯一能工作的顺序。旧实现把缺的 `<li>` 一律插到 `</activeMods>`
@@ -125,11 +145,11 @@ const DEFAULT_MOD_INDENT = '    ';
  * 代价：已有 profile 的 activeMods 顺序会被改动一次（每条 packageId 不变，只是位置变）。
  *
  * 幂等：算出来的顺序与文件里已有的完全一致时，**原样返回传进来的字符串**（调用方据此不写文件）。
- * 没有 `<activeMods>` 段时也原样返回 —— 不猜位置。
+ * 没有 `<activeMods>` 段、或 front 与 then 都是空清单时也原样返回 —— 不猜位置。
  * 用文本重排而不是 XML 序列化器：序列化器会把整个文件重排（属性引号、自闭合标签、
  * knownExpansions 的位置都会变），真 profile 的 diff 会炸成整文件。
  */
-export function insertBaseMods(xml, baseMods) {
+export function rewriteActiveMods(xml, { front = [], then = [] } = {}) {
   const section = /<activeMods>([\s\S]*?)<\/activeMods>/.exec(xml);
   if (!section) return xml;
   const inner = section[1];
@@ -144,19 +164,15 @@ export function insertBaseMods(xml, baseMods) {
     entries.push({ id, text: m[0], indent: /^[ \t]*$/.test(before) ? before : null });
   }
 
-  const baseIds = [];
-  const baseKeys = new Set();
-  for (const raw of Array.isArray(baseMods) ? baseMods : []) {
-    const id = String(raw ?? '').trim();
-    if (!id || baseKeys.has(id.toLowerCase())) continue;
-    baseKeys.add(id.toLowerCase());
-    baseIds.push(id);
-  }
-  if (!baseIds.length) return xml; // 没有清单就没有「该在前面的东西」
+  const frontIds = normalizePackageIds(front);
+  const frontKeys = new Set(frontIds.map((id) => id.toLowerCase()));
+  // then 里与 front 重复的项丢掉：同一条 mod 排两次会多出一行（底座以 base-mods.json 为准）
+  const thenIds = normalizePackageIds(then).filter((id) => !frontKeys.has(id.toLowerCase()));
+  if (!frontIds.length && !thenIds.length) return xml; // 没有清单就没有「该在前面的东西」
 
   const ordered = [];
   const consumed = new Set();
-  for (const id of baseIds) {
+  for (const id of [...frontIds, ...thenIds]) {
     const key = id.toLowerCase();
     const at = entries.findIndex((e, i) => !consumed.has(i) && e.id.toLowerCase() === key);
     if (at >= 0) {
@@ -166,7 +182,7 @@ export function insertBaseMods(xml, baseMods) {
       ordered.push({ id, text: `<li>${id}</li>`, indent: null });
     }
   }
-  // 底座之外的条目原样留在后面；底座项的重复行也一并留在这里（只加不删，不替 profile 主人做减法）
+  // 两段清单之外的条目原样留在后面；清单项的重复行也一并留在这里（只加不删，不替 profile 主人做减法）
   entries.forEach((e, i) => {
     if (!consumed.has(i)) ordered.push(e);
   });
@@ -200,17 +216,18 @@ export function diffBaseMods({ profileDir, baseMods }) {
 }
 
 /**
- * 补齐底座 mod（幂等，只加不删；顺带把底座项排到最前面，理由见 `insertBaseMods`）。
+ * 补齐底座 mod（幂等，只加不删；顺带把底座项排到最前面，理由见 `rewriteActiveMods`）。
  * 返回 `{ added, already, reordered, modsConfigPath }`；
  * ModsConfig.xml 不存在或没有 `<activeMods>` 时不写文件，返回 `{ added: [], already: [], skipped }`。
  *
- * **变才写**：`insertBaseMods` 在顺序已经规范时原样返回，所以这里可以直接比字符串 ——
+ * **变才写**：`rewriteActiveMods` 在顺序已经规范时原样返回，所以这里可以直接比字符串 ——
  * 没变化就不动文件（每次 start 都摸一遍文件会把 mtime、git 状态、用户的备份工具全都弄脏）。
  */
 export function ensureBaseMods({ profileDir, baseMods }) {
   const plan = planBaseMods({ profileDir, baseMods });
   if (plan.skipped) return { added: [], already: [], skipped: plan.skipped };
-  const nextXml = insertBaseMods(plan.xml, baseMods);
+  // start 路径不认识被测 mod：then 空 ⇒ 行为与泛化前的 insertBaseMods 完全一致（只认底座）
+  const nextXml = rewriteActiveMods(plan.xml, { front: baseMods, then: [] });
   const changed = nextXml !== plan.xml;
   // 'utf8' 写出去就是无 BOM；游戏与 Read 工具都按 UTF-8 读这份 XML
   if (changed) fs.writeFileSync(plan.file, nextXml, 'utf8');
