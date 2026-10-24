@@ -39,6 +39,13 @@
 - `stop` 默认只关本 profile；**`--force` 会强杀全机 RimWorld（含用户在玩的那局），只有用户明确要求才用**。
 - 起游戏会**抢一次窗口焦点**：用户正在玩时先说一声，窗口放副屏（`prefs.json` 的 `monitor`）。
 
+7. **写中文文件只准用 `write` / `edit` 工具，禁用 shell 重定向。**
+理由：本机的 `pwsh` 工具是 **Windows PowerShell 5.1**，`Set-Content` 默认写 GBK、`Out-File` 不带参数写 UTF-16LE、
+`Out-File -Encoding utf8` 带 BOM（`node` 读它 `JSON.parse` 会抛 `SyntaxError: Unexpected token '﻿'`）——
+**中文落成乱码时文件照样存在、大小正常、`git status` 也显示改过**，"重要结论当场落盘"这条会静默失效。
+只在"必须保存命令输出"时才用 shell，且落盘后**读回前 3 行**确认中文；`Select-String` 搜中文在 GBK 文件上会**静默失配**，别拿它当"没匹配"的证据。
+实测样例：`runs\2026-10-25-skill试跑\enc-test\`（四种写法的头字节）。
+
 ## 写代码的三条原则（用户 2026-10-17 定，**顶层，优先于"先能跑"**）
 
 1. **Easy to Change** —— 改一个东西只改一处。
