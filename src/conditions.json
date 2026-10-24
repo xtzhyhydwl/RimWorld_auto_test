@@ -232,9 +232,9 @@
         "path": "result.alive",
         "equals": false
       },
-      "description": "stop 之后等进程真的没了（现在那处是固定 sleep 循环）。",
-      "evidence": "docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md:123 与 :155-160（进程快照字段，设计推断）",
-      "verifiedLevel": "inferred",
+      "description": "stop 之后等进程真的没了。2026-10-24 真机两次命中（`stop` 后均 exit 0）：`runs/2026-10-25-回归/A-六阶段/71-wait-进程已退出.txt`、`runs/2026-10-25-回归/V-验证/05-真机-收工.txt`。",
+      "evidence": "docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md:123 与 :155-160（进程快照字段）；真机命中见上述两条 runs 证据",
+      "verifiedLevel": "wait-verified",
       "timeoutMs": 60000
     }
   }
