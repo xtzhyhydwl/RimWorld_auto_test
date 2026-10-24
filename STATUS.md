@@ -32,12 +32,14 @@
   - **未验证**：`startGame` 全链路仍未在真机跑（本轮禁止起停游戏）；`stop --force` 没真杀过；`resolveBridge` 的「活实例全部通过」分支没跑到（写完时游戏已被关掉）。
 - **当前重点（2026-10-24 晚，用户指定）**：把「自然语言需求 → 可执行测试」这条链路做出来。
   - 事实底稿：[docs/自动化测试-流程与原子能力清单-20261024.md](docs/自动化测试-流程与原子能力清单-20261024.md)（六阶段流程、四层原子、七条组合规则、缺原子反馈模板；**不含模块划分**）。
-  - **组合 skill 已落地**（用户 2026-10-24 决定：**单开**、名字带 closed-loop、内容含原手册要点、试用有效后取代旧 skill）：
+  - **组合 skill 已落地，并按用户口径改薄（2026-10-24 晚）**：skill 只留「做什么 / 四问拆判据 / 硬规则 / 选 SOP / 停手 / 指针」，
+    其余全部外移；生长方式 = **加指针，不加正文**。
     [`.dsh/skills/rimworld-auto-test-closed-loop/SKILL.md`](.dsh/skills/rimworld-auto-test-closed-loop/SKILL.md)
-    （决策层 + 执行层：拆解四问、七条硬规则、六阶段 SOP、四层原子、读失败、停手模板、反例、报告要求）。
-    旧 `rimworld-auto-test` 退为**细节手册**，顶部已指向新 skill。
-  - **模块线（用户已定）**：代码按**四层原子**切（`condition.js` 判定 / `wait-sources.js` 取样与聚合 / `conditions.json` 登记 / 游戏内工具 mod 侧）；
-    另加一份**经典测试模板**兜下限：[docs/测试模板-六阶段-20261024.md](docs/测试模板-六阶段-20261024.md)。
+  - **SOP 目录**：[docs/测试SOP/README.md](docs/测试SOP/README.md)。标准六阶段在
+    [docs/测试SOP/标准-六阶段.md](docs/测试SOP/标准-六阶段.md)（原 `测试模板-六阶段`，已 `git mv`）；
+    失败判读在 [docs/测试SOP/失败判读.md](docs/测试SOP/失败判读.md)；特殊流程表暂时为空，按「加文件 + 一行登记」生长。
+  - 旧 `rimworld-auto-test` 去留：**用户自己看完再定**（2026-10-24 口径），本轮未动。
+  - **模块线（用户已定）**：代码按**四层原子**切（`condition.js` 判定 / `wait-sources.js` 取样与聚合 / `conditions.json` 登记 / 游戏内工具 mod 侧）。
   - 设计过程与取舍（含试跑发现）：[docs/组合skill-草案-20261024.md](docs/组合skill-草案-20261024.md)、
     [docs/自动化测试-流程与原子能力清单-20261024.md](docs/自动化测试-流程与原子能力清单-20261024.md)、
     [docs/组合skill-试跑-20261024.md](docs/组合skill-试跑-20261024.md)。
