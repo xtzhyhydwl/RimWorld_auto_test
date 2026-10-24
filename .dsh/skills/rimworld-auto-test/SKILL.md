@@ -113,9 +113,9 @@ node src/cli.js wait --profile <p> --source bridge --probe rimworld/list_colonis
   所以「还没进图就去等 `colonists`」这类事不会伪装成「条件写错」，而是到点报「路径从头到尾没取到」。
 - **PowerShell 吞引号**：条件和参数一律走文件 —— `--condition-file cond.json` / `--args-file a.json`
   （或 `--condition '@cond.json'`，**`@` 必须带引号**；PowerShell 里裸写 `@cond.json` 会当 splatting 解析错）。
-- 条件算子与 `rb.poll` 的 15 个同构，另有本仓库扩展 `not`；路径根 `result.` = **这次探针调用的载荷根**（`get_bridge_status` 的 `state`、`list_colonists` 的 `colonists`）。
+- 条件算子与 `rb.poll` 的 15 个同构，另有本仓库扩展 `not` 与 `contains`（子串，2026-10-24 加；含这两个算子的条件**不能**原样下发游戏内）。路径根 `result.` = **这次探针调用的载荷根**（`get_bridge_status` 的 `state`、`list_colonists` 的 `colonists`）。
 - 探针必须是**只读工具**；探针挂住 = `GABP_TIMEOUT` ⇒ exit 1，会话已废，**重启游戏而不是重试**。
-- 细节（15 个算子逐个举例、文件传参、实测记录）见 [docs/cli-wait-用法-20261024.md](../../../docs/cli-wait-用法-20261024.md)；
+- 细节（16 个算子逐个举例、文件传参、实测记录）见 [docs/cli-wait-用法-20261024.md](../../../docs/cli-wait-用法-20261024.md)；
   真机 9 个用例（命中 / 超时 / 字段缺失 / 算子写错 / 动作后闭环）见 [docs/cli-wait-实测-20261024.md](../../../docs/cli-wait-实测-20261024.md)。
 
 **等待逻辑只准出现在一处**（一条 `live` 命令 / 一条 `cli wait`），不要散成一堆 sleep。
