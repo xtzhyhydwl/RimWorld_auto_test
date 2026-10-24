@@ -5,13 +5,16 @@
 
 ## 现在（2026-10-24）
 
-- **主线：RHAH（鼠族：饥与祸）模组返修**。规划与票据在另一个仓库 `..\RHAH-wayfinder`（`map.md` / `EXECUTION-PLAN.md` / `tickets\0001`–`0010` / `HANDOFF.md`）；本仓库只出测试机器与 `docs\` 分析报告。
-- **已完成：1.6 程序集重建**。产物在 `RimworldMods\ratkin_hunger_and_havoc\1.6\Assemblies\HungerAndHavoc.dll`（865,280 B / SHA256 `D38461F0…C5FCC2` / InfoVersion 1.1.4），旧版备份在 `runs\build-backup-20261024\`。**只落仓库，未部署**到游戏/工坊。
-- **正在做：票 0008（门 / 离场）**（由另一个会话推进）。方向已定：用原版「被困 → 凿墙/跑掉」的行为，**不传送、不消失**；倒地不强制；被囚/招募/死亡不处理。下一步是接入点调研 → 实施。
-- **E12（票 0001）已有存档级证据**：`Letter_0` 仍 `Pending`；`openChoices` 里 `id=1 / I-014 / expireTick 62349` 未结算；`LordJob_RHAH_Visitor` 的 `armedChoiceId=1 / armedAssault=True`（拒绝已生效）。测试档 `profiles\rhah\Saves\probe-choice-record-20261024.rws`。
-- **测试环境可用：profile `rhah`（14 项）**。起 `node src/cli.js start --profile rhah --width 1600 --height 900 --monitor 2`；停 `node src/cli.js stop --profile rhah`（**不加 `--force`**）；**必须显式 `--profile`**（默认是 `vanilla` 561 项全量档，且 `profiles\` 不入库）。
-- **本轮踩的坑**（细节见 [docs/RimWorld-工具耗时与暂停行为测量-20261024.md](docs/RimWorld-工具耗时与暂停行为测量-20261024.md)）：推游戏时间用 `step_game_ticks`（能穿 forcePause，实测 600/600），`play_for` 在 forcePause 下静默 0 tick；信件对话框开着会冻结游戏时间（30 秒 Δ=0，`ESC` 无效）；`search_debug_actions` 常态 349–437 ms，曾一次 68 秒主线程停摆（占用者未定性）。
-- **下一步**：0008 的调研（原版「被困 → 凿墙」接入点）与实施；其后按 `EXECUTION-PLAN.md` §2 的顺序推进其余票。
+- **主线：票 0008（受困来客打不开门 / 离场）**，修复分支 `fix/0008-can-dig-exit`（基点 `6ab44c7`），提交链 `9b00cbd` → `95fc93c` → `3c0595d`；票据与规划在 `..\RHAH-wayfinder`（`tickets\0001`–`0011`、`EXECUTION-PLAN.md`、`HANDOFF.md`）。
+- **同一自然场景 A/B 的结论**：A＝作者原版 1.7 DLL **红**（0.45h 内不离图，2.64h 仍 `spawned=true`，门 HP 恒 104）；B＝`9b00cbd` **绿**（门 104→64→24→打烂，`curJob=Mine`，tick 2031 离图，0 异常）；B＝`95fc93c` **红**（15090 tick ≈6.04 游戏小时门 HP 恒 104，从未拿到挖掘 job；同 duty 换原版 giver，同一 pawn 1800 tick 内凿墙离图 ⇒ 卡点在 RHAH 包装层）；B＝`3c0595d`（结果缓存 + 冷却 2500 tick、首检放行）**未验证**——绿臂跑到一半被人为中止。
+- **设计方向可能错了（人类 2026-10-24 提出，最高优先）**：来客明明有门却凿墙，因为 `RHAH_DoorPatch` 对活跃来客强制 `PawnCanOpen=false`（`famineVisitorsOpenDoors` 默认 `false`），且**不看 lifecycle**——人已在 `Leaving` 仍被锁门。建议改成「**离场放开门禁、让他们走门；凿墙只做无路兜底**」，比现方案小。
+- **画面不可信**：**所有 pawn 的渲染位置都不随实际位置更新**（非鼠族同样，人类刚补充），截图**不能**作为位置/行为证据，位置只用格子/坐标回读；日志 `Failed to find any textures at Things/Ratkin/Head/` 是另一独立现象（部件贴图缺失），解释不了「人停在原地」。
+- **闸门**：构建 ✅（1.7 `-t:Rebuild` 0 警告 0 错误）；游戏内自动化 ⚠️（绿过一次、节流回归、最新构建未验）；独立 review ✅ 一轮（「有条件通过、0 阻塞、3 应修」，已修但**需复审**）；人工抽验 ❌。
+- **下一步**：① 设计决策（走门 vs 凿墙）② 渲染诊断（结论前不用截图下结论）③ 实施 + 1.7 构建 0/0 ④ 同场景 A/B 复验（位置以格子回读为准）⑤ 独立复审 ⑥ 人工抽验（含「无围墙正常离场」回归，至今未做）⑦ 起草 PR。
+- **交接文档**：[docs/HANDOFF-0008-收尾交接.md](docs/HANDOFF-0008-收尾交接.md)。
+- **测试环境**：profile `rhah`（14 项）；`node src/cli.js start --profile rhah --width 1600 --height 900 --monitor 2` / `stop --profile rhah`（不加 `--force`），必须显式 `--profile`；推时间用 `step_game_ticks`（`play_for` 在 forcePause 下静默 0 tick）。
+- **多实例**：1.7 的 `Player.log` 全机共用且被后启动者重写，`status --profile` 会串台（`src\launcher.js:185`）；并发时禁用一切读 `Player.log` 的断言，只用 `runs\live\<profile>.ndjson`，桥接调用前三重校验；同一时刻只有一个会话能改 `src\`。
+- **其他线**（1.6 程序集重建、E12/票 0001 证据、闭环等待、自动化测试）见下文，本轮未动。
 
 ### 闭环等待（独立一条线，2026-10-24）
 
@@ -29,8 +32,15 @@
   - **未验证**：`startGame` 全链路仍未在真机跑（本轮禁止起停游戏）；`stop --force` 没真杀过；`resolveBridge` 的「活实例全部通过」分支没跑到（写完时游戏已被关掉）。
 - **当前重点（2026-10-24 晚，用户指定）**：把「自然语言需求 → 可执行测试」这条链路做出来。
   - 事实底稿：[docs/自动化测试-流程与原子能力清单-20261024.md](docs/自动化测试-流程与原子能力清单-20261024.md)（六阶段流程、四层原子、七条组合规则、缺原子反馈模板；**不含模块划分**）。
-  - **组合 skill 正文草案**：[docs/组合skill-草案-20261024.md](docs/组合skill-草案-20261024.md)（含七条硬规则、六阶段 SOP、原子清单、停手规则、反例集、交付格式）。
-  - **等用户拍板**：① 模块线怎么切（先看流程再定）② 这份正文是**并入** `rimworld-auto-test` 还是**单开**一个 skill。
+  - **组合 skill 已落地**（用户 2026-10-24 决定：**单开**、名字带 closed-loop、内容含原手册要点、试用有效后取代旧 skill）：
+    [`.dsh/skills/rimworld-auto-test-closed-loop/SKILL.md`](.dsh/skills/rimworld-auto-test-closed-loop/SKILL.md)
+    （决策层 + 执行层：拆解四问、七条硬规则、六阶段 SOP、四层原子、读失败、停手模板、反例、报告要求）。
+    旧 `rimworld-auto-test` 退为**细节手册**，顶部已指向新 skill。
+  - **模块线（用户已定）**：代码按**四层原子**切（`condition.js` 判定 / `wait-sources.js` 取样与聚合 / `conditions.json` 登记 / 游戏内工具 mod 侧）；
+    另加一份**经典测试模板**兜下限：[docs/测试模板-六阶段-20261024.md](docs/测试模板-六阶段-20261024.md)。
+  - 设计过程与取舍（含试跑发现）：[docs/组合skill-草案-20261024.md](docs/组合skill-草案-20261024.md)、
+    [docs/自动化测试-流程与原子能力清单-20261024.md](docs/自动化测试-流程与原子能力清单-20261024.md)、
+    [docs/组合skill-试跑-20261024.md](docs/组合skill-试跑-20261024.md)。
   - 用户已定：`args` 变量化＝做（已落地 `--arg`/`$占位`）；`verifiedLevel` 保留但**不作准入**，只当"还差哪几步没验"的工作清单。
 - **P1 已落地（2026-10-24 晚）**：四类等待收敛到**同一个** `waitFor`，`live` 不再有自己的循环。
   - `--source event` / `process` / `bridge-ready` 全部实现（`src\wait-sources.js` 负责取样与聚合：事件窗口、
