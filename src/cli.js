@@ -43,6 +43,12 @@ import {
 } from './launcher.js';
 import { baseModsFile, readBaseModsFile, diffBaseMods, rewriteActiveMods } from './base-mods.js';
 
+/**
+ * 必须带值的全局 flag。少了值不能退化成 `true`（否则文件会真叫 "true"），
+ * 也不能让它掉进 positional 被当成子命令的位置参数。
+ */
+const VALUE_REQUIRED_FLAGS = new Set(['out']);
+
 function parseArgs(argv) {
   const positional = [];
   const flags = {};
@@ -51,6 +57,11 @@ function parseArgs(argv) {
     if (a.startsWith('--')) {
       const key = a.slice(2);
       const next = argv[i + 1];
+      if (VALUE_REQUIRED_FLAGS.has(key) && (next === undefined || next.startsWith('--'))) {
+        throw new Error(
+          `--${key} 需要一个文件路径（例：--out runs\\2026-10-25-回归\\F-out\\01-wait.txt）\n\n${GENERAL_USAGE}`,
+        );
+      }
       if (next !== undefined && !next.startsWith('--')) {
         // --arg 要能重复给多次（`--arg x=139 --arg z=231`），单个对象存不下
         if (key === 'arg') (flags.arg ??= []).push(next);
@@ -68,6 +79,45 @@ function parseArgs(argv) {
 
 function out(obj) {
   console.log(typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2));
+}
+
+/**
+ * `--out <file>`：一次接管 stdout 与 stderr，两条流**同时**以 UTF-8 追加写进同一个文件。
+ *
+ * 为什么要在 CLI 里做：本机 shell 是 Windows PowerShell 5.1，它按 `[Console]::OutputEncoding`（GBK/936）
+ * 解码原生命令的 **stderr** 再交给下游，stdout 却是按字节直通 —— 所以 `node … 2>&1 | …` 存下来的文件里
+ * 「stdout 中文好好的、stderr 中文全乱码」（`runs\2026-10-25-回归\O-编排观察.md` 的 O1，同一文件内两种共存）。
+ * 由 node 自己写盘就绕开了 shell 这一层解码。
+ *
+ * 为什么必须同步写：各子命令（含 `live.js` / `smoke.js`）里有 `process.exit(...)`，异步写流会在退出的
+ * 那一刻丢掉尾巴 —— 丢的往往正是最后那句「为什么失败」。`fs.writeSync` + 同一个 fd 还顺带保证
+ * 两条流在文件里的先后顺序与终端里一致。
+ */
+function installOutputTee(file, argv) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'a'); // 不存在则创建；已存在则追加（一个文件里能放多次运行）
+  } catch (err) {
+    // 存不成证据不该让命令本身失败：警告一行，照原样继续，退出码由命令自己决定
+    console.error(`[--out] 打不开「${file}」（${err.message}）—— 继续执行，但这次没有存盘证据。`);
+    return;
+  }
+
+  // 分隔行：这次的命令行 + 时间。一个文件里放多次运行时靠它切开，不必每次换文件名。
+  fs.writeSync(fd, `\n===== ${new Date().toISOString()}  node src/cli.js ${argv.join(' ')} =====\n`);
+
+  for (const stream of [process.stdout, process.stderr]) {
+    const writeToStream = stream.write.bind(stream);
+    stream.write = (chunk, encoding, callback) => {
+      const result = writeToStream(chunk, encoding, callback); // 原流先写：终端里看到的一个字节都不变
+      try {
+        fs.writeSync(fd, chunk); // string 默认 utf8、Buffer 原样；不加 BOM
+      } catch {
+        // 写证据失败（磁盘满 / 句柄失效）同样不改命令的退出码
+      }
+      return result;
+    };
+  }
 }
 
 /**
@@ -308,6 +358,7 @@ const GENERAL_USAGE = [
   '  node src/cli.js <子命令> --profile <名字> [选项]   --profile 决定「操作哪个隔离实例」；start/stop/smoke/env-check 必须显式给',
   '  node src/cli.js <子命令> --help                    只看用法，不执行任何动作（查参数不该有副作用）',
   '  node src/cli.js --help                             看这一份总表',
+  '  --out <file>  把 stdout+stderr 同时以 UTF-8 追加存盘（存证据用，避免 PS 5.1 把 stderr 中文解码成乱码）',
   '',
   '  env-check 每次开测先跑：进程/桥接归属/激活 mod/加载顺序/CE/时间/路径 一次问清（不启动游戏）',
   '  start    启动隔离测试实例并等待桥接就绪（--port N 显式指定端口，否则自动挑 5174..5183 里空闲的）',
@@ -1561,6 +1612,16 @@ function printEnvCheck(report) {
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   const { positional, flags } = parseArgs(rest);
+
+  /**
+   * `--out` **在一切输出之前**接管（连 `--help` 的输出也照存）：证据要的是「这条命令到底吐了什么」，
+   * 开始晚一行就少一行。装完之后从 flags 里删掉 —— 它对子命令没有意义，
+   * 留着只会在某天被人当成子命令自己的参数读走。
+   */
+  if (typeof flags.out === 'string') {
+    installOutputTee(flags.out, process.argv.slice(2));
+    delete flags.out;
+  }
 
   /**
    * `--help` 必须在任何动作之前拦下来：以前全文件没有 help 处理，`start --help` 直接把

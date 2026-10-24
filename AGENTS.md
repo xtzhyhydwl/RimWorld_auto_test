@@ -46,6 +46,7 @@
 理由：本机的 `pwsh` 工具是 **Windows PowerShell 5.1**，`Set-Content` 默认写 GBK、`Out-File` 不带参数写 UTF-16LE、
 `Out-File -Encoding utf8` 带 BOM（`node` 读它 `JSON.parse` 会抛 `SyntaxError: Unexpected token '﻿'`）——
 **中文落成乱码时文件照样存在、大小正常、`git status` 也显示改过**，"重要结论当场落盘"这条会静默失效。
+**首选** `node src/cli.js … --out <file>`：stdout/stderr 一并 UTF-8 存盘，绕开 PS 5.1 的编码坑（`Set-Content`/`Out-File` 那套只在 `--out` 不可用时才用）。
 只在"必须保存命令输出"时才用 shell，且落盘后**读回前 3 行**确认中文；`Select-String` 搜中文在 GBK 文件上会**静默失配**，别拿它当"没匹配"的证据。
 实测样例：`runs\2026-10-25-skill试跑\enc-test\`（四种写法的头字节）。
 
