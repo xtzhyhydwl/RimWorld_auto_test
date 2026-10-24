@@ -1,0 +1,228 @@
+{
+  "schema": 1,
+  "note": "场景 → 探针 + 参数 + 条件。加场景 = 加一条。verified=false 表示该 condition 未在真机经 wait 命中过（字段存在性可能有真机证据，见 evidence）。字段说明见 docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md §4；候选来源与证据分级见 docs/条件登记表-候选数据-20261024.md。 2026-10-24 落盘：verified 改为 verifiedLevel 四档（wait-verified/field-verified/doc-example/inferred），verified 由它派生；事件源计数统一用 result.counts.<kind>。",
+  "conditions": {
+    "已进图可玩": {
+      "source": "bridge",
+      "probe": "rimbridge/get_bridge_status",
+      "args": {},
+      "condition": {
+        "path": "result.state.playable",
+        "equals": true
+      },
+      "description": "地图已载入、可以下操作；所有动作类用例的第一道门。",
+      "evidence": "docs/cli-wait-实测-20261024.md:19 用例 A（真机 exit 0，attempts=1，elapsedMs=5）",
+      "verifiedLevel": "wait-verified",
+      "timeoutMs": 60000
+    },
+    "主菜单待开局": {
+      "source": "bridge",
+      "probe": "rimbridge/get_bridge_status",
+      "args": {},
+      "condition": {
+        "path": "result.state.inEntryScene",
+        "equals": true
+      },
+      "description": "新起实例停在主菜单时用；主菜单阶段没有游戏侧事件。",
+      "evidence": "docs/cli-wait-实测-20261024.md:26 用例 H（真机 exit 0，attempts=1）",
+      "verifiedLevel": "wait-verified",
+      "timeoutMs": 60000
+    },
+    "工作面板已打开": {
+      "source": "bridge",
+      "probe": "rimworld/get_ui_state",
+      "args": {},
+      "condition": {
+        "path": "result.openMainTabId",
+        "equals": "main-tab:Work"
+      },
+      "description": "open_main_tab {mainTabId} 之后等面板真的切过去（动作→闭环样板）。",
+      "evidence": "docs/cli-wait-实测-20261024.md:25 用例 G（真机 exit 0，attempts=1，elapsedMs=5）",
+      "verifiedLevel": "wait-verified",
+      "timeoutMs": 60000
+    },
+    "游戏对象已建立": {
+      "source": "bridge",
+      "probe": "rimbridge/get_bridge_status",
+      "args": {},
+      "condition": {
+        "path": "result.state.hasCurrentGame",
+        "exists": true
+      },
+      "description": "最便宜的桥接+游戏对象门槛，比 playable 早成立。",
+      "evidence": "docs/cli-wait-用法-20261024.md:138（真机 exit 0，attempts=1，elapsedMs=12）",
+      "verifiedLevel": "wait-verified",
+      "timeoutMs": 60000
+    },
+    "进图且可玩": {
+      "source": "bridge",
+      "probe": "rimbridge/get_bridge_status",
+      "args": {},
+      "condition": {
+        "all": [
+          {
+            "path": "result.state.hasCurrentGame",
+            "equals": true
+          },
+          {
+            "path": "result.state.playable",
+            "equals": true
+          }
+        ]
+      },
+      "description": "一次等到真能操作；比『已进图可玩』多一条 hasCurrentGame。",
+      "evidence": "docs/cli-wait-用法-20261024.md:121-126 例 2 的 ready.json（文档示例；两个字段各自有真机命中，all 组合未跑）",
+      "verifiedLevel": "field-verified",
+      "timeoutMs": 60000
+    },
+    "地图已就绪": {
+      "source": "bridge",
+      "probe": "rimbridge/get_bridge_status",
+      "args": {},
+      "condition": {
+        "path": "result.state.currentMapReady",
+        "equals": true
+      },
+      "description": "readiness=mapData 之后、还没到 playable 的窗口用。",
+      "evidence": "docs/自动化测试-变化驱动设计.md:460（state 18 字段在线复核，字段实测）；条件未跑（:282-283 为设计示例）",
+      "verifiedLevel": "field-verified",
+      "timeoutMs": 60000
+    },
+    "殖民者人数到3": {
+      "source": "bridge",
+      "probe": "rimworld/list_colonists",
+      "args": {
+        "currentMapOnly": true
+      },
+      "condition": {
+        "path": "result.colonists",
+        "countEquals": 3
+      },
+      "description": "开局/收留/死亡后等人数真的到 N；必须先过『已进图可玩』。",
+      "evidence": "docs/cli-wait-用法-20261024.md:108-116 例 1（文档示例；字段见 :52-53 与 docs/自动化测试-变化驱动设计.md:462 在线复核）；反证：docs/cli-wait-实测-20261024.md:27 用例 I 未进图时 exit 2",
+      "verifiedLevel": "field-verified",
+      "timeoutMs": 60000
+    },
+    "无模态窗口": {
+      "source": "bridge",
+      "probe": "rimworld/get_ui_state",
+      "args": {},
+      "condition": {
+        "path": "result.windowCount",
+        "equals": 0
+      },
+      "description": "截图/长跑前等屏幕上没有窗口挡着。",
+      "evidence": "docs/自动化测试-变化驱动设计.md:1097（get_ui_state 25 字段已确证，字段实测）；docs/cli-wait-用法-20261024.md:128-133 的 get_screen_targets 路径未实测（:152），docs/cli-wait-实测-20261024.md:52 记 windowCount 归零未确证",
+      "verifiedLevel": "field-verified",
+      "timeoutMs": 60000
+    },
+    "浮菜单已打开": {
+      "source": "bridge",
+      "probe": "rimworld/get_ui_state",
+      "args": {},
+      "condition": {
+        "path": "result.floatMenuOpen",
+        "equals": true
+      },
+      "description": "set_hover_target→click_ui_target 之后确认浮菜单真的弹出来。",
+      "evidence": "SKILL.md:328-330（判据是回读 floatMenuOpen:true，不是 changed:true，字段实测）；字段见 docs/自动化测试-变化驱动设计.md:1097",
+      "verifiedLevel": "field-verified",
+      "timeoutMs": 60000
+    },
+    "无强制暂停窗口": {
+      "source": "bridge",
+      "probe": "rimworld/get_ui_state",
+      "args": {},
+      "condition": {
+        "path": "result.windowsForcePause",
+        "equals": false
+      },
+      "description": "play_for/step_game_ticks 长跑之前必等，否则静默跑 0 tick。",
+      "evidence": "SKILL.md:141 与 :145-158（已知地雷，字段实测）；字段见 docs/自动化测试-变化驱动设计.md:1097；条件未跑",
+      "verifiedLevel": "field-verified",
+      "timeoutMs": 60000
+    },
+    "游戏未暂停": {
+      "source": "bridge",
+      "probe": "rimbridge/get_bridge_status",
+      "args": {},
+      "condition": {
+        "path": "result.state.paused",
+        "equals": false
+      },
+      "description": "推进时间前的便宜检查；与『无强制暂停窗口』要一起过。",
+      "evidence": "docs/自动化测试-变化驱动设计.md:460（state 18 字段含 paused，字段实测）；旁证 docs/RHAH-0008-困在房间基线复现-20261024.md:170 回读 paused=false",
+      "verifiedLevel": "field-verified",
+      "timeoutMs": 60000
+    },
+    "地面资源已解禁": {
+      "source": "bridge",
+      "probe": "foodprobe/forbidden_stats",
+      "args": {},
+      "condition": {
+        "path": "result.remaining",
+        "equals": 0
+      },
+      "description": "unforbid_all 之后等解禁真的生效，别信 success。",
+      "evidence": "SKILL.md:138（开局实测 54 件禁取，判据回读 remaining:0）与 :306（前置清单第 1 步，字段实测）",
+      "verifiedLevel": "field-verified",
+      "timeoutMs": 60000
+    },
+    "选中的是目标建筑": {
+      "source": "bridge",
+      "probe": "rimworld/get_selection_semantics",
+      "args": {},
+      "condition": {
+        "path": "result.selectedObjects.0.type",
+        "contains": "Building_"
+      },
+      "description": "click_cell 选工作台时先等『选中的是个建筑』再做 bill。",
+      "evidence": "SKILL.md:307 与 :479（selectedObjects[0].type 应为 Building_*，字段实测）；contains 算子见 docs/cli-wait-用法-20261024.md:82",
+      "verifiedLevel": "field-verified",
+      "timeoutMs": 60000
+    },
+    "进图事件已发出": {
+      "source": "event",
+      "condition": {
+        "path": "result.counts.colony_started",
+        "greaterThanOrEqual": 1
+      },
+      "description": "不轮询桥接，等游戏侧报告进图（只报一次）。",
+      "evidence": "docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md:443-454（§4.2 作者自标『没在真机上跑过』）；kind 语义见 SKILL.md:69",
+      "verifiedLevel": "inferred",
+      "timeoutMs": 180000,
+      "fromNow": false,
+      "windowMs": null
+    },
+    "桥接已就绪": {
+      "source": "bridge-ready",
+      "condition": {
+        "any": [
+          {
+            "path": "result.source",
+            "equals": "log"
+          },
+          {
+            "path": "result.ready",
+            "equals": true
+          }
+        ]
+      },
+      "description": "替代 start 内部等待、或要拿 host/port/token 证据时用。",
+      "evidence": "docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md:346 与 :315-352（设计推断）；现实现 waitForBridge 真机 7.6s 就绪见 docs/cli-wait-实测-20261024.md:10",
+      "verifiedLevel": "inferred",
+      "timeoutMs": 240000
+    },
+    "游戏进程已退出": {
+      "source": "process",
+      "condition": {
+        "path": "result.alive",
+        "equals": false
+      },
+      "description": "stop 之后等进程真的没了（现在那处是固定 sleep 循环）。",
+      "evidence": "docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md:123 与 :155-160（进程快照字段，设计推断）",
+      "verifiedLevel": "inferred",
+      "timeoutMs": 60000
+    }
+  }
+}

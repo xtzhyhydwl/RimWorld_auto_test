@@ -17,6 +17,7 @@ import path from 'node:path';
 import { connectGabp, DEFAULT_REQUEST_TIMEOUT_MS } from './gabp.js';
 import { assertToolNameExists } from './toolname.js';
 import { waitFor } from './wait.js';
+import { CONDITIONS_FILE, fillArgs, listScenarios, loadRegistry, resolveScenario } from './conditions.js';
 import {
   startGame,
   stopGame,
@@ -42,7 +43,9 @@ function parseArgs(argv) {
       const key = a.slice(2);
       const next = argv[i + 1];
       if (next !== undefined && !next.startsWith('--')) {
-        flags[key] = next;
+        // --arg 要能重复给多次（`--arg x=139 --arg z=231`），单个对象存不下
+        if (key === 'arg') (flags.arg ??= []).push(next);
+        else flags[key] = next;
         i++;
       } else {
         flags[key] = true;
@@ -58,8 +61,29 @@ function out(obj) {
   console.log(typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2));
 }
 
-/** 读 JSON 文件并去掉 BOM —— Windows 工具（含 PowerShell 5.1）写 UTF-8 时常带 BOM */
-function readJsonFile(file) {
+/**
+ * `--arg k=v`（可重复）→ `{k: 'v'}`；也接受一次给多个：`--arg x=139,z=231`。
+ *
+ * 存在的理由只有一个：登记表里的参数是静态 JSON，而坐标 / `pawnId` / `Letter_0` 每次都不同，
+ * 用 `$x` 这类占位留口、由命令行填值（见 `src/conditions.js` 的 `fillArgs`）。
+ * 值一律先当字符串，`fillArgs` 再把纯数字转成数字 —— 别在参数里偷偷做类型猜测。
+ */
+function parseArgPairs(value) {
+  if (value === undefined) return {};
+  const items = Array.isArray(value) ? value : [value];
+  const pairs = {};
+  for (const item of items) {
+    if (item === true) throw new Error('--arg 需要 k=v 形式，例 --arg x=139');
+    for (const chunk of String(item).split(',')) {
+      const at = chunk.indexOf('=');
+      if (at <= 0) throw new Error(`--arg 需要 k=v 形式，收到「${chunk}」`);
+      pairs[chunk.slice(0, at).trim()] = chunk.slice(at + 1).trim();
+    }
+  }
+  return pairs;
+}
+
+/** 读 JSON 文件并去掉 BOM —— Windows 工具（含 PowerShell 5.1）写 UTF-8 时常带 BOM */function readJsonFile(file) {
   let text = fs.readFileSync(file, 'utf8');
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   return JSON.parse(text);
@@ -116,13 +140,18 @@ function readJsonInput({ inline, file, positional, flag }) {
 }
 
 const WAIT_USAGE = [
-  "用法: node src/cli.js wait --profile <p> --probe <工具名> (--condition '<JSON>' | --condition-file <文件>) [选项]",
+  '用法（两条路）:',
+  '  node src/cli.js wait --profile <p> --scenario <场景名> [--arg k=v …] [--timeout 60000]',
+  '  node src/cli.js wait --profile <p> --probe <工具名> (--condition \'<JSON>\' | --condition-file <文件>) [选项]',
+  '  node src/cli.js wait --list            列出登记表里的全部场景（不连桥接）',
   '',
-  '  --source bridge                      目前只认 bridge（event/process 属 P1 未实现）',
+  '  --scenario 已进图可玩                 场景来自 src/conditions.json；探针/参数/条件都由它给，不许再给 --probe/--source',
+  '  --arg x=139 [--arg z=231]            给场景 args 里的 $占位填值（可重复；也可 --arg x=139,z=231）',
+  '  --source bridge                      目前只认 bridge（event/process/bridge-ready 属 P1 未实现）',
   '  --probe rimworld/list_colonists      要反复调用的只读工具名',
   '  --args \'{"currentMapOnly":true}\'      探针参数（也可 --args-file f.json 或 \'@f.json\'）',
   '  --condition \'{"path":"result.colonists","countEquals":3}\'   条件 JSON（也可 --condition-file f.json 或 \'@f.json\'）',
-  '  --timeout 60000                      等多久（毫秒，默认 60000）',
+  '  --timeout 60000                      等多久（毫秒；场景自带 timeoutMs 时以场景为准，显式给则覆盖）',
   '  --interval 200                       两次采样的间隔（毫秒，默认 200）',
   '  退出码：0=条件命中 / 2=超时（打印条件+最后采样+attempts+elapsedMs）/ 1=参数错、工具名不存在、桥接未就绪等',
   '  条件与路径写法见 docs/cli-wait-用法-20261024.md',
@@ -374,39 +403,110 @@ async function main() {
        * 判定只在 Node 侧做一套（src/wait.js），条件 JSON 与游戏内 rb.poll 的算子同构，
        * 以后可以原样下发；本轮只做 --source bridge。
        */
-      const source = flags.source === undefined ? 'bridge' : String(flags.source);
-      if (source === 'event' || source === 'process') {
+      // ② 登记表：--list 不连桥接、也不需要场景名
+      const registry = loadRegistry();
+      if (flags.list) {
+        if (registry.errors.length) {
+          console.error(`[wait] 登记表有 ${registry.errors.length} 处错误（下面仍列出可用场景）：`);
+          for (const e of registry.errors) console.error(`  - ${e}`);
+        }
+        const rows = listScenarios(registry);
+        console.log(`[wait] 条件登记表：${CONDITIONS_FILE}（${rows.length} 个场景）`);
+        const mark = {
+          'wait-verified': '✔ 真机 wait 验过',
+          'field-verified': '～ 字段真机读过、条件没跑',
+          'doc-example': '？ 文档示例',
+          inferred: '× 推断',
+        };
+        for (const r of rows) {
+          console.log(`  ${r.name}  [${r.source}] ${mark[r.verifiedLevel] ?? r.verifiedLevel}  — ${r.description}`);
+        }
+        break;
+      }
+      if (registry.errors.length && flags.scenario !== undefined) {
         throw new Error(
-          `--source ${source} 属于 P1，本轮未实现（wait 目前只支持 --source bridge）。\n` +
-            '  · 等事件（NDJSON / Player.log）：先用 `node src/cli.js live --until <条件>`，退出码同为 0/2/1；\n' +
-            '  · 等进程存活/退出：先用 `node src/cli.js status`。\n' +
-            '  排期见 docs/HANDOFF-自动化闭环改造.md §4「必修清单」里 P1 的两行。',
+          `登记表有错，先修数据再按场景等：\n${registry.errors.map((e) => `  - ${e}`).join('\n')}\n  文件：${CONDITIONS_FILE}`,
         );
       }
-      if (source !== 'bridge') {
-        throw new Error(`--source 只认 bridge（event/process 属 P1 未实现），收到「${source}」\n\n${WAIT_USAGE}`);
+
+      /**
+       * ③ 场景 → (source, probe, args, condition, timeout)。
+       * 场景身份（source / probe）**不许**被命令行覆盖 —— 否则就会出现「拿 A 的条件打 B 的探针」，
+       * 那正是「字段名靠猜」的老毛病换了个入口。调参类（--timeout/--interval）与占位参数允许覆盖。
+       */
+      let scenario = null;
+      if (flags.scenario !== undefined) {
+        if (flags.scenario === true) throw new Error(`--scenario 需要一个场景名（用 --list 看有哪些）\n\n${WAIT_USAGE}`);
+        const found = resolveScenario(registry, String(flags.scenario));
+        if (!found.ok) throw new Error(`${found.reason}\n\n用 \`node src/cli.js wait --list\` 看全部场景。`);
+        scenario = found.scenario;
+        if (flags.probe !== undefined) {
+          throw new Error(`--scenario 已经含探针（${scenario.probe ?? scenario.source}），不要再给 --probe`);
+        }
+        if (!scenario.verified) {
+          console.error(`[wait] 场景「${scenario.name}」未经真机 wait 验证（级别 ${scenario.verifiedLevel}）：${scenario.evidence}`);
+        }
+      }
+
+      const source = flags.source !== undefined ? String(flags.source) : (scenario?.source ?? 'bridge');
+      if (scenario && source !== scenario.source) {
+        throw new Error(`--source ${source} 与场景「${scenario.name}」的 source=${scenario.source} 冲突（场景身份不能覆盖）`);
+      }
+      if (source === 'event' || source === 'process' || source === 'bridge-ready') {
+        throw new Error(
+          `--source ${source} 属于 P1 的下半段，尚未实现（wait 目前只支持 --source bridge）。` +
+            (scenario ? `\n  场景「${scenario.name}」就是这个来源，等它接上再用。` : '') +
+            '\n  · 等事件：先用 `node src/cli.js live --until <条件>`（退出码同为 0/2/1）；' +
+            '\n  · 等进程存活/退出：先用 `node src/cli.js status`。',
+        );
       }
 
       if (flags.probe === true) throw new Error(`--probe 需要一个工具名，例 rimworld/list_colonists\n\n${WAIT_USAGE}`);
-      const probeName = flags.probe === undefined ? positional[0] : String(flags.probe);
-      if (!probeName) throw new Error(`缺少 --probe（要反复调用的只读工具名）\n\n${WAIT_USAGE}`);
+      const probeName = scenario ? scenario.probe : flags.probe === undefined ? positional[0] : String(flags.probe);
+      if (!probeName) throw new Error(`缺少 --probe（要反复调用的只读工具名），或用 --scenario <名字>\n\n${WAIT_USAGE}`);
 
-      const args =
-        readJsonInput({ inline: flags.args, file: flags['args-file'], positional: positional[1], flag: '--args' }) ?? {};
-      const condition = readJsonInput({
-        inline: flags.condition,
-        file: flags['condition-file'],
-        positional: undefined,
-        flag: '--condition',
+      // 参数：场景自带 args（`$名字` 占位由 --arg 填）；没有场景时整份来自 --args/--args-file
+      const providedArgs = readJsonInput({
+        inline: flags.args,
+        file: flags['args-file'],
+        positional: positional[1],
+        flag: '--args',
       });
+      const argPairs = parseArgPairs(flags.arg);
+      let args = providedArgs ?? {};
+      if (scenario) {
+        const filled = fillArgs(scenario.args, argPairs);
+        if (!filled.ok) {
+          throw new Error(
+            `场景「${scenario.name}」需要这些参数：${filled.missing.map((k) => `--arg ${k}=…`).join(' ')}`,
+          );
+        }
+        if (filled.unused.length) {
+          console.error(`[wait] 这些 --arg 用不上（场景里没有对应占位）：${filled.unused.join(', ')}`);
+        }
+        args = { ...filled.args, ...(providedArgs ?? {}) };
+      } else if (Object.keys(argPairs).length) {
+        throw new Error('--arg 只能配合 --scenario 用：没有登记表条目时，占位符无从对应');
+      }
+
+      const condition = scenario
+        ? scenario.condition
+        : readJsonInput({
+            inline: flags.condition,
+            file: flags['condition-file'],
+            positional: undefined,
+            flag: '--condition',
+          });
       if (condition === undefined) {
-        throw new Error(`缺少 --condition（条件 JSON，例 '{"path":"result.colonists","countEquals":3}'）\n\n${WAIT_USAGE}`);
+        throw new Error(
+          `缺少 --condition（条件 JSON，例 '{"path":"result.colonists","countEquals":3}'）或用 --scenario\n\n${WAIT_USAGE}`,
+        );
       }
       if (condition === null || typeof condition !== 'object' || Array.isArray(condition)) {
         throw new Error(`--condition 必须是一个 JSON 对象，收到：${JSON.stringify(condition).slice(0, 200)}\n\n${WAIT_USAGE}`);
       }
 
-      const timeoutMs = flags.timeout === undefined ? 60_000 : Number(flags.timeout);
+      const timeoutMs = flags.timeout === undefined ? (scenario?.timeoutMs ?? 60_000) : Number(flags.timeout);
       if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
         throw new Error(`--timeout 必须是正数（毫秒），收到「${flags.timeout}」\n\n${WAIT_USAGE}`);
       }
@@ -440,6 +540,7 @@ async function main() {
         elapsedMs: result.elapsedMs,
         attempts: result.attempts,
         probe: probeName,
+        ...(scenario ? { scenario: scenario.name, verifiedLevel: scenario.verifiedLevel } : {}),
         condition,
         ...(result.missingPath ? { missingPath: result.missingPath } : {}),
         sample: result.sample,
