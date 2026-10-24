@@ -15,6 +15,10 @@
   5 推时间 ✅（`step 600`→600 tick/600 帧/6365 ms≈94.3 tick/s；`play_for Fast 1000ms`→182 tick）；
   6 失败判读 ✅（exit 2 超时 / exit 1 未知工具与坏 JSON / `call` 动作失败 / `missingPath` 第三类，全对上）；
   7 缺原子模板 ✅（假需求「等某封信被处理掉」判为**补数据**，不是补采样层）；8 存档读档 ✅（阶段 2–7 真跑 + `list_saves` 补验：坏档不抛错而是 `metadata_unavailable`、空目录 `count=0`、**可当 `wait --probe` 用 `result.saves.0.name` 断言**，`wait 游戏进程已退出` 真机 exit 0）。
+- **修复轮（用户拍板后，23:0x–23:4x）**：24 条里 **22 条已改**（文档/数据；逐条状态见报告 §8），另加 **`--out`**（`cf1f6b1`：stdout+stderr 一并 UTF-8 落盘，
+  一处接管 119 个输出点，绕开 PS 5.1 把 stderr 中文解成乱码）。提交 `96a9b7a` / `de32f52` / `beb064a` / `cf1f6b1`。
+  独立代理按**改后**的 `标准-六阶段` 阶段 1→2 真机照抄：**11 步全过**（`runs\2026-10-25-回归\V-验证\`）。
+  **仍未修**：`ce/set_skills` 的 `success` 语义（CE 写入语义在查）、LogTap 放 `[DSH-TEST]`（要重编 `mods\DSH_GameLink` 并复验）。
 - **两处环境事实改正**：游戏进程名是 **`RimWorld`**（`RimWorldWin64` 已随 1.7 删除，拿它判存活会永远「没在跑」）；
   `vanilla` 的 `activeMods` 实测 **562**（不是 561）。场景登记表 **17 个**；**分档计数别写死**——用 `node src/cli.js atoms` 的 `byLevel` 看（本轮把 `桥接可连`、`游戏进程已退出` 各升了一档）。
 - **已知坑补充（比 AGENTS 硬约束 7 更窄、更准）**：存 CLI 输出时**只有 stderr 的中文会坏**（PS 5.1 把原生 stderr 转 ErrorRecord 时按 GBK 解码；stdout 的 JSON 按字节直通，完好）；
