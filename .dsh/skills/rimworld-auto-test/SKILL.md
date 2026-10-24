@@ -38,10 +38,13 @@ node src/cli.js tools | Select-String '工具总数'
 3. **别和用户抢窗口。** 桥接的点击是真注入到游戏 UI 的；人工同时操作会把游戏搞卡死。
    驱动期间不要动那个窗口。
 4. **卡住了先跑诊断**：`node scripts/diag.mjs`（每步 15 秒超时），看桥接是否响应、最后完成到哪一步。
-5. **多实例/多会话时，先证明「我连的是自己那一局」。** 1.7 的 `Player.log` 全机共用、后启动者整份重写，
-   `readBridgeInfo` 会按「最新记录」兜底 ⇒ `call`/`wait` 可能打进别人的局，而返回看着正常。
-   发命令前跑 `docs\多实例并发安全-给运行中会话的补充说明-20261024.md` §0 的三段校验
-   （记录 pid ↔ 监听该端口的 PID ↔ 该 PID 命令行含 `-savedatafolder=…\profiles\<profile>`）；**不要**用 `status`/`logs` 判断连的是谁。
+5. **多实例/多会话时，先证明「我连的是自己那一局」。** 1.7 的 `Player.log` 全机共用、后启动者整份重写。
+   **2026-10-24 起这件事已经内置**：`call`/`wait`/`status` 都先过 `resolveBridge()` 的四道校验
+   （记录可信 / 该 PID 的命令行含本 profile 的 `-savedatafolder` / 端口一致 / token 一致），
+   不过就**拒发命令**并打印判据。看 `status` 的 `bridgeResolution`（`ok/reason/evidence`）即可，
+   不要再用 `logs` 判断连的是谁（共用日志会看到别人的行）。
+   老的三段校验脚本仍有效，但现在只在怀疑工具链本身出错时才需要手跑：
+   `docs\多实例并发安全-给运行中会话的补充说明-20261024.md` §0。
 
 ---
 
@@ -183,8 +186,10 @@ node src/cli.js stop   --profile <p>   # 只关这一局；--force 才会强杀�
 **绝不碰用户的主力存档。** 窗口/画面设置在 `profiles/<name>/prefs.json`
 （`runInBackground=true`、静音、英文界面）。
 
-**多实例（2026-10-17 实测成立）**：不同 profile 可以**同时**跑——记录按 profile 落盘
+**多实例（2026-10-17 实测成立，2026-10-24 加固）**：不同 profile 可以**同时**跑——记录按 profile 落盘
 （`runs/game-process.<p>.json`）、端口自动在 5174..5183 里避让、`stop` 默认只杀本 profile 的 PID。
+同一 profile 并发 `start` 由 `runs\locks\<p>.lock` 挡住（第二个会被拒并说明持有者 PID/时间）。
+PID 判据已改为「身份校验」：`EPERM`（PID 被别的进程复用）不再算活着，`stop`/`--force` 杀之前都要先验身份。
 **机器上别的 RimWorld 进程不再阻止 `start`**（那可能是用户自己玩的那一局，只会打一行警告）。
 一个 profile 同时只能有一个实例。资源基准（主菜单、未进图）：6 mod ≈ 600 MB、14 mod ≈ 1.1 GB working set；
 **推时间上限用 `Fast`**，不要 `Superfast`/`Ultrafast`（和用户那一局抢 CPU）。

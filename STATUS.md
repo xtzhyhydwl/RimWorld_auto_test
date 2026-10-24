@@ -15,10 +15,21 @@
 
 ### 闭环等待（独立一条线，2026-10-24）
 
-- **P0 已落地**：`node src/cli.js wait`（判定只在 `src/wait.js`，本轮只做 `--source bridge`；`src/ui.js` 的旧 `waitUntil` 已删）。真机 9 个用例见 [docs/cli-wait-实测-20261024.md](docs/cli-wait-实测-20261024.md)，语法/15 算子见 [docs/cli-wait-用法-20261024.md](docs/cli-wait-用法-20261024.md)；P1/P2 清单见 [docs/HANDOFF-自动化闭环改造.md](docs/HANDOFF-自动化闭环改造.md) §4。skill 与 AGENTS.md 硬约束 5 已同步。
-- **新踩的坑（实测）**：① **起游戏的命令一退出，游戏就被连进程树杀掉**（`start` 单独跑：桥接 7 s 就绪后游戏死）⇒ 多步驱动要把启动命令挂成**保活 job**；② `src/proc.js:125 isAlive` 把 `EPERM` 当活着，PID 复用后会误判「已有实例在运行」而挡住 `start`（本轮删 `runs\game-process.<profile>.json` 绕过，**未修**）。
-- **多实例会串台（另一路会话实测，已影响本线）**：1.7 的 `Player.log` 全机共用、后启动者整份重写，`readBridgeInfo` 的「最新记录」兜底会把别人的实例/假记录当成自己 ⇒ `call`/`wait` 可能打进别人的局。发命令前跑 [docs/多实例并发安全-给运行中会话的补充说明-20261024.md](docs/多实例并发安全-给运行中会话的补充说明-20261024.md) §0 的三段校验；四条该修的见其 §4。
-- **交接**：[docs/HANDOFF-闭环等待-交接-20261024.md](docs/HANDOFF-闭环等待-交接-20261024.md) 是给下一个会话的自包含说明（现状 / 实测 / 坑 / 剩余任务）。
+- **P0 已落地**：`node src/cli.js wait`（判定只在 `src/wait.js`，本轮只做 `--source bridge`；`src/ui.js` 的旧 `waitUntil` 已删）。真机 9 个用例见 [docs/cli-wait-实测-20261024.md](docs/cli-wait-实测-20261024.md)，语法/15 算子见 [docs/cli-wait-用法-20261024.md](docs/cli-wait-用法-20261024.md)。
+- **P2 已落地（2026-10-24 晚）**：多实例串台/并发四项 + 进程身份 + 超时统一。
+  一条命令 `status --profile X` 现在会说清「这个桥接凭什么属于我」；`call`/`wait` 不通过校验就**拒发**。
+  - 解析：有 profile 时**记录即权威**（不再去共用日志里刮），新增 `resolveBridge()` 四道校验（记录可信 / PID 命令行含本 profile / 端口一致 / token 一致）。
+  - 日志：启动时写 `logAnchor`（大小+末尾 256B sha1），被重写就放弃日志解析，不再「读整份」⇒ 不会读到别人的桥接行。
+  - 锁：`runs\locks\<profile>.lock`，`openSync('wx')` 原子抢占、死 PID 自动回收；只管**启动临界区**，跑起来后由记录+身份校验负责。
+  - 假记录：`recordTrust()` 拒 `pid<=0` / 端口不在 5174-5183 / 哨兵 token（`RIMBRIDGE_ALLOW_FAKE_RECORD=1` 可放行，仅离线用）；记录加 `schema/source/writer`，写入口只留一处。
+  - PID 判据：`proc.js` 新增 `probePid`/`describeProcess`/`verifyInstance`（`EPERM` 不再算活着）；
+    `stop` 的 `taskkill` 与 `--force` 收集**全部**先验身份，认不出就不杀。
+  - 超时：`gabp.js` 唯一常量 `DEFAULT_REQUEST_TIMEOUT_MS = 60_000`，`cli call` 不再写死 300 s。
+  - 记录：[docs/多实例并发安全-修复记录-20261024.md](docs/多实例并发安全-修复记录-20261024.md)、[docs/并发安全-进程身份原语与call超时-修复-20261024.md](docs/并发安全-进程身份原语与call超时-修复-20261024.md)。
+  - **未验证**：`startGame` 全链路仍未在真机跑（本轮禁止起停游戏）；`stop --force` 没真杀过；`resolveBridge` 的「活实例全部通过」分支没跑到（写完时游戏已被关掉）。
+- **下一步（P1）**：`--source event/process` 接进同一 `waitFor` 并与 `live.js` 合并；条件登记表落 `src\conditions.json`（路径已由用户拍板）。
+- **多实例硬规矩（仍然有效）**：发命令前先证明「我连的是自己那一局」——现在可以直接看 `status` 的 `bridgeResolution`，但**不要**用 `logs` 判断自己死活（共用日志会看到别人的行）。`--force`/`--all` 仍会杀用户的局，只有用户明确要求才用。
+- **交接**：[docs/HANDOFF-闭环等待-交接-20261024.md](docs/HANDOFF-闭环等待-交接-20261024.md)。
 
 | 线 | 是什么 | 状态文件 | 当前一句话 |
 | --- | --- | --- | --- |

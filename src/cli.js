@@ -14,7 +14,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { connectGabp } from './gabp.js';
+import { connectGabp, DEFAULT_REQUEST_TIMEOUT_MS } from './gabp.js';
 import { assertToolNameExists } from './toolname.js';
 import { waitFor } from './wait.js';
 import {
@@ -22,6 +22,7 @@ import {
   stopGame,
   waitForBridge,
   readBridgeInfo,
+  resolveBridge,
   readProcessRecord,
   gameStatus,
   probeBridge,
@@ -64,12 +65,27 @@ function readJsonFile(file) {
   return JSON.parse(text);
 }
 
+/**
+ * 连上「本 profile 自己的」桥接。
+ *
+ * 2026-10-24：不再直接 `readBridgeInfo`（那只是解析层的猜测），先过 `resolveBridge()` 的
+ * 四道校验（记录可信 / PID 命令行确实是本 profile 的实例 / 端口一致 / token 一致）。
+ * 不通过就**不发命令**并说清判据 —— 多实例并行时「打进了别人的局而返回看着正常」比报错糟得多。
+ */
 async function withBridge(profile, fn, opts = {}) {
-  const info = readBridgeInfo(logPathFor(profile));
-  if (!info) throw new Error('日志里还没有桥接信息，先跑 `node src/cli.js start`。');
+  const resolved = await resolveBridge(profile);
+  if (!resolved.ok) {
+    throw new Error(
+      `拒绝连接 profile「${profile}」的桥接：${resolved.reason}\n` +
+        `  判据：\n${resolved.evidence.map((e) => `  - ${e}`).join('\n')}\n` +
+        '  先跑 `node src/cli.js status --profile ' +
+        `${profile}\` 看清状态；别用别的 profile 的端口硬连。`,
+    );
+  }
+  const { info } = resolved;
   const { client, welcome } = await connectGabp(info, opts);
   try {
-    return await fn(client, welcome, info);
+    return await fn(client, welcome, { ...info, evidence: resolved.evidence, record: resolved.record });
   } finally {
     client.close();
   }
@@ -188,9 +204,20 @@ async function main() {
        */
       const st = await gameStatus(profile);
       const rec = await readProcessRecord(profile);
-      const info = readBridgeInfo(logPathFor(profile));
+      // ② 这里必须用**权威**解析（带 PID 身份校验），不能用 readBridgeInfo 的解析层猜测：
+      // 竞态现场实测过「voiced 真实端口 5174，解析出 5175（别人的记录）」。
+      const resolved = await resolveBridge(profile);
+      const info = resolved.info;
       const bridge = await probeBridge(profile); // 有界超时（默认 1.5s）
       const evidence = [...st.evidence];
+      if (info || resolved.evidence.length) {
+        evidence.push(
+          resolved.ok
+            ? `桥接归属校验通过：${resolved.reason}`
+            : `桥接归属校验未通过：${resolved.reason}`,
+        );
+        for (const line of resolved.evidence) evidence.push(`  · ${line}`);
+      }
       if (bridge.reachable) {
         evidence.push(
           `桥接可达 ${bridge.host}:${bridge.port}（GABP session/hello 握手成功，` +
@@ -243,13 +270,27 @@ async function main() {
         bridge,
         lastLaunch: rec,
         bridgeInLog: info ? { host: info.host, port: info.port, source: info.source } : null,
+        // ② 给调用方一个可机器判的结论：这个桥接到底是不是本 profile 的
+        bridgeResolution: {
+          ok: resolved.ok,
+          reason: resolved.reason,
+          evidence: resolved.evidence,
+          port: info?.port ?? null,
+          recordedPort: rec?.bridge?.port ?? null,
+        },
       });
       break;
     }
 
     case 'bridge': {
-      const info = readBridgeInfo(logPathFor(profile));
-      out(info ?? { error: '日志中未找到桥接信息' });
+      // 与 status 同源：给结论（这份桥接凭什么属于我）+ 解析结果
+      const resolved = await resolveBridge(profile);
+      out(resolved.info ? { ...resolved.info, ok: resolved.ok, reason: resolved.reason, evidence: resolved.evidence } : {
+        error: '没有可用的桥接信息',
+        ok: false,
+        reason: resolved.reason,
+        evidence: resolved.evidence,
+      });
       break;
     }
 
@@ -310,12 +351,19 @@ async function main() {
       // 从文件读参数：绕开 PowerShell/bash 对 JSON 双引号的吞引号问题
       const args =
         readJsonInput({ inline: flags.args, file: flags['args-file'], positional: positional[1], flag: '--args' }) ?? {};
+      // 默认超时与 gabp.js 同一个常量（60 s）：以前这里写死 300 s，一次挂住白等 5 分钟，
+      // 而复用同一桥接的后续调用会跟着挂住（桥接把调用排在游戏主线程上）。长操作显式传 --timeout。
+      // 连接与单次调用共用这一个值，所以必须在 withBridge 之前算好。
+      const callTimeoutMs = flags.timeout === undefined ? DEFAULT_REQUEST_TIMEOUT_MS : Number(flags.timeout);
+      if (!Number.isFinite(callTimeoutMs) || callTimeoutMs <= 0) {
+        throw new Error(`--timeout 必须是正数（毫秒），收到「${flags.timeout}」`);
+      }
       await withBridge(profile, async (client) => {
         // 2026-10-13：先校验工具名再调用，避免「调用不存在的工具名 + 吞掉错误」的静默失效。
         await assertToolNameExists(client, name);
-        const res = await client.callTool(name, args, { timeoutMs: Number(flags.timeout || 300000) });
+        const res = await client.callTool(name, args, { timeoutMs: callTimeoutMs });
         out(res);
-      }, { requestTimeoutMs: Number(flags.timeout || 300000) });
+      }, { requestTimeoutMs: callTimeoutMs });
       break;
     }
 

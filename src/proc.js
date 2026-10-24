@@ -121,15 +121,136 @@ export function spawnDetached(cmd, args = [], { cwd, env, hideWindow = false } =
   return child;
 }
 
-/** 用 PID 判断进程是否还活着（纯 Node，不启动任何子进程） */
-export function isAlive(pid) {
-  if (!pid) return false;
+/**
+ * PID 三态探针（纯 Node，不启动子进程，约 0.01ms）。
+ *
+ * 为什么不是布尔：Windows 上 `EPERM` 的真实含义是「这个 PID 被别的、我们拿不到权限的进程占着」，
+ * 和「我们的游戏还活着」是两件事。2026-10-24 实测的故障就是：记录里 pid 被一个受保护进程复用，
+ * `EPERM` 被当成「活着」⇒ `start` 一直报「该 profile 已有实例在运行」。
+ * 所以这里把「存在但不可控」单独成态，调用方自己决定怎么用；要判「是不是我们的游戏」
+ * 用 `verifyInstance()`，不要用这个。
+ *
+ * @returns {{state:'alive'|'foreign'|'none'|'unknown', code?:string}}
+ *   alive   = PID 存在且我们发得动信号
+ *   foreign = PID 存在但我们无权（EPERM）—— 极可能不是我们的进程
+ *   none    = PID 不存在（ESRCH）
+ *   unknown = 其它错误，别当成确定结论
+ */
+export function probePid(pid) {
+  if (!pid) return { state: 'none' };
   try {
-    process.kill(pid, 0);
-    return true;
+    process.kill(Number(pid), 0);
+    return { state: 'alive' };
   } catch (err) {
-    return err.code === 'EPERM'; // 存在但没权限发信号，仍算活着
+    if (err.code === 'EPERM') return { state: 'foreign', code: err.code };
+    if (err.code === 'ESRCH') return { state: 'none', code: err.code };
+    return { state: 'unknown', code: err.code };
   }
+}
+
+/**
+ * 用 PID 判断「我们自己的进程是否还活着」。
+ *
+ * 与 2026-10-13 那版的区别：`EPERM`（foreign）**不再**算活着。这样 PID 被复用后陈旧记录
+ * 不会挡住 `start`；同时因为它返回 false，`stop` 里「按记录 pid 收集待杀进程」也不会
+ * 把一个无关进程收进去。要更严格的身份判断用 `verifyInstance()`。
+ */
+export function isAlive(pid) {
+  return probePid(pid).state === 'alive';
+}
+
+/**
+ * 查一个 PID 的真实身份（映像名 + 完整命令行）。要起一个 powershell.exe（约 0.2~1s），
+ * 只在「决定要不要相信一条记录 / 要不要杀这个 PID」时付这个代价。
+ *
+ * @returns {Promise<null | {pid:number, image:string, commandLine:string}>} 不存在返回 null
+ */
+export async function describeProcess(pid, { timeoutMs = 8000 } = {}) {
+  const n = Number(pid);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  const { code, stdout, stderr } = await capture(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `Get-CimInstance Win32_Process -Filter "ProcessId=${n}" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress`,
+    ],
+    { timeoutMs },
+  );
+  // 「查不到」是正常结论（进程已退出），只有 PowerShell 自己失败才算查询故障
+  if (code !== 0 || stderr.trim()) {
+    throw Object.assign(new Error(`查询 PID ${n} 的身份失败（code=${code}）：${stderr.trim().slice(0, 200) || '无输出'}`), {
+      code: 'EPROCENUM',
+    });
+  }
+  const text = stdout.trim();
+  if (!text) return null;
+  let obj;
+  try {
+    obj = JSON.parse(text);
+  } catch {
+    throw Object.assign(new Error(`查询 PID ${n} 的身份：输出不是 JSON（${text.slice(0, 120)}）`), {
+      code: 'EPROCENUM',
+    });
+  }
+  const row = Array.isArray(obj) ? obj[0] : obj;
+  if (!row || !row.ProcessId) return null;
+  return {
+    pid: Number(row.ProcessId),
+    image: String(row.Name || ''),
+    commandLine: String(row.CommandLine || ''),
+  };
+}
+
+/**
+ * 判定「这个 PID 现在是**我们某个 profile 的游戏实例**吗」—— 多实例并发时唯一可信的判据。
+ *
+ * 只看 PID 是否存活不够（PID 会被复用），必须三件事同时成立：PID 找得到、命令行里带着
+ * 我们给它的 `-savedatafolder=<某个 profiles 下的目录>`、且（给了 expectedProfile 时）
+ * 就是那个 profile。
+ *
+ * 为什么只比 `profiles\<profile>` 这一段而不比整条路径：实测记录里的 `profileDir` 会带乱码
+ * （`2026.7浠ュ悗鐨勬柊宸ョ▼`），整路径比较会假阴性。
+ *
+ * @param {number} pid
+ * @param {{processesDir?:string, expectedProfile?:string}} [opts] `processesDir` 是本仓库
+ *   `profiles\` 的绝对路径（默认由调用方给，proc.js 不知道工作区布局）
+ * @returns {Promise<{ok:boolean, reason:string, process?:object, profile?:string|null}>}
+ */
+export async function verifyInstance(pid, { processesDir, expectedProfile } = {}) {
+  const probe = probePid(pid);
+  if (probe.state === 'none') return { ok: false, reason: `PID ${pid} 不存在` };
+  if (probe.state === 'unknown') {
+    return { ok: false, reason: `PID ${pid} 状态未知（${probe.code}），不当作我们的实例` };
+  }
+  let info;
+  try {
+    info = await describeProcess(pid);
+  } catch (err) {
+    // 查身份本身失败时不能给出「是/不是」的结论，也不能因此去杀它
+    return { ok: false, reason: `PID ${pid} 身份查询失败：${err.message}` };
+  }
+  if (!info) return { ok: false, reason: `PID ${pid} 已退出` };
+  const m = /-savedatafolder=(?:"([^"]*)"|(\S+))/i.exec(info.commandLine);
+  if (!m) {
+    return { ok: false, reason: `PID ${pid}（${info.image}）命令行里没有 -savedatafolder，不是本工具的实例`, process: info };
+  }
+  const dir = (m[1] ?? m[2]).replace(/[\\/]+$/, '');
+  const profile = /[\\/]profiles[\\/]([^\\/]+)$/i.exec(dir)?.[1] ?? null;
+  if (!profile) {
+    return { ok: false, reason: `PID ${pid} 的存档目录不在 profiles\\ 下：${dir}`, process: info, profile: null };
+  }
+  if (processesDir) {
+    const want = path.resolve(processesDir).toLowerCase() + path.sep;
+    if (!path.resolve(dir).toLowerCase().startsWith(want)) {
+      return { ok: false, reason: `PID ${pid} 的存档目录不在本仓库的 profiles\\ 下：${dir}`, process: info, profile };
+    }
+  }
+  if (expectedProfile && profile !== expectedProfile) {
+    return { ok: false, reason: `PID ${pid} 是 profile「${profile}」的实例，不是「${expectedProfile}」`, process: info, profile };
+  }
+  return { ok: true, reason: `PID ${pid} 是 profile「${profile}」的实例（${info.image}）`, process: info, profile };
 }
 
 /** 温和结束进程；返回是否成功发出信号 */

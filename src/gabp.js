@@ -58,6 +58,13 @@ export function encodeFrame(obj) {
   return Buffer.concat([header, json]);
 }
 
+/**
+ * 单次桥接请求的默认超时。**全仓库只有这一个默认值**（`cli call` 曾经自己写 300 s，
+ * 结果一次挂住白等 5 分钟；`cli wait` / `live` 的默认也是 60 s，语义一致）。
+ * 需要更长的操作（开殖民地、`play_for`、跑 tick）显式传 `--timeout`。
+ */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+
 export class GabpError extends Error {
   constructor(code, message, data, method) {
     super(message);
@@ -84,7 +91,7 @@ export class GabpClient extends EventEmitter {
     token,
     bridgeVersion = 'dsh-rimworld/0.1.0',
     launchId = randomUUID(),
-    requestTimeoutMs = 60_000,
+    requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
   } = {}) {
     super();
     if (!port) throw new Error('GabpClient 需要 port');
