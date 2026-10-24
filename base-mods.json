@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "description": "所有测试 profile 共用的底座 mod。start 前自动补齐到 profiles/<p>/Config/ModsConfig.xml，只加不删。",
+  "mods": [
+    { "packageId": "brrainz.harmony", "why": "绝大多数 mod 的前置" },
+    { "packageId": "ludeon.rimworld", "why": "Core" },
+    { "packageId": "brrainz.rimbridgeserver", "why": "桥接本体：cli tools/call/wait" },
+    { "packageId": "dsh.gamelink", "why": "事件通道：runs/live/<p>.ndjson" },
+    { "packageId": "void.charactereditor", "why": "Character Editor：摆/读小人（ce/* 工具依赖它）" },
+    { "packageId": "dsh.autotest", "why": "我们的自动化测试 mod（Def 热重载等）" }
+  ]
+}

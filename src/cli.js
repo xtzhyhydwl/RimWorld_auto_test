@@ -11,6 +11,7 @@
  *   node src/cli.js logs [行数] [--profile vanilla]
  *   node src/cli.js live --profile voiced --until 'kind=colony_started' [--timeout 120000]
  *   node src/cli.js stop [--profile vanilla] [--force]
+ *   node src/cli.js base-mods [--profile vanilla]
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,6 +36,7 @@ import {
   gameRoot,
   WS,
 } from './launcher.js';
+import { baseModsFile, readBaseModsFile, diffBaseMods } from './base-mods.js';
 
 function parseArgs(argv) {
   const positional = [];
@@ -244,6 +246,43 @@ async function main() {
       console.log('');
       console.log(`桥接就绪：127.0.0.1:${info.port}  (等待 ${(info.waitedMs / 1000).toFixed(1)}s，来源=${info.source ?? 'log'})`);
       out({ bridge: { host: info.host, port: info.port }, tokenPreview: info.token.slice(0, 8) + '…' });
+      break;
+    }
+
+    case 'base-mods': {
+      /**
+       * 只读自检入口：`base-mods.json` 是全项目唯一一份底座 mod 清单，
+       * 这里把它和某个 profile 的实际 `ModsConfig.xml` 对一下账 —— **只报告不写文件**
+       * （写文件是 `start` 的事，见 src/launcher.js 的 ensureBaseModsBeforeStart）。
+       */
+      const data = readBaseModsFile(WS);
+      if (data.missingFile) {
+        console.error(`没有 ${baseModsFile(WS)}：底座 mod 清单缺失，start 时会跳过自动补齐`);
+        process.exitCode = 1;
+        break;
+      }
+      console.log(`底座 mod（唯一真源）${data.file}：${data.packageIds.length} 个`);
+      if (data.description) console.log(`  ${data.description}`);
+      const width = Math.max(...data.mods.map((m) => m.packageId.length), 0);
+      for (const m of data.mods) {
+        console.log(`  ${m.packageId.padEnd(width)}  ${m.why}`);
+      }
+      console.log('  数组顺序就是补进 <activeMods> 的顺序（Harmony 必须最靠前）；只加不删。');
+
+      // 不带 --profile 就只看清单本身；带上了才去对 profile 的账（读文件，写由 start 负责）
+      if (flags.profile !== undefined) {
+        const diff = diffBaseMods({ profileDir: profileDir(profile), baseMods: data.packageIds });
+        if (diff.skipped) {
+          console.log(`profile ${profile}：跳过（${diff.skipped}）`);
+        } else if (!diff.missing.length) {
+          console.log(`profile ${profile}：缺 0 个（${data.packageIds.length} 个都在 ${diff.modsConfigPath}）`);
+        } else {
+          console.log(
+            `profile ${profile}：缺 ${diff.missing.length} 个 → ${diff.missing.join(', ')}` +
+              `（只报告，不写文件；start 时会自动补）`,
+          );
+        }
+      }
       break;
     }
 
@@ -721,7 +760,8 @@ async function main() {
           '  dump-tools  把所有工具 schema 导出到 runs/tools.json',
           '  call     调用一个游戏内工具',
           '  wait     等条件成立（反复调探针 + 条件 JSON；0 命中 / 2 超时 / 1 其它），见 docs/cli-wait-用法-20261024.md',
-      '  atoms    原子能力清单（算子 / 四类来源的快照字段 / 登记表统计）—— 写测试前先看这个',
+          '  atoms    原子能力清单（算子 / 四类来源的快照字段 / 登记表统计）—— 写测试前先看这个',
+          '  base-mods 底座 mod 清单（base-mods.json）；带 --profile <p> 只报告该 profile 缺哪几个，不写文件',
           '  logs     打印该 profile 的 Player.log 尾部',
           '  live     等游戏侧事件（DSH_GameLink 的 NDJSON 或 Player.log），命中即返回',
           '  stop     关闭该 profile 的测试实例（--force 才会强杀全机 RimWorld，破坏性）',

@@ -30,7 +30,8 @@ node src/cli.js tools        # 游戏内工具；单个参数用 describe <工�
 | 按需能力 | 要用事件 → `dsh.gamelink`；要摆/读小人 → `void.charactereditor`；要用 `ce/*` → `call ce/probe` 有返回 |
 
 **按需项缺了也停手**，不降级成"用别的方式凑合"。
-必备清单、profile 现状、缺了怎么补：`docs\测试SOP\环境自检.md`。**在缺底座的实例里跑出来的结论不可信。**
+必备清单的唯一真源是仓库根 `base-mods.json`（`start` 前自动补齐到 profile；`node src/cli.js base-mods [--profile <p>]` 对账）。
+profile 现状、缺了怎么补：`docs\测试SOP\环境自检.md`。**在缺底座的实例里跑出来的结论不可信。**
 
 ## 3 把需求拆成判据（四问，答完再动手）
 

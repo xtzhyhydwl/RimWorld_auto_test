@@ -47,6 +47,10 @@
     游戏侧 `BridgeTools\DSH.CEBridge` 是指向仓库 `bridge\DSH.CEBridge` 的 **junction**（部署已就位，`-Recurse` 不会穿过 junction，别误判为空）。
   - **渲染结论（定性）**：暂停态 `step_game_ticks` 后 **pawn 层不刷新**（UI/新建墙/相机正常、动物同样冻）；
     `play_for` 400 ms（≈74 tick）追平，再 step 又冻。⇒ 截图前先 `play_for`，位置只认坐标回读 + 新旧格裁剪；**此前"截图证明"的结论降级为【未验证】**。
+  - **底座 mod 自动补齐（2026-10-24 晚）**：唯一真源 `base-mods.json`（仓库根，6 项：Core/Harmony/RimBridgeServer/GameLink/CE/AutoTest）；
+    `start` 前按 profile 补齐（只加不删、幂等、补了才打印一行），`node src/cli.js base-mods [--profile <p>]` 只读对账。
+    已验：`node --check` 三文件、临时 profile 首次 +4 / 二次 +0（顺序与缩进正确）、`rhah` 报缺 2 且未写文件。
+    **未验**：真机 `start` 的补齐打印路径（`voiced` 已齐，不用补）。
   - 旧 skill `rimworld-auto-test` **已删**（用户 2026-10-24 决定；删前 HEAD `8ee9bae`，需要时可从 git 历史取回）。
   - **模块线（用户已定）**：代码按**四层原子**切（`condition.js` 判定 / `wait-sources.js` 取样与聚合 / `conditions.json` 登记 / 游戏内工具 mod 侧）。
   - 设计过程与取舍（含试跑发现）：[docs/组合skill-草案-20261024.md](docs/组合skill-草案-20261024.md)、

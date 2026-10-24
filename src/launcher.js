@@ -30,6 +30,7 @@ import {
 } from './proc.js';
 import { connectGabp } from './gabp.js';
 import { ensurePrefs, resolvePrefs, prefsPath } from './prefs.js';
+import { loadBaseMods, ensureBaseMods } from './base-mods.js';
 
 export const WS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -251,6 +252,43 @@ export function stampModsConfigVersion(profile = 'vanilla', versionText = null) 
 
 export function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * start 前的底座 mod 补齐（策略层；补齐本身在 `src/base-mods.js`）。
+ *
+ * 单独成函数是因为它要吞掉三种**不该让 start 失败**的情况：清单文件缺、JSON 写坏、
+ * profile 的 ModsConfig 不可写。三种都只警告一行 —— 缺 mod 的后果由使用者判断，
+ * 不该被一条辅助步骤卡死在命令行。
+ *
+ * 没有补齐时**什么都不打印**：每次 start 都刷一行「没变」是噪音，真变化反而被埋掉。
+ */
+function ensureBaseModsBeforeStart(profile, prof) {
+  let loaded;
+  try {
+    loaded = loadBaseMods(WS);
+  } catch (err) {
+    console.warn(`[警告] 读不了 base-mods.json（${err.message}），本次跳过底座 mod 补齐`);
+    return;
+  }
+  if (loaded.missingFile) {
+    console.warn('[警告] 没有 base-mods.json，本次跳过底座 mod 补齐（按现有 ModsConfig 启动）');
+    return;
+  }
+  let result;
+  try {
+    result = ensureBaseMods({ profileDir: prof, baseMods: loaded.packageIds });
+  } catch (err) {
+    console.warn(`[警告] 底座 mod 补齐失败（${err.message}），继续启动（ModsConfig 保持原样）`);
+    return;
+  }
+  if (result.skipped) {
+    console.warn(`[警告] 跳过底座 mod 补齐：${result.skipped}`);
+    return;
+  }
+  if (result.added.length) {
+    console.log(`底座 mod 自动补齐（profile ${profile}）：${result.added.map((id) => `+${id}`).join(', ')}`);
+  }
 }
 
 /** 每次进程内只唠叨一次的告警（回退路径会反复被调用，重复告警会把 stderr 淹掉） */
@@ -821,6 +859,12 @@ export async function startGame({
   // 14 项清单会被抹掉。所以启动前把 `<version>` 戳成游戏自己的版本串 —— 只改这一行，
   // mod 清单、knownExpansions 一个字节都不动。版本一致时什么都不做。
   const modsConfigStamp = stampModsConfigVersion(profile, layout.versionText);
+
+  // 底座 mod 按 base-mods.json 补齐（只加不删、幂等），与上面戳版本互不影响：
+  // 一个只改 `<version>`、一个只在 `</activeMods>` 前插行。
+  // 这里绝不能挡住启动：清单写了错、profile 的 Config 不可写，都只警告 ——
+  // 用户要的是「起一局看看」，不是被一条辅助步骤卡死在命令行。
+  ensureBaseModsBeforeStart(profile, prof);
 
   const logFile = layout.logFile;
   // 只归档**profile 目录内**的日志。1.7 的日志是全机共用的默认存档目录那份，
