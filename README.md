@@ -66,7 +66,7 @@ node src/cli.js smoke --attach --ticks 300
 | [docs/验证结果总报告.md](docs/验证结果总报告.md) | 5 个阶段的端到端验证结果（含未验证项） |
 | `runs/debug-actions-top.md` | 341 个顶层调试动作清单 |
 | `runs/debug-settings-outputs.md` | 181 个开关 + 247 个诊断读取 |
-| `.dsh/skills/rimworld-auto-test/SKILL.md` | **DSH 技能**：让 agent 一提到 RimWorld 测试就自动带上这套经验 |
+| `.dsh/skills/rimworld-auto-test-closed-loop/SKILL.md` | **DSH 技能**：一提到 RimWorld 测试就自动带上拆解 + 硬规则 + 指针 |
 
 ---
 
@@ -301,7 +301,7 @@ runs/
 - [x] **原版调试体系研究**：341 个 Actions + 247 个 Outputs + 181 个 Settings，
       结构规律与用法见 [docs/原版调试体系研究.md](docs/原版调试体系研究.md)
 - [x] **Hot reload Defs 端到端验证**：改 Def XML → 亚秒级重载 → 立即验证，不用重启游戏
-- [x] **固化为 skill**：`.dsh/skills/rimworld-auto-test/SKILL.md`（项目级，DSH 已识别）
+- [x] **固化为 skill**：`.dsh/skills/rimworld-auto-test-closed-loop/SKILL.md`（项目级，DSH 已识别）
 - [x] **验证总报告**：[docs/验证结果总报告.md](docs/验证结果总报告.md)（5 个阶段，逐项通过/失败）
 - [ ] **回归测试用例**：面向具体 bug 的「读档 → 执行操作序列 → 断言」脚本化
 - [ ] **视觉回归**：截图 diff（分辨率已固定在 2560x1440）

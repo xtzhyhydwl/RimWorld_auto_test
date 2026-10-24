@@ -1,7 +1,7 @@
 # 项目级约束
 
 > 本文件\*\*每轮都会进上下文\*\*，所以只放\*\*顶层约束\*\*。
-> 做事的具体流程在 skill 里（`rimworld-mod-pipeline`、`rimworld-auto-test`、`rimworld-mod-compat` 等）。
+> 做事的具体流程在 skill 里（`rimworld-mod-pipeline`、`rimworld-auto-test-closed-loop`、`rimworld-mod-compat` 等）。
 
 ## 唯一的原理
 
@@ -29,10 +29,11 @@
 5. **等游戏状态只准两种形式，禁止 `Start-Sleep`。** 等**事件**（进程/桥接就绪、进图、窗口、日志、心跳）用
 `node src/cli.js live --until '<条件>'` 挂后台 job（job 完成通知就是推送）；等**游戏内状态**（tick / 小人 / 物件 / UI / 地图是否可用）用
 `node src/cli.js wait --source bridge` 反复采样只读探针直到断言成立。
-参数、`kind` 表与「为什么固定延时是错的」见 skill `rimworld-auto-test` 的「等游戏状态」一节。
+参数、`kind` 表与「为什么固定延时是错的」见 `docs\cli-wait-用法-20261024.md` 与 `docs\等待机制-事件驱动-20261017.md`；
+写测试的流程骨架见 skill `rimworld-auto-test-closed-loop`。
 
 6. **自动化测试的机器资源约定**（用户可能同时在玩他自己那一局；数字见 `docs/多实例改造-实现-20261017.md`）：
-- **只开轻 profile**（例 `voiced` 6 个 mod）；满配 `vanilla`（561 个）要当次用户许可。
+- **只开轻 profile**（例 `voiced`：6 项底座 + 被测 mod，2026-10-24 已是 8 个）；满配 `vanilla`（561 个）要当次用户许可。
 - **推时间速度上限 `Fast`**；禁 `Superfast` / `Ultrafast` / `ultraSpeedBoost:true` / `forceRequestedSpeed:true`，除非用户当次允许。
 - 用**独立 profile** 与用户那一局并存（记录/端口/`stop` 都已按 profile 隔离）；一个 profile 只起一个实例。
 - `stop` 默认只关本 profile；**`--force` 会强杀全机 RimWorld（含用户在玩的那局），只有用户明确要求才用**。
