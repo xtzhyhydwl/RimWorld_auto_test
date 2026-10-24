@@ -26,9 +26,12 @@
 |进度、待办、已知坑|`STATUS.md`（**顶部留 ≤30 行"现在"摘要**，历史往下堆）|
 |测试产物、报告、截图|`runs/`|
 
-5. **等游戏状态只准两种形式，禁止 `Start-Sleep`。** 等**事件**（进程/桥接就绪、进图、窗口、日志、心跳）用
-`node src/cli.js live --until '<条件>'` 挂后台 job（job 完成通知就是推送）；等**游戏内状态**（tick / 小人 / 物件 / UI / 地图是否可用）用
-`node src/cli.js wait --source bridge` 反复采样只读探针直到断言成立。
+5. **等游戏状态只准两种形式，禁止 `Start-Sleep`。**
+- 等**桥接就绪 / 进程起来**：反复采样 `node src/cli.js call rimbridge/ping --profile <p>` 到 exit 0
+  （**注意：桥接还没监听时 `wait` 是立刻 exit 1，不是等** ⇒ 这一步只能外层重试；`live` 也**没有**"桥接就绪"这种 `kind`）。
+- 等**进图 / 窗口 / UI**：`node src/cli.js wait --scenario <场景名>`（`wait --list` 查名字）。
+- 等**日志 / 事件 / 心跳**：`node src/cli.js live --until '<条件>'` 挂后台 job（job 完成通知就是推送；可用 `kind` 见 `docs\cli-wait-用法-20261024.md`）。
+- 等**游戏内状态**（tick / 小人 / 物件 / 地图是否可用）：`node src/cli.js wait --source bridge` 反复采样只读探针直到断言成立。
 参数、`kind` 表与「为什么固定延时是错的」见 `docs\cli-wait-用法-20261024.md` 与 `docs\等待机制-事件驱动-20261017.md`；
 写测试的流程骨架见 skill `rimworld-auto-test-closed-loop`。
 

@@ -38,7 +38,7 @@
 | 存档读档-往返验证 | 需求涉及「存档 / 读档 / 读回来的状态 / 跨存档」、或要证明桥接读不到的字段真写进了存档时用 | 阶段 2–7 已真机跑通、阶段 1 未验（`list_saves` 已补验） | [存档读档-往返验证.md](存档读档-往返验证.md) |
 
 证据等级四档（与 `wait --list` / `conditions.json` 的 `verifiedLevel` 一致）：`wait-verified`（真机命中）/ `field-verified`（字段真机读过、条件没跑）/ `doc-example`（仅文档示例）/ `inferred`（推断）。
-注：`doc-example` 目前没有场景使用，所以 `node src/cli.js atoms` 的 `byLevel` 里看不到它（实测 `{wait-verified:5, field-verified:9, inferred:3}`，共 17 个场景）。写报告时用 `wait-verified/field-verified/inferred` 这三个词；"整份没真跑过"就直接说这句话，不要造第五档。
+注：`doc-example` 目前没有场景使用，所以 `node src/cli.js atoms` 的 `byLevel` 里看不到它（**具体计数别背，跑 `atoms` 看**；共 17 个场景）。写报告时用 `wait-verified/field-verified/inferred` 这三个词；"整份没真跑过"就直接说这句话，不要造第五档。
 
 ## 自建与登记
 
