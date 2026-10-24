@@ -103,7 +103,7 @@ node src/cli.js wait --profile <p> --source event --condition-file cnt.json     
 
 | 层 | 加一个要动 | 现在 |
 | --- | --- | --- |
-| 条件算子 | `src/condition.js` 一个 `case` + 文档一行 | 16 叶子 + `all/any/not` + `allItems/anyItem` |
+| 条件算子 | `src/condition.js` 一个 `case` + 文档一行 | 13 叶子 + 3 组合子（合计 16）+ 两个量词 |
 | 采样来源 | `src/wait-sources.js` 一个 sampler + `SOURCE_SPECS` 一条 | bridge / event / process / bridge-ready |
 | 场景登记 | **只加一条数据** `src/conditions.json`；带运行期参数用 `$占位` + `--arg k=v` | 16 条 |
 | 游戏内工具 | mod 侧加 | 以 `cli tools` 为准 |
