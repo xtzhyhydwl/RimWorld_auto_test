@@ -5,6 +5,11 @@
 
 ## 现在（2026-10-24）
 
+- **缺陷第一批已修并真机复验（2026-10-24 21:5x）**：回滚基线 `b5d7143`（只含分诊文档、代码未动），之后分批提交：`e500132`(AGENTS 写文件编码) / `67697e3`(代码批) / 文档批（见 `git log`）。要退某一批就 `git revert <该提交>`。
+  复验：**离线 12 项 + 真机 14 项全过**，清单与证据 `runs\2026-10-25-skill试跑\verify\VERIFY-RESULT.md`；反证成立——`start --help` 只打用法不再起游戏、`runs\game-process.*.json` mtime 一个没变、RimWorld 进程数 0。
+  真机确认：底座 **13 mod（Harmony→Core→5 DLC→工具→用户 mod，规范顺序）**、`无模态窗口` exit 2→**0**、`call` 动作失败 **exit 1**（载荷照打）、CE `{"part":"Leg","index":0}`=**右腿**且 `restore` **秒回**（中文 label 曾挂 60 s）、`step_game_ticks 600` = 600 帧（坐实 **1 tick/帧**）、`wait` 第三类提示实测命中。
+  复验又发现 3 条并已补：`桥接已就绪` 只校验记录（新增 `桥接可连`= `rimbridge/ping` + `message=="pong"`）、PS 5.1 吞内联 JSON 引号（文档改走 `--args-file`、CLI 错误文案教转义）、`env-check` 的 `timeSpeed` 恒 unknown。
+  **仍未修 / 未验**：A9（condition 无占位、等待层缺 `--consecutive N`）、E1–E7（要造强制暂停窗口 / 停实例 / 长 `call` 占主线程）、`存档读档-往返验证` SOP 未按序真跑、`npm` 脚本需 `npm run start -- --profile <p>`（未改 `package.json`）。
 - **测试流程全量试跑（2026-10-24 晚，4 个干净上下文的代理并行）**：八项全部跑到（环境自检=部分通过、2–8=走通），
   缺陷清单 **45 条 + 13 步修复顺序**在 [docs/2026-10-25-skill试跑缺陷.md](docs/2026-10-25-skill试跑缺陷.md)，
   **给人读的过程版（每条"当初怎么撞上的 + 可不可信 + 该不该修"）**在 [逐条分析](docs/2026-10-25-skill试跑缺陷-逐条分析.md)。

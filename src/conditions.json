@@ -208,10 +208,23 @@
           }
         ]
       },
-      "description": "替代 start 内部等待、或要拿 host/port/token 证据时用。",
-      "evidence": "docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md:346 与 :315-352（设计推断）；现实现 waitForBridge 真机 7.6s 就绪见 docs/cli-wait-实测-20261024.md:10",
+      "description": "只校验**实例记录**（本 profile 的 pid / 端口 / token 归属）通过，**不代表桥接的 TCP 真的能连**——2026-10-24 真机实测：它 exit 0 的同一次，env-check 仍报 ECONNREFUSED 127.0.0.1:5174（DLC 变多后监听建立更晚）。要「能连」请用场景「桥接可连」。替代 start 内部等待、或要拿 host/port/token 证据时用。",
+      "evidence": "docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md:346 与 :315-352（设计推断）；现实现 waitForBridge 真机 7.6s 就绪见 docs/cli-wait-实测-20261024.md:10；反证（记录就绪但 TCP 不可连）：runs/2026-10-25-skill试跑/verify/A6-envcheck-voiced.txt 与 B1-envcheck-live.txt 的 ECONNREFUSED",
       "verifiedLevel": "inferred",
       "timeoutMs": 240000
+    },
+    "桥接可连": {
+      "source": "bridge",
+      "probe": "rimbridge/ping",
+      "args": {},
+      "condition": {
+        "path": "result.message",
+        "equals": "pong"
+      },
+      "description": "要确认桥接真的能连（不只是记录校验通过）时用；`start` 之后、进图之前的最可靠门槛。⚠ 本场景**没有在真机上跑过**：判据与载荷形状来自 B6-ping.txt 的真机 `call rimbridge/ping`（message:\"pong\"），但这个场景本身没被 `wait --scenario` 命中验证过。",
+      "evidence": "runs/2026-10-25-skill试跑/verify/B6-ping.txt（真机 `call rimbridge/ping` 返回 message:\"pong\"，timestamp 2026-10-24T13:43:51Z；字段实测、条件未跑）；反证为什么要它：runs/2026-10-25-skill试跑/verify/A6-envcheck-voiced.txt 与 B1-envcheck-live.txt（桥接已就绪 exit 0 之后仍 ECONNREFUSED）",
+      "verifiedLevel": "field-verified",
+      "timeoutMs": 60000
     },
     "游戏进程已退出": {
       "source": "process",

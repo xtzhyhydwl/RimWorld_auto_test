@@ -13,14 +13,20 @@ description: RimWorld 测试闭环：把「测一下 X」拆成动作、等待�
 ## 1 开工先拿原子清单
 
 ```powershell
-node src/cli.js atoms        # 算子 / 四类采样源快照字段 / 登记表统计（代码导出，不会漂）
-node src/cli.js wait --list  # 已登记场景 + 证据等级
-node src/cli.js tools        # 游戏内工具；单个参数用 describe <工具名>
+node src/cli.js atoms --profile <p>        # 算子 / 四类采样源快照字段 / 登记表统计（代码导出，不会漂）
+node src/cli.js wait --list --profile <p>  # 已登记场景 + 证据等级
+node src/cli.js tools --profile <p>        # 游戏内工具；单个参数用 describe <工具名> --profile <p>
 ```
 
 参数不确定就先 `describe`，再回 §7 查用法文档。
 
+`tools` / `describe` **要活桥接**；没有实例时离线目录只剩 `runs\tools.json`（184 条，2026-10-17 快照），用它要标「快照日期」。
+
 ## 2 开测前自检（不过就停手）
+
+- 起实例：`node src/cli.js start --profile <p> --width 1600 --height 900 --monitor <n>`。**必须显式给 `--profile`**，否则起的是默认的满配 `vanilla`。
+- 底座 mod 的唯一真源是仓库根 `base-mods.json`：`start` 前自动幂等补进 `profiles/<p>/Config/ModsConfig.xml`（只加不删）；加/查用 `node src/cli.js base-mods --profile <p>`（只读对账）。
+- 环境事实别凭记忆，跑 `node src/cli.js env-check --profile <p>`（一次输出进程 / 桥接 / 激活 mod / 加载顺序 / 能力 / 路径）。
 
 | 检查 | 判据 |
 | --- | --- |
@@ -58,7 +64,7 @@ SOP 每一阶段都有完成判据，判据不过不进入下一阶段。动作/
 
 1. 动作之后用 `wait` 等一个可观测判据；等价判据拿不准时，先用最便宜的那个。
 2. 结论来自回读：`wait` 命中、`cli call` 取回字段、截图。动作返回的 `success` 表示请求发出去了。
-3. 字段先查表（`wait --list`、`atoms`），新字段实测后回填 `src/conditions.json` 一条数据。
+3. 字段先查表（`wait --list`、`atoms`），新字段实测后回填 `src/conditions.json` 一条数据。184 个工具里只有 13 个有 `outputSchema`，查不到字段就 `call` 一次再回填。
 4. 发命令前先看归属：`status --profile <p>` 的 `bridgeResolution.ok` 为 true；有 profile 时以记录为权威，不要去共用日志里刮。
 5. 每条结论带证据：产物落 `runs/<日期>-<主题>/`，正文只给路径 + 结论，并标【实测】/【未验证】。
 6. 资源：轻 profile 起实例（一个 profile 一个实例）、推时间 `Fast` 封顶、`--force`/`--all` 要用户当场同意。
@@ -80,10 +86,13 @@ SOP 每一阶段都有完成判据，判据不过不进入下一阶段。动作/
 - 现在做不到的原因：<探针缺失 / 字段无据 / 采样层没有聚合 / 算子不够>
 - 我试过：<命令 + 返回值里的关键字段>
 - 需要补：<一个只读探针 / 一个字段 / 一个采样参数 / 一个算子>
+- 有没有不补也能测的替代方案：<有 ⇒ 先测那一半>
+- 阻塞等级：<卡住整条需求 / 只卡一半 / 只是不够便宜>
+- 这条判据的可信度：<强判据 / 弱判据（成立不等于需求成立）>
 - 补上之后能登记成：<场景名> = <探针> + <条件 JSON 形状>
 ```
 
-能写成「探针 + 一次单值比较」的属**补数据**（登记表一条）；写不成单值比较的才属**补算子/补采样层**。
+能写成「探针 + 一次单值比较」的属**补数据**（登记表一条）；写不成单值比较的才属**补算子/补采样层**。能写成单值比较、但"该比较成立 ≠ 需求成立"的，属**弱判据**，必须同时写清它漏掉什么。
 
 ## 7 指针
 

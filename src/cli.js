@@ -124,6 +124,21 @@ async function withBridge(profile, fn, opts = {}) {
 }
 
 /**
+ * 「像 JSON，但键名没带引号」——只看 `{a:b}` / `{a:b,c:d}` 这种形状，**只用于错误文案**。
+ *
+ * 为什么要这个判据：本机 pwsh 是 5.1，`'{"readiness":"playable"}'` 到 node 手上已经是 `{readiness:playable}`，
+ * 只报「JSON 解析失败」会让人以为是 CLI 坏了。先把带引号的字符串整段挖掉再看结构位置，
+ * 正常 JSON（`{"a":1}`）永远不会命中。
+ */
+function looksLikeJsonWithBareKeys(text) {
+  if (typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  if (!/^[{[]/.test(trimmed)) return false;
+  const withoutStrings = trimmed.replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  return /[{,]\s*[A-Za-z_$][\w$.-]*\s*:/.test(withoutStrings);
+}
+
+/**
  * 读一段 JSON 参数：优先文件，其次行内文本，其次位置参数。
  *
  * 为什么要文件这一路：PowerShell 会把 JSON 里的双引号吃掉（`'{"a":1}'` 到手可能已经变形），
@@ -137,7 +152,14 @@ function readJsonInput({ inline, file, positional, flag }) {
     try {
       return text.startsWith('@') ? fromFile(text.slice(1)) : JSON.parse(text);
     } catch (err) {
-      throw new Error(`${flag} 的 JSON 解析失败：${err.message}\n  收到：${String(text).slice(0, 300)}`);
+      // 报错时最贵的不是「解析失败」，是让人去猜为什么失败：本机 pwsh 是 5.1，`'{"a":1}'`
+      // 到手会变成 `{a:1}`（双引号被吞），照文档抄一遍必失败。所以识别这个形状并直接给两条出路。
+      throw new Error(
+        `${flag} 的 JSON 解析失败：${err.message}\n  收到：${String(text).slice(0, 300)}` +
+          (looksLikeJsonWithBareKeys(text)
+            ? '\n  这通常是 Windows PowerShell 5.1 吞掉了双引号——改用 --args-file <文件> / --condition-file <文件>，或把内层引号写成 \\"'
+            : ''),
+      );
     }
   };
 
@@ -571,9 +593,23 @@ async function collectEnvCheck(profile) {
   // 时间：强制暂停窗口会让 play_for 静默跑 0 tick，所以它是「推时间」的前置事实
   const status = gameFacts?.bridgeStatus ?? null;
   const ui = gameFacts?.uiState ?? null;
+  /**
+   * `timeSpeed` 的唯一真源是 `rimbridge/get_bridge_status` 的 `state.timeSpeed`。
+   * 2026-10-25 实测核对过两次 `rimworld/get_ui_state` 载荷（各 25 个字段）：**里面没有 timeSpeed**，
+   * 所以别往 ui 上找。桥接在「游戏没跑 / 还在主菜单或加载中」时给的就是 `null` —— 这里必须保持
+   * `'unknown'`（不填 `Paused`/`Normal` 冒充），但要把**为什么**写出来：否则读报告的人只看到
+   * `timeSpeed=unknown`，会误判成「代码忘了读这个字段」。
+   */
+  const timeSpeed = status?.state?.timeSpeed;
   const time = {
     windowsForcePause: knownOrUnknown(ui?.windowsForcePause),
-    timeSpeed: knownOrUnknown(status?.state?.timeSpeed),
+    timeSpeed: knownOrUnknown(timeSpeed),
+    timeSpeedWhy:
+      timeSpeed === undefined || timeSpeed === null
+        ? probe.reachable
+          ? '桥接可达，但它给的 state.timeSpeed 是 null —— 游戏还在主菜单/加载中（此时 paused 也可能是 false）。进图后再看这一项。'
+          : '桥接不可达，没查到时间速度（原因见桥接项）'
+        : null,
     paused: knownOrUnknown(status?.state?.paused),
     policyMaxSpeed: 'unknown',
     policyMaxSpeedWhy:
@@ -727,6 +763,7 @@ function printEnvCheck(report) {
     `windowsForcePause=${shown(report.time.windowsForcePause)} timeSpeed=${shown(report.time.timeSpeed)} ` +
       `paused=${shown(report.time.paused)} 速度上限=${shown(report.time.policyMaxSpeed)}（AGENTS.md 硬约束 6）`,
   );
+  if (report.time.timeSpeedWhy) row('', `原因：${report.time.timeSpeedWhy}`);
   row('登记表', `${report.registry.scenarios} 个场景 ${JSON.stringify(report.registry.byLevel)}，错误 ${report.registry.errors.length} 处`);
   row('路径', `profile=${report.paths.profileDir}`);
   row('', `截图=${report.paths.screenshotsDir}`);
