@@ -11,7 +11,7 @@
         "equals": true
       },
       "description": "地图已载入、可以下操作；只判 result.state.playable，不判 hasCurrentGame —— 所以它只是「便宜的第一道门」：要确保真的在局内（不是残留的旧游戏对象），用「进图且可玩」。",
-      "evidence": "docs/cli-wait-实测-20261024.md:19 用例 A（真机 exit 0，attempts=1，elapsedMs=5）",
+      "evidence": "docs/cli-wait-实测-20261024.md 用例 A（真机 exit 0，attempts=1，elapsedMs=5）",
       "verifiedLevel": "wait-verified",
       "timeoutMs": 60000
     },
@@ -24,7 +24,7 @@
         "equals": true
       },
       "description": "新起实例停在主菜单时用；主菜单阶段没有游戏侧事件。",
-      "evidence": "docs/cli-wait-实测-20261024.md:26 用例 H（真机 exit 0，attempts=1）",
+      "evidence": "docs/cli-wait-实测-20261024.md 用例 H（真机 exit 0，attempts=1）",
       "verifiedLevel": "wait-verified",
       "timeoutMs": 60000
     },
@@ -37,7 +37,7 @@
         "equals": "main-tab:Work"
       },
       "description": "open_main_tab {mainTabId} 之后等面板真的切过去（动作→闭环样板）。",
-      "evidence": "docs/cli-wait-实测-20261024.md:25 用例 G（真机 exit 0，attempts=1，elapsedMs=5）",
+      "evidence": "docs/cli-wait-实测-20261024.md 用例 G（真机 exit 0，attempts=1，elapsedMs=5）",
       "verifiedLevel": "wait-verified",
       "timeoutMs": 60000
     },
@@ -50,7 +50,7 @@
         "exists": true
       },
       "description": "最便宜的桥接+游戏对象门槛，比 playable 早成立。",
-      "evidence": "docs/cli-wait-用法-20261024.md:138（真机 exit 0，attempts=1，elapsedMs=12）",
+      "evidence": ".dsh/skills/rimworld-auto-test-closed-loop/docs/cli-wait-用法-20261024.md 的「本文件已实测 / 未实测」（真机 exit 0，attempts=1，elapsedMs=12）",
       "verifiedLevel": "wait-verified",
       "timeoutMs": 60000
     },
@@ -71,7 +71,7 @@
         ]
       },
       "description": "一次等到真能操作；比『已进图可玩』多一条 hasCurrentGame。",
-      "evidence": "docs/cli-wait-用法-20261024.md:121-126 例 2 的 ready.json（文档示例；两个字段各自有真机命中，all 组合未跑）",
+      "evidence": ".dsh/skills/rimworld-auto-test-closed-loop/docs/cli-wait-用法-20261024.md 例 2 的 ready.json（文档示例；两个字段各自有真机命中，all 组合未跑）",
       "verifiedLevel": "field-verified",
       "timeoutMs": 60000
     },
@@ -84,7 +84,7 @@
         "equals": true
       },
       "description": "readiness=mapData 之后、还没到 playable 的窗口用。",
-      "evidence": "docs/自动化测试-变化驱动设计.md:460（state 18 字段在线复核，字段实测）；条件未跑（:282-283 为设计示例）",
+      "evidence": "docs/自动化测试-变化驱动设计.md 的「3.2.1 读取类（3 行）」（state 18 字段在线复核，字段实测）；条件未跑（该文「2.1.1 桥接侧条件算子（2026-10-13 实测确证，`【实测·在线】`）」为设计示例）",
       "verifiedLevel": "field-verified",
       "timeoutMs": 60000
     },
@@ -99,7 +99,7 @@
         "countEquals": 3
       },
       "description": "开局/收留/死亡后等人数真的到 N；必须先过『已进图可玩』。",
-      "evidence": "docs/cli-wait-用法-20261024.md:108-116 例 1（文档示例；字段见 :52-53 与 docs/自动化测试-变化驱动设计.md:462 在线复核）；反证：docs/cli-wait-实测-20261024.md:27 用例 I 未进图时 exit 2",
+      "evidence": ".dsh/skills/rimworld-auto-test-closed-loop/docs/cli-wait-用法-20261024.md 例 1（文档示例；字段见该文「先看清单：`node src/cli.js atoms`」与 docs/自动化测试-变化驱动设计.md 的「3.2.1 读取类（3 行）」在线复核）；反证：docs/cli-wait-实测-20261024.md 用例 I 未进图时 exit 2",
       "verifiedLevel": "field-verified",
       "timeoutMs": 60000
     },
@@ -112,7 +112,7 @@
         "equals": false
       },
       "description": "截图/长跑前等屏幕上没有会挡住的对话框；判据 = result.nonImmediateDialogWindowOpen 为 false（不是 windowCount=0：进图后屏幕上恒有 2 个 Verse.ImmediateWindow，windowCount 永远归不了零）。",
-      "evidence": "条件已改、未真机复验（原条件 result.windowCount equals 0 在真机永不成立）。反证 + 判据同一次采样：runs/2026-10-25-skill试跑/A-CE-时间-截图/12-wait-无模态窗口.json（旧条件 attempts=18、elapsedMs=3681、exit 2；同一载荷 windowCount=2 且 nonImmediateDialogWindowOpen=false、两个窗口都是 Verse.ImmediateWindow/forcePause:false）与 runs/2026-10-25-skill试跑/A-CE-时间-截图/30-screenshot-paused-synced.json（截图载荷的 screenTargets.uiState 同样 windowCount=2、nonImmediateDialogWindowOpen=false、topWindowType=Verse.ImmediateWindow）；字段见 docs/自动化测试-变化驱动设计.md:1097（25 字段含 nonImmediateDialogWindowOpen）",
+      "evidence": "条件已改、未真机复验（原条件 result.windowCount equals 0 在真机永不成立）。反证 + 判据同一次采样：runs/2026-10-25-skill试跑/A-CE-时间-截图/12-wait-无模态窗口.json（旧条件 attempts=18、elapsedMs=3681、exit 2；同一载荷 windowCount=2 且 nonImmediateDialogWindowOpen=false、两个窗口都是 Verse.ImmediateWindow/forcePause:false）与 runs/2026-10-25-skill试跑/A-CE-时间-截图/30-screenshot-paused-synced.json（截图载荷的 screenTargets.uiState 同样 windowCount=2、nonImmediateDialogWindowOpen=false、topWindowType=Verse.ImmediateWindow）；字段见 docs/自动化测试-变化驱动设计.md 的「§9 未确证清单（不许当成已知）」（25 字段含 nonImmediateDialogWindowOpen）",
       "verifiedLevel": "field-verified",
       "timeoutMs": 60000
     },
@@ -125,7 +125,7 @@
         "equals": true
       },
       "description": "set_hover_target→click_ui_target 之后确认浮菜单真的弹出来。",
-      "evidence": "旧引用「SKILL.md 第 328-330 行」已失效（旧 skill .dsh/skills/rimworld-auto-test 已删，其第 349 行才是这条判据）；现出处 docs/共享单车-机制真值表.md:503（click_ui_target 单独调会把 changed:true 骗到手而 floatMenuOpen 仍 false，必须先 set_hover_target）与 docs/食物自动化-技术侦察.md:374（execute_gizmo 后 floatMenuOpen=true）；字段见 docs/自动化测试-变化驱动设计.md:1097",
+      "evidence": "旧引用「SKILL.md 第 328-330 行」已失效（旧 skill .dsh/skills/rimworld-auto-test 已删，其第 349 行才是这条判据）；现出处 docs/共享单车-机制真值表.md 的「2.9.4 run-4 配方链实测轮（2026-10-14，`bp:run-4\\`）—— **`C1` 主命题结案**」（click_ui_target 单独调会把 changed:true 骗到手而 floatMenuOpen 仍 false，必须先 set_hover_target）与 docs/食物自动化-技术侦察.md 的「B8. 默认种什么？能不能指定作物？【实测：默认 Potato，能改，但必须走 UI】」（execute_gizmo 后 floatMenuOpen=true）；字段见 docs/自动化测试-变化驱动设计.md 的「§9 未确证清单（不许当成已知）」",
       "verifiedLevel": "field-verified",
       "timeoutMs": 60000
     },
@@ -138,7 +138,7 @@
         "equals": false
       },
       "description": "play_for/step_game_ticks 长跑之前必等，否则静默跑 0 tick。",
-      "evidence": "旧引用「SKILL.md 第 141 行与第 145-158 行」已失效（旧 skill .dsh/skills/rimworld-auto-test 已删，其第 160/172 行才是这条）；现出处 docs/测试SOP/推时间.md:18（为 true 时 play_for 静默 0 tick、success 有时仍为 true）与 .dsh/skills/rimworld-auto-test-closed-loop/SKILL.md:66（推时间前先确认 windowsForcePause=false）；真机 windowsForcePause=true 见 docs/RimWorld-工具耗时与暂停行为测量-20261024.md:13；字段见 docs/自动化测试-变化驱动设计.md:1097；条件未跑",
+      "evidence": "旧引用「SKILL.md 第 141 行与第 145-158 行」已失效（旧 skill .dsh/skills/rimworld-auto-test 已删，其第 160/172 行才是这条）；现出处 .dsh/skills/rimworld-auto-test-closed-loop/docs/测试SOP/推时间.md 的「1 推之前：三个前置」（为 true 时 play_for 静默 0 tick、success 有时仍为 true）与 .dsh/skills/rimworld-auto-test-closed-loop/SKILL.md（推时间前先确认 windowsForcePause=false）；真机 windowsForcePause=true 见 docs/RimWorld-工具耗时与暂停行为测量-20261024.md 的「结论（3 行）」；字段见 docs/自动化测试-变化驱动设计.md 的「§9 未确证清单（不许当成已知）」；条件未跑",
       "verifiedLevel": "field-verified",
       "timeoutMs": 60000
     },
@@ -151,7 +151,7 @@
         "equals": false
       },
       "description": "推进时间前的便宜检查；与『无强制暂停窗口』要一起过。",
-      "evidence": "docs/自动化测试-变化驱动设计.md:460（state 18 字段含 paused，字段实测）；旁证 docs/RHAH-0008-困在房间基线复现-20261024.md:170 回读 paused=false",
+      "evidence": "docs/自动化测试-变化驱动设计.md 的「3.2.1 读取类（3 行）」（state 18 字段含 paused，字段实测）；旁证 docs/RHAH-0008-困在房间基线复现-20261024.md 的「六、过程中的坑（影响手法，不影响结论）」回读 paused=false",
       "verifiedLevel": "field-verified",
       "timeoutMs": 60000
     },
@@ -164,7 +164,7 @@
         "equals": 0
       },
       "description": "unforbid_all 之后等解禁真的生效，别信 success。⚠ 探针来自 **foodcontrol** mod，不在 `base-mods.json` 的 11 项底座里 ⇒ 在只按底座起的 profile 上会报「未知工具」（exit 1）。",
-      "evidence": "旧引用「SKILL.md 第 138 行与第 306 行」已失效（旧 skill .dsh/skills/rimworld-auto-test 已删，其第 325 行才是这条）；现出处 docs/共享单车-机制真值表.md:502（调试殖民地开局地面资源默认全禁 = 54 件，unforbid_all 后回读 remaining:0）与 docs/生产自动化-扩展需求.md:20-34（同一事实的早期记录）；条件未跑，只验过字段有值",
+      "evidence": "旧引用「SKILL.md 第 138 行与第 306 行」已失效（旧 skill .dsh/skills/rimworld-auto-test 已删，其第 325 行才是这条）；现出处 docs/共享单车-机制真值表.md 的「2.9.4 run-4 配方链实测轮（2026-10-14，`bp:run-4\\`）—— **`C1` 主命题结案**」（调试殖民地开局地面资源默认全禁 = 54 件，unforbid_all 后回读 remaining:0）与 docs/生产自动化-扩展需求.md 的「问题 1：debug 开局的物资被禁取，小人拿不到 ✅ 已核实」（同一事实的早期记录）；条件未跑，只验过字段有值",
       "verifiedLevel": "field-verified",
       "timeoutMs": 60000
     },
@@ -177,7 +177,7 @@
         "contains": "Building_"
       },
       "description": "click_cell 选工作台时先等『选中的是个建筑』再做 bill。",
-      "evidence": "旧引用「SKILL.md 第 307 行与第 479 行」已失效（旧 skill .dsh/skills/rimworld-auto-test 已删，其第 326 行才是这条，第 479 行讲的是 CE 面板取带）；现出处 docs/共享单车-机制真值表.md:496（真机 selectedObjects[0].type = 类名「BikeProbe.MinifiedBike」、id/inspectString 同格可取）与 docs/RIMBRIDGE-技巧手册.md:137（选中语义走 get_selection_semantics，inspect 文本在 selectedObjects[].inspectString）；注意 type 的字符串格式没有工具手册定版，contains「Building_」只对原版类名成立；contains 算子见 docs/cli-wait-用法-20261024.md:82",
+      "evidence": "旧引用「SKILL.md 第 307 行与第 479 行」已失效（旧 skill .dsh/skills/rimworld-auto-test 已删，其第 326 行才是这条，第 479 行讲的是 CE 面板取带）；现出处 docs/共享单车-机制真值表.md 的「2.9.4 run-4 配方链实测轮（2026-10-14，`bp:run-4\\`）—— **`C1` 主命题结案**」（真机 selectedObjects[0].type = 类名「BikeProbe.MinifiedBike」、id/inspectString 同格可取）与 docs/RIMBRIDGE-技巧手册.md 的「5. 读状态」（选中语义走 get_selection_semantics，inspect 文本在 selectedObjects[].inspectString）；注意 type 的字符串格式没有工具手册定版，contains「Building_」只对原版类名成立；contains 算子见 .dsh/skills/rimworld-auto-test-closed-loop/docs/cli-wait-用法-20261024.md 的「算子清单（每个一条最小例子）」",
       "verifiedLevel": "field-verified",
       "timeoutMs": 60000
     },
@@ -188,7 +188,7 @@
         "greaterThanOrEqual": 1
       },
       "description": "不轮询桥接，等游戏侧报告进图（只报一次）。",
-      "evidence": "docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md:443-454（§4.2 作者自标『没在真机上跑过』）；kind 语义见 docs/等待机制-事件驱动-20261017.md:24（colony_started = 首次出现玩家主基地地图、只报一次；旧引用「SKILL.md 第 69 行」已失效，旧 skill .dsh/skills/rimworld-auto-test 的 kind 表在第 71-74 行）",
+      "evidence": "docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md（§4.2 作者自标『没在真机上跑过』）；kind 语义见 docs/等待机制-事件驱动-20261017.md 的「事件 `kind` 表（核实来源：`mods/DSH_GameLink/Source/GameLinkComponent.cs`、`LogTap.cs`、`LiveChannel.cs`）」（colony_started = 首次出现玩家主基地地图、只报一次；旧引用「SKILL.md 第 69 行」已失效，旧 skill .dsh/skills/rimworld-auto-test 的 kind 表在第 71-74 行）",
       "verifiedLevel": "inferred",
       "timeoutMs": 180000,
       "fromNow": false,
@@ -209,7 +209,7 @@
         ]
       },
       "description": "只校验**实例记录**（本 profile 的 pid / 端口 / token 归属）通过，**不代表桥接的 TCP 真的能连**——2026-10-24 真机实测：它 exit 0 的同一次，env-check 仍报 ECONNREFUSED 127.0.0.1:5174（DLC 变多后监听建立更晚）。要「能连」请用场景「桥接可连」。替代 start 内部等待、或要拿 host/port/token 证据时用。",
-      "evidence": "docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md:346 与 :315-352（设计推断）；现实现 waitForBridge 真机 7.6s 就绪见 docs/cli-wait-实测-20261024.md:10；反证（记录就绪但 TCP 不可连）：runs/2026-10-25-skill试跑/verify/A6-envcheck-voiced.txt 与 B1-envcheck-live.txt 的 ECONNREFUSED",
+      "evidence": "docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md 的「3.3 `src/live.js` 变成薄封装（输出格式与 exit 码不回退）」与「3.4 `src/wait-sources.js`（新文件，四类采样 + `waitForBridge` 外壳）」（设计推断）；现实现 waitForBridge 真机 7.6s 就绪见 docs/cli-wait-实测-20261024.md 的「环境」；反证（记录就绪但 TCP 不可连）：runs/2026-10-25-skill试跑/verify/A6-envcheck-voiced.txt 与 B1-envcheck-live.txt 的 ECONNREFUSED",
       "verifiedLevel": "inferred",
       "timeoutMs": 240000
     },
@@ -233,7 +233,7 @@
         "equals": false
       },
       "description": "stop 之后等进程真的没了。2026-10-24 真机两次命中（`stop` 后均 exit 0）：`runs/2026-10-25-回归/A-六阶段/71-wait-进程已退出.txt`、`runs/2026-10-25-回归/V-验证/05-真机-收工.txt`。",
-      "evidence": "docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md:123 与 :155-160（进程快照字段）；真机命中见上述两条 runs 证据",
+      "evidence": "docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md 的「2.2 四类 source 的采样函数签名」与「2.2.2 进程快照的结构（`--source process`）」（进程快照字段）；真机命中见上述两条 runs 证据",
       "verifiedLevel": "wait-verified",
       "timeoutMs": 60000
     }

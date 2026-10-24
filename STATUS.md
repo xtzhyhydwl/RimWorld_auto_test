@@ -54,7 +54,7 @@
   ④CE `part` 示例在中文包下必失败、`index 0` 实为右腿、中文 label `restore` 挂 60 s；⑤`wait` 把探针 `success:false` 当「没进图/字段名错」白等满超时。
 - **环境事实（会静默坑人）**：`pwsh` 工具是 **Windows PowerShell 5.1** —— `Set-Content` 落 GBK、`Out-File` 无参是 UTF-16LE、
   `Out-File -Encoding utf8` 带 BOM（`node` 读它 `JSON.parse` 抛错）⇒ **写中文正文只用 `write`/`edit`**。见 `runs\2026-10-25-skill试跑\X-环境事实-pwsh5.1写文件编码.md`（`runs/` 已 gitignore，证据只在本地）。
-- **本轮新增资产**：`docs/测试SOP/存档读档-往返验证.md`（整份【未验证】）+ README「特殊流程」1 行；截图取证可量化为**白色名字标签像素 IoU**；建议登记的 wait 场景「信件栈已空」。
+- **本轮新增资产**：`.dsh/skills/rimworld-auto-test-closed-loop/docs/测试SOP/存档读档-往返验证.md`（整份【未验证】）+ README「特殊流程」1 行；截图取证可量化为**白色名字标签像素 IoU**；建议登记的 wait 场景「信件栈已空」。
 - **实例已收工**：`stop --profile voiced`（PID 11476 已停）、保活 job 已杀，机上一个 RimWorld 都没剩。
 
 - **主线：票 0008（受困来客打不开门 / 离场）**，修复分支 `fix/0008-can-dig-exit`（基点 `6ab44c7`），提交链 `9b00cbd` → `95fc93c` → `3c0595d`；票据与规划在 `..\RHAH-wayfinder`（`tickets\0001`–`0011`、`EXECUTION-PLAN.md`、`HANDOFF.md`）。
@@ -70,7 +70,7 @@
 
 ### 闭环等待（独立一条线，2026-10-24）
 
-- **P0 已落地**：`node src/cli.js wait`（判定只在 `src/wait.js`，本轮只做 `--source bridge`；`src/ui.js` 的旧 `waitUntil` 已删）。真机 9 个用例见 [docs/cli-wait-实测-20261024.md](docs/cli-wait-实测-20261024.md)，语法/15 算子见 [docs/cli-wait-用法-20261024.md](docs/cli-wait-用法-20261024.md)。
+- **P0 已落地**：`node src/cli.js wait`（判定只在 `src/wait.js`，本轮只做 `--source bridge`；`src/ui.js` 的旧 `waitUntil` 已删）。真机 9 个用例见 [docs/cli-wait-实测-20261024.md](docs/cli-wait-实测-20261024.md)，语法/15 算子见 [.dsh/skills/rimworld-auto-test-closed-loop/docs/cli-wait-用法-20261024.md](.dsh/skills/rimworld-auto-test-closed-loop/docs/cli-wait-用法-20261024.md)。
 - **P2 已落地（2026-10-24 晚）**：多实例串台/并发四项 + 进程身份 + 超时统一。
   一条命令 `status --profile X` 现在会说清「这个桥接凭什么属于我」；`call`/`wait` 不通过校验就**拒发**。
   - 解析：有 profile 时**记录即权威**（不再去共用日志里刮），新增 `resolveBridge()` 四道校验（记录可信 / PID 命令行含本 profile / 端口一致 / token 一致）。
@@ -83,17 +83,17 @@
   - 记录：[docs/多实例并发安全-修复记录-20261024.md](docs/多实例并发安全-修复记录-20261024.md)、[docs/并发安全-进程身份原语与call超时-修复-20261024.md](docs/并发安全-进程身份原语与call超时-修复-20261024.md)。
   - **未验证**：`startGame` 全链路仍未在真机跑（本轮禁止起停游戏）；`stop --force` 没真杀过；`resolveBridge` 的「活实例全部通过」分支没跑到（写完时游戏已被关掉）。
 - **当前重点（2026-10-24 晚，用户指定）**：把「自然语言需求 → 可执行测试」这条链路做出来。
-  - 事实底稿：[docs/自动化测试-流程与原子能力清单-20261024.md](docs/自动化测试-流程与原子能力清单-20261024.md)（六阶段流程、四层原子、七条组合规则、缺原子反馈模板；**不含模块划分**）。
+  - 事实底稿：[.dsh/skills/rimworld-auto-test-closed-loop/docs/自动化测试-流程与原子能力清单-20261024.md](.dsh/skills/rimworld-auto-test-closed-loop/docs/自动化测试-流程与原子能力清单-20261024.md)（六阶段流程、四层原子、七条组合规则、缺原子反馈模板；**不含模块划分**）。
   - **组合 skill 已落地，并按用户口径改薄（2026-10-24 晚）**：skill 只留「做什么 / 四问拆判据 / 硬规则 / 选 SOP / 停手 / 指针」，
     其余全部外移；生长方式 = **加指针，不加正文**。
     [`.dsh/skills/rimworld-auto-test-closed-loop/SKILL.md`](.dsh/skills/rimworld-auto-test-closed-loop/SKILL.md)
-  - **SOP 目录**：[docs/测试SOP/README.md](docs/测试SOP/README.md)。标准六阶段在
-    [docs/测试SOP/标准-六阶段.md](docs/测试SOP/标准-六阶段.md)（原 `测试模板-六阶段`，已 `git mv`）；
-    配套：[环境自检](docs/测试SOP/环境自检.md)（必备 mod / profile 现状 / CE 部署）、
-    [角色编辑器](docs/测试SOP/角色编辑器.md)（CE 反射与 UI 两条路）、
-    [推时间](docs/测试SOP/推时间.md)（`step_game_ticks` vs `play_for`、预算、分段）、
-    [截图取证](docs/测试SOP/截图取证.md)（渲染不刷新、位置只认回读）、
-    [失败判读](docs/测试SOP/失败判读.md)。特殊流程表已有 1 条（[存档读档-往返验证](docs/测试SOP/存档读档-往返验证.md)，2026-10-24 试跑新增，整份【未验证】），按「加文件 + 一行登记」生长 —— 实测成本是「删占位行 + 加一行」，见缺陷清单 C6。
+  - **SOP 目录**：[.dsh/skills/rimworld-auto-test-closed-loop/docs/测试SOP/README.md](.dsh/skills/rimworld-auto-test-closed-loop/docs/测试SOP/README.md)。标准六阶段在
+    [.dsh/skills/rimworld-auto-test-closed-loop/docs/测试SOP/标准-六阶段.md](.dsh/skills/rimworld-auto-test-closed-loop/docs/测试SOP/标准-六阶段.md)（原 `测试模板-六阶段`，已 `git mv`）；
+    配套：[环境自检](.dsh/skills/rimworld-auto-test-closed-loop/docs/测试SOP/环境自检.md)（必备 mod / profile 现状 / CE 部署）、
+    [角色编辑器](.dsh/skills/rimworld-auto-test-closed-loop/docs/测试SOP/角色编辑器.md)（CE 反射与 UI 两条路）、
+    [推时间](.dsh/skills/rimworld-auto-test-closed-loop/docs/测试SOP/推时间.md)（`step_game_ticks` vs `play_for`、预算、分段）、
+    [截图取证](.dsh/skills/rimworld-auto-test-closed-loop/docs/测试SOP/截图取证.md)（渲染不刷新、位置只认回读）、
+    [失败判读](.dsh/skills/rimworld-auto-test-closed-loop/docs/测试SOP/失败判读.md)。特殊流程表已有 1 条（[存档读档-往返验证](.dsh/skills/rimworld-auto-test-closed-loop/docs/测试SOP/存档读档-往返验证.md)，2026-10-24 试跑新增，整份【未验证】），按「加文件 + 一行登记」生长 —— 实测成本是「删占位行 + 加一行」，见缺陷清单 C6。
   - **环境实测（2026-10-24 晚，profile `voiced`）**：加了 `void.charactereditor` + `dsh.autotest` 后 8 个 mod，
     Core/Harmony/RimBridgeServer/GameLink/CE/AutoTest 六项 `loadedInSession=true`；`ce/probe` 通过（CE 1.7.1.0、42 个数据工具）。
     游戏侧 `BridgeTools\DSH.CEBridge` 是指向仓库 `bridge\DSH.CEBridge` 的 **junction**（部署已就位，`-Recurse` 不会穿过 junction，别误判为空）。
@@ -108,14 +108,14 @@
   - 旧 skill `rimworld-auto-test` **已删**（用户 2026-10-24 决定；删前 HEAD `8ee9bae`，需要时可从 git 历史取回）。
   - **模块线（用户已定）**：代码按**四层原子**切（`condition.js` 判定 / `wait-sources.js` 取样与聚合 / `conditions.json` 登记 / 游戏内工具 mod 侧）。
   - 设计过程与取舍（含试跑发现）：[docs/组合skill-草案-20261024.md](docs/组合skill-草案-20261024.md)、
-    [docs/自动化测试-流程与原子能力清单-20261024.md](docs/自动化测试-流程与原子能力清单-20261024.md)、
+    [.dsh/skills/rimworld-auto-test-closed-loop/docs/自动化测试-流程与原子能力清单-20261024.md](.dsh/skills/rimworld-auto-test-closed-loop/docs/自动化测试-流程与原子能力清单-20261024.md)、
     [docs/组合skill-试跑-20261024.md](docs/组合skill-试跑-20261024.md)。
   - 用户已定：`args` 变量化＝做（已落地 `--arg`/`$占位`）；`verifiedLevel` 保留但**不作准入**，只当"还差哪几步没验"的工作清单。
 - **P1 已落地（2026-10-24 晚）**：四类等待收敛到**同一个** `waitFor`，`live` 不再有自己的循环。
   - `--source event` / `process` / `bridge-ready` 全部实现（`src\wait-sources.js` 负责取样与聚合：事件窗口、
     按 kind 计数、进程三态、桥接就绪归属校验），`live --until` 现在只是把谓词**翻译**成条件 JSON（`e7dfa7a`）。
   - 条件登记表 `src\conditions.json` + `wait --scenario/--list/--arg`（`f620d7b`）；求值器独立成 `src\condition.js`（`4250ac8`）。
-  - 用法见 [docs/cli-wait-用法-20261024.md](docs/cli-wait-用法-20261024.md)（四类来源表）；设计稿 §2.4/§6.1、
+  - 用法见 [.dsh/skills/rimworld-auto-test-closed-loop/docs/cli-wait-用法-20261024.md](.dsh/skills/rimworld-auto-test-closed-loop/docs/cli-wait-用法-20261024.md)（四类来源表）；设计稿 §2.4/§6.1、
     候选数据 [docs/条件登记表-候选数据-20261024.md](docs/条件登记表-候选数据-20261024.md)。
   - **实测**：`live` 的 `--last` / `=` / `~` / 超时打印尾部 / `--new-only` 五项；`wait` 的 process（alive 与不存在）、
     event（NDJSON 计数、日志行 `contains`）、bridge-ready（无游戏时 exit 2）四项。

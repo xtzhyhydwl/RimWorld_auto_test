@@ -36,7 +36,7 @@ export { matchesCondition } from './condition.js';
  *
  * @param {() => Promise<any>} probe
  * @param {object} opts
- * @param {object} opts.condition 条件 JSON（见 docs/cli-wait-用法-20261024.md）
+ * @param {object} opts.condition 条件 JSON（见 .dsh/skills/rimworld-auto-test-closed-loop/docs/cli-wait-用法-20261024.md）
  * @param {number} [opts.timeoutMs]
  * @param {number} [opts.intervalMs]
  * @param {string} [opts.what] 人话名字，进错误信息

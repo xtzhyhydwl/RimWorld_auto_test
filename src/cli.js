@@ -238,7 +238,7 @@ const WAIT_USAGE = [
   '  --timeout 60000                      等多久（毫秒；场景自带 timeoutMs 时以场景为准，显式给则覆盖）',
   '  --interval 200                       两次采样的间隔（毫秒，默认 200）',
   '  退出码：0=条件命中 / 2=超时（打印条件+最后采样+attempts+elapsedMs）/ 1=参数错、工具名不存在、桥接未就绪等',
-  '  条件与路径写法见 docs/cli-wait-用法-20261024.md',
+  '  条件与路径写法见 .dsh/skills/rimworld-auto-test-closed-loop/docs/cli-wait-用法-20261024.md',
 ].join('\n');
 
 /** `mods` 的四条子命令 —— 用法文案与「缺 --profile」的示例都从这里取，免得两处各写一份 */
@@ -368,7 +368,7 @@ const GENERAL_USAGE = [
   '  describe 显示单个工具的完整参数 schema',
   '  dump-tools  把所有工具 schema 导出到 runs/tools.json',
   '  call     调用一个游戏内工具（载荷 success:false ⇒ exit 1）',
-  '  wait     等条件成立（反复调探针 + 条件 JSON；0 命中 / 2 超时 / 1 其它），见 docs/cli-wait-用法-20261024.md',
+  '  wait     等条件成立（反复调探针 + 条件 JSON；0 命中 / 2 超时 / 1 其它），见 .dsh/skills/rimworld-auto-test-closed-loop/docs/cli-wait-用法-20261024.md',
   '  atoms    原子能力清单（算子 / 四类来源的快照字段 / 登记表统计）—— 写测试前先看这个',
   '  base-mods 底座 mod 清单（base-mods.json）；带 --profile <p> 只报告该 profile 缺哪几个，不写文件',
   '  mods     被测 mod 清单（profiles/<p>/tested-mods.json）：list / add / remove / apply —— 只有 --apply 才改 ModsConfig',
@@ -1655,9 +1655,9 @@ async function main() {
         registry: summarizeRegistry(registry),
         gameTools: '游戏内可用工具随 mod 变：node src/cli.js tools [关键词]；单个参数：describe <工具名>',
         docs: {
-          usage: 'docs/cli-wait-用法-20261024.md',
+          usage: '.dsh/skills/rimworld-auto-test-closed-loop/docs/cli-wait-用法-20261024.md',
           compose: 'docs/组合skill-草案-20261024.md',
-          flow: 'docs/自动化测试-流程与原子能力清单-20261024.md',
+          flow: '.dsh/skills/rimworld-auto-test-closed-loop/docs/自动化测试-流程与原子能力清单-20261024.md',
         },
       });
       break;

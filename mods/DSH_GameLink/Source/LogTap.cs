@@ -2,7 +2,7 @@
 //
 // 三条：
 //   · Log.Message —— 只转发文本里含 `[VD]`（产品 mod 的路径日志）或含 `[DSH-TEST]`（测试埋点，
-//     约定见 docs\测试SOP\埋点协议.md）的行；其余 Message 不进事件文件，否则会被刷屏；
+//     约定见 .dsh\skills\rimworld-auto-test-closed-loop\docs\测试SOP\埋点协议.md）的行；其余 Message 不进事件文件，否则会被刷屏；
 //   · Log.Warning —— 同一条过滤（其它 mod 的警告每秒刷屏，会把事件文件变成垃圾）；
 //   · Log.Error —— 全转发，用来抓红字（这是「为什么这局没跑通」的主要证据）；
 //   · 自己打的 `[GameLink] ...` 一律跳过，否则「写盘失败 → Log.Error → 转发 → 再写盘失败」会自激。
@@ -68,7 +68,7 @@ namespace DSH_GameLink
             Emit("Error", __0, false);
         }
 
-        // ── mod 加载埋点（正面埋点，见 docs\测试SOP\埋点协议.md）─────────────
+        // ── mod 加载埋点（正面埋点，见 .dsh\skills\rimworld-auto-test-closed-loop\docs\测试SOP\埋点协议.md）─────────────
 
         // 埋点放在静态构造里而不是新组件里：这是 mod 最早的、必定执行的入口，
         // 而 GameComponent 要等有了 Game 才被创建，主菜单阶段根本没有。

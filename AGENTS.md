@@ -30,9 +30,9 @@
 - 等**桥接就绪 / 进程起来**：反复采样 `node src/cli.js call rimbridge/ping --profile <p>` 到 exit 0
   （**注意：桥接还没监听时 `wait` 是立刻 exit 1，不是等** ⇒ 这一步只能外层重试；`live` 也**没有**"桥接就绪"这种 `kind`）。
 - 等**进图 / 窗口 / UI**：`node src/cli.js wait --scenario <场景名>`（`wait --list` 查名字）。
-- 等**日志 / 事件 / 心跳**：`node src/cli.js live --until '<条件>'` 挂后台 job（job 完成通知就是推送；可用 `kind` 见 `docs\cli-wait-用法-20261024.md`）。
+- 等**日志 / 事件 / 心跳**：`node src/cli.js live --until '<条件>'` 挂后台 job（job 完成通知就是推送；可用 `kind` 见 `.dsh\skills\rimworld-auto-test-closed-loop\docs\cli-wait-用法-20261024.md`）。
 - 等**游戏内状态**（tick / 小人 / 物件 / 地图是否可用）：`node src/cli.js wait --source bridge` 反复采样只读探针直到断言成立。
-参数、`kind` 表与「为什么固定延时是错的」见 `docs\cli-wait-用法-20261024.md` 与 `docs\等待机制-事件驱动-20261017.md`；
+参数、`kind` 表与「为什么固定延时是错的」见 `.dsh\skills\rimworld-auto-test-closed-loop\docs\cli-wait-用法-20261024.md` 与 `docs\等待机制-事件驱动-20261017.md`；
 写测试的流程骨架见 skill `rimworld-auto-test-closed-loop`。
 
 6. **自动化测试的机器资源约定**（用户可能同时在玩他自己那一局；数字见 `docs/多实例改造-实现-20261017.md`）：
