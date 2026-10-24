@@ -27,16 +27,18 @@
   - 超时：`gabp.js` 唯一常量 `DEFAULT_REQUEST_TIMEOUT_MS = 60_000`，`cli call` 不再写死 300 s。
   - 记录：[docs/多实例并发安全-修复记录-20261024.md](docs/多实例并发安全-修复记录-20261024.md)、[docs/并发安全-进程身份原语与call超时-修复-20261024.md](docs/并发安全-进程身份原语与call超时-修复-20261024.md)。
   - **未验证**：`startGame` 全链路仍未在真机跑（本轮禁止起停游戏）；`stop --force` 没真杀过；`resolveBridge` 的「活实例全部通过」分支没跑到（写完时游戏已被关掉）。
-- **下一步（P1 剩最后一块）**：`--source event/process/bridge-ready` 接进同一 `waitFor`，并与 `live.js` 合并（别留两套判定）。
-  - **已完成**：
-    - 求值器拆到 `src/condition.js`（原子判定，依赖单向），`wait.js` 只剩等待循环 —— `4250ac8`；
-      算子边界「原子只做单值判定、聚合进采样层」见设计稿 §2.4（`f4fedbc`），并加了 `contains`（`665ce88`）。
-    - **条件登记表已落地**：`src\conditions.json` + `wait --scenario / --list / --arg`（`f620d7b`）。
-      16 个场景（4 条真机 wait 验过、9 条字段真机读过、3 条推断），证据分级 `verifiedLevel` 四档，
-      `args` 支持 `$占位` 由 `--arg` 填。用法见 [docs/cli-wait-用法-20261024.md](docs/cli-wait-用法-20261024.md)；
-      候选来源与缺口见 [docs/条件登记表-候选数据-20261024.md](docs/条件登记表-候选数据-20261024.md)。
-  - **仍待用户拍板**（不阻塞已落地部分）：Q1 模块切分（推荐 a1：新增 `wait-sources.js`，`events.js` 以后再说）、
-    Q2 `waitForBridge` 是否搬出 `launcher.js`、Q6/Q7/Q8 已按推荐做成了**可回退的增量**（占位参数、`verifiedLevel` 四档、中文场景键）。
+- **P1 已落地（2026-10-24 晚）**：四类等待收敛到**同一个** `waitFor`，`live` 不再有自己的循环。
+  - `--source event` / `process` / `bridge-ready` 全部实现（`src\wait-sources.js` 负责取样与聚合：事件窗口、
+    按 kind 计数、进程三态、桥接就绪归属校验），`live --until` 现在只是把谓词**翻译**成条件 JSON（`e7dfa7a`）。
+  - 条件登记表 `src\conditions.json` + `wait --scenario/--list/--arg`（`f620d7b`）；求值器独立成 `src\condition.js`（`4250ac8`）。
+  - 用法见 [docs/cli-wait-用法-20261024.md](docs/cli-wait-用法-20261024.md)（四类来源表）；设计稿 §2.4/§6.1、
+    候选数据 [docs/条件登记表-候选数据-20261024.md](docs/条件登记表-候选数据-20261024.md)。
+  - **实测**：`live` 的 `--last` / `=` / `~` / 超时打印尾部 / `--new-only` 五项；`wait` 的 process（alive 与不存在）、
+    event（NDJSON 计数、日志行 `contains`）、bridge-ready（无游戏时 exit 2）四项。
+  - **未验证**：真实游戏事件流（本轮禁止起停游戏）；`docs/cli-wait-实测-20261024.md` 里 9 个用例未重跑；
+    `waitForBridge` 仍留在 `launcher.js`（Q2 未定，没搬）。
+  - **仍待用户拍板**：Q2 `waitForBridge` 是否搬出 `launcher.js`；Q4 `--scenario` 覆盖规则（当前实现＝禁改身份/允许调参）；
+    Q6/Q7/Q8 已按推荐做成**可回退的增量**（`$占位` 参数、`verifiedLevel` 四档、中文场景键）。
 - **多实例硬规矩（仍然有效）**：发命令前先证明「我连的是自己那一局」——现在可以直接看 `status` 的 `bridgeResolution`，但**不要**用 `logs` 判断自己死活（共用日志会看到别人的行）。`--force`/`--all` 仍会杀用户的局，只有用户明确要求才用。
 - **交接**：[docs/HANDOFF-闭环等待-交接-20261024.md](docs/HANDOFF-闭环等待-交接-20261024.md)。
 

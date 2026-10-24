@@ -91,11 +91,12 @@ node src/cli.js live --profile <profile> --until 'kind=colony_started' --timeout
 
 | 要等的 | 用哪条 |
 | --- | --- |
-| 进程 / 桥接就绪 | `node src/cli.js start`（自带等待）/ `status` |
-| 主菜单（entry scene，**没有事件**） | `live --source log --until 'text~GABP server connected to GABS'` |
-| 游戏侧事件（进图 / 窗口 / 日志 / 心跳） | `live --until ...`（见上表） |
-| **游戏内状态**（tick / 小人 / 物件 / UI / 地图可用） | `node src/cli.js wait --source bridge ...` |
-| 日志文本 / 进程存活 | `wait` 的探针只要是个只读采样就能用，但 CLI 目前**只有** `--source bridge` ⇒ 用 `live --source log` / `status` |
+| 进程 / 桥接就绪（**归属校验通过**，不只是端口能连） | `node src/cli.js start`（自带等待）/ `status` / `wait --source bridge-ready` |
+| 主菜单（entry scene，**没有事件**） | `live --source log --until 'text~GABP server connected to GABS'`（或 `wait --source event --event-format log`） |
+| 游戏侧事件（进图 / 窗口 / 日志 / 心跳） | `live --until ...`（见上表），或 `wait --source event` + `result.counts.<kind>` |
+| **游戏内状态**（tick / 小人 / 物件 / UI / 地图可用） | `node src/cli.js wait --scenario <场景名>`（先 `wait --list`）或 `--source bridge --probe ...` |
+| 进程存活 / 已退出 | `node src/cli.js wait --source process --pid <pid>`（不给 `--pid` 就用本 profile 记录里的） |
+| 日志文本 | `live --source log --until 'text~...'`；要等「某类事件至少 N 次」用 `wait --source event` + `result.counts.<kind>` |
 
 ```powershell
 # 等进图：playable 字段任何时刻都在（未进图时 list_colonists 可能连 colonists 字段都没有）
