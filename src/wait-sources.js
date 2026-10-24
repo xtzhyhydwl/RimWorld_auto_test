@@ -247,6 +247,38 @@ export function bridgeSampler({ client, probe, args = {}, deadline }) {
 }
 
 /**
+ * 四类来源的「说明书」（给 `cli atoms` 导出，也是 `buildSampler` 的合法取值来源）。
+ * 快照字段必须与各 sampler 实际返回的一致 —— 这是代理写条件时的唯一依据。
+ */
+export const SOURCE_SPECS = {
+  bridge: {
+    what: '调一次只读桥接工具',
+    needs: ['--probe（或用 --scenario）'],
+    snapshot: '工具返回的载荷本身（与 cli call 一致），路径以 result. 开头',
+    example: { 'result.state.playable': true },
+  },
+  event: {
+    what: '跟读 NDJSON 事件文件或 Player.log 的行',
+    needs: ['--file（默认 runs/live/<profile>.ndjson）', '--event-format events|log', '--new-only', '--window-ms'],
+    snapshot:
+      'events[]（事件对象）、eventTexts[]（同上的字符串化视图，承载子串语义）、counts{}（按 kind 计数）、lineMatch（命中后才出现）、readCount',
+    example: { 'result.counts.colony_started': '>= 1' },
+  },
+  process: {
+    what: '探一个 PID 的三态',
+    needs: ['--pid（缺省用本 profile 记录里的 PID）', '--verify（连身份一起校验，约 +0.3s/次）'],
+    snapshot: 'pid、state（alive|foreign|none|unknown）、alive；开 --verify 时另有 verified/profile/reason',
+    example: { 'result.alive': false },
+  },
+  'bridge-ready': {
+    what: '校验「这个桥接是不是我的」（四道校验）',
+    needs: [],
+    snapshot: 'ready、source（record|log|env）、host、port、logFile、reason、evidence[]',
+    example: { 'result.ready': true },
+  },
+};
+
+/**
  * 按来源造采样器。`deps.client` 只有 `bridge` 需要。
  * 返回值直接喂 `waitFor(probe, {condition, ...})`。
  */
@@ -269,6 +301,6 @@ export function buildSampler(spec = {}, deps = {}) {
     case 'bridge-ready':
       return bridgeReadySampler({ profile });
     default:
-      throw new Error(`不认识的 source「${source}」（可用：bridge / event / process / bridge-ready）`);
+      throw new Error(`不认识的 source「${source}」（可用：${Object.keys(SOURCE_SPECS).join(' / ')}）`);
   }
 }

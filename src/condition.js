@@ -299,3 +299,14 @@ function badCondition(message) {
 export { tryMatch };
 /** 字符串化规则（`contains` 与事件源的 `texts` 视图共用，保证两处答案一致） */
 export { stringForm };
+/**
+ * 算子清单与注意事项——给 `cli atoms` 导出，别在别处再抄一份（抄了就会漂移）。
+ */
+const OPERATOR_NOTES = {
+  contains: 'Node 侧扩展：先字符串化再比子串；rb.poll 没有这个算子，含它的条件不能下发游戏内',
+  not: 'Node 侧扩展：rb.poll 没有这个算子，含它的条件不能下发游戏内',
+  exists: '只判「有没有这个键」，null 也算有；所以「命中后才出现」的字段用 exists 是对的',
+  countEquals: '只支持「等于」；要「至少 N 个」请让采样层给出计数（如 result.counts.<kind>）再用数值比较',
+  allItems: '对空数组恒真；要同时断言非空请加 {"path":"...","countEquals":N} 之类的条件',
+};
+export { LEAF_OPERATORS, COMBINATORS, OPERATOR_NOTES };

@@ -12,13 +12,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { editDistance } from './toolname.js';
+import { SOURCE_SPECS } from './wait-sources.js';
 
 const WS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 export const CONDITIONS_FILE = path.join(WS, 'src', 'conditions.json');
 
-/** 四类采样来源：只有 `bridge` 需要探针工具名 */
-export const SOURCES = ['bridge', 'event', 'process', 'bridge-ready'];
+/** 四类采样来源：这份清单的唯一出处是 wait-sources.js 的 SOURCE_SPECS（抄两份必然漂移） */
+export const SOURCES = Object.keys(SOURCE_SPECS);
 
 /** 证据等级。`verified` 是派生布尔（只为 wait-verified），保留是为了兼容只读布尔的调用方。 */
 export const VERIFIED_LEVELS = ['wait-verified', 'field-verified', 'doc-example', 'inferred'];

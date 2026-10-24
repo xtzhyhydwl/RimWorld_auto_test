@@ -17,7 +17,8 @@ import path from 'node:path';
 import { connectGabp, DEFAULT_REQUEST_TIMEOUT_MS } from './gabp.js';
 import { assertToolNameExists } from './toolname.js';
 import { waitFor } from './wait.js';
-import { buildSampler, resolveEventFile } from './wait-sources.js';
+import { buildSampler, resolveEventFile, SOURCE_SPECS } from './wait-sources.js';
+import { COMBINATORS, LEAF_OPERATORS, OPERATOR_NOTES } from './condition.js';
 import { CONDITIONS_FILE, fillArgs, listScenarios, loadRegistry, resolveScenario } from './conditions.js';
 import {
   startGame,
@@ -182,6 +183,39 @@ async function main() {
   const profile = flags.profile || 'vanilla';
 
   switch (cmd) {
+    case 'atoms': {
+      /**
+       * 原子能力清单（机器可读）——让**没有上下文的代理**一次拿到「能怎么判、能等什么」，
+       * 不用读文档也不用猜字段名。这是「原子库应当可检索」的落点：清单由代码导出，
+       * 不会与实现漂移（算子从 condition.js 读，来源从 wait-sources.js 读）。
+       */
+      const registry = loadRegistry();
+      out({
+        operators: {
+          leaf: LEAF_OPERATORS,
+          combinators: COMBINATORS,
+          notes: OPERATOR_NOTES,
+        },
+        sources: SOURCE_SPECS,
+        registry: {
+          file: CONDITIONS_FILE,
+          scenarios: Object.keys(registry.scenarios).length,
+          byLevel: listScenarios(registry).reduce((acc, s) => {
+            acc[s.verifiedLevel] = (acc[s.verifiedLevel] ?? 0) + 1;
+            return acc;
+          }, {}),
+          errors: registry.errors,
+        },
+        gameTools: '游戏内可用工具随 mod 变：node src/cli.js tools [关键词]；单个参数：describe <工具名>',
+        docs: {
+          usage: 'docs/cli-wait-用法-20261024.md',
+          compose: 'docs/组合skill-草案-20261024.md',
+          flow: 'docs/自动化测试-流程与原子能力清单-20261024.md',
+        },
+      });
+      break;
+    }
+
     case 'start': {
       const rec = await startGame({
         profile,
@@ -551,6 +585,7 @@ async function main() {
         pid,
         file: eventFile,
         eventSource: eventFormat,
+        verifyIdentity: Boolean(flags.verify),
         fromNow: Boolean(flags['new-only']),
         windowMs: flags['window-ms'] === undefined ? null : Number(flags['window-ms']),
       };
@@ -684,6 +719,7 @@ async function main() {
           '  dump-tools  把所有工具 schema 导出到 runs/tools.json',
           '  call     调用一个游戏内工具',
           '  wait     等条件成立（反复调探针 + 条件 JSON；0 命中 / 2 超时 / 1 其它），见 docs/cli-wait-用法-20261024.md',
+      '  atoms    原子能力清单（算子 / 四类来源的快照字段 / 登记表统计）—— 写测试前先看这个',
           '  logs     打印该 profile 的 Player.log 尾部',
           '  live     等游戏侧事件（DSH_GameLink 的 NDJSON 或 Player.log），命中即返回',
           '  stop     关闭该 profile 的测试实例（--force 才会强杀全机 RimWorld，破坏性）',
