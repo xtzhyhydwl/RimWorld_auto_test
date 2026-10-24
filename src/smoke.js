@@ -19,7 +19,6 @@ import {
   startGame,
   stopGame,
   waitForBridge,
-  readBridgeInfo,
   logPathFor,
   tailFile,
   profileDir,
