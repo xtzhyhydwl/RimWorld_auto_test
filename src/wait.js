@@ -45,6 +45,7 @@ const LEAF_OPERATORS = [
   'lessThan',
   'lessThanOrEqual',
   'countEquals',
+  'contains',
   'allItems',
   'anyItem',
 ];
@@ -227,6 +228,23 @@ function evaluateLeaf(node, op, scope) {
       return membership(actual, want, op);
     case 'notIn':
       return !membership(actual, want, op);
+    case 'contains': {
+      /**
+       * 子串匹配。加它只有一个理由：`live --until` 的 `~` 就是子串
+       * （`live.js:101` 的 `actual.includes(c.value)`），不给它一个算子，
+       * `live` 就永远得留着第二套判定，「合并成一套」也就无从谈起。
+       *
+       * 语义照抄 live 的 `fieldText`：先把这个字段**字符串化**再比（null→'null'，
+       * 对象→JSON 文本，其它→String(v)），这样 `~` 的 5 个等价点（数字/布尔/null/
+       * 对象/缺键）在条件 JSON 里能一一对得上。区分大小写，和 `~` 一致。
+       * 取反用组合子：`{"not":{"path":"result.x","contains":"y"}}`。
+       *
+       * 注意：游戏侧 `rb.poll` 没有这个算子（与 `not` 同类），所以含它的条件
+       * **不能**原样下发，只能在 Node 侧求值。
+       */
+      if (typeof want !== 'string') throw badCondition(`contains 的值必须是字符串，收到 ${preview(want)}`);
+      return stringForm(actual).includes(want);
+    }
     case 'countEquals': {
       if (!Array.isArray(actual)) {
         throw opTypeError(op, pathText, actual, '数组');
@@ -336,6 +354,18 @@ function deepEqual(a, b) {
   const kb = Object.keys(b);
   if (ka.length !== kb.length) return false;
   return ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && deepEqual(a[k], b[k]));
+}
+
+/**
+ * 把一个字段值转成「可做子串比较的文本」。
+ *
+ * 与 `live.js` 的 `fieldText` 同一套规则（null→'null'、对象→JSON 文本、其它→String(v)）：
+ * `live --until` 合并进来之后两边必须是同一个转换，否则同一个 `~` 写法会在两处给出不同答案。
+ */
+function stringForm(v) {
+  if (v === null) return 'null';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
 }
 
 function typeName(v) {
