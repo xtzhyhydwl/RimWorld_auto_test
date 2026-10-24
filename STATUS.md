@@ -11,7 +11,7 @@
 - **八项结果**：1 环境自检 ✅（`activeMods=13`、底座 11 缺 0、`loadedInSession` 13、ordering 0、`restartRequired=false`）；
   2 起实例+进门 ✅（ping 第 5 次 @14.0 s；进图 6017 ms/84 attempts；**新场景 `桥接可连` 首次真机 exit 0**）；
   3 `mods` 端到端 ✅（临时 profile：底座 11 → 加 achtung → **12/12**、ordering 0、幂等、stop+删 profile+机器清零）；
-  4 CE ⚠️ 部分（`{"part":"Leg","index":0}`=右腿；截肢/`restore` 各 371 ms；**`ce/set_skills` 写等级不生效且整表清零**）；
+  4 CE ✅（`{"part":"Leg","index":0}`=右腿；截肢/`restore` 各 371 ms。**`ce/set_skills`「等级写不进」是本轮误判，已撤回**：C2 复测定标为 `DefName|等级|激情|xpSince|xpMidnight` 恰好 5 列，等级可写，毁数据的是「整表覆盖 + 坏段静默丢弃」）；
   5 推时间 ✅（`step 600`→600 tick/600 帧/6365 ms≈94.3 tick/s；`play_for Fast 1000ms`→182 tick）；
   6 失败判读 ✅（exit 2 超时 / exit 1 未知工具与坏 JSON / `call` 动作失败 / `missingPath` 第三类，全对上）；
   7 缺原子模板 ✅（假需求「等某封信被处理掉」判为**补数据**，不是补采样层）；8 存档读档 ✅（阶段 2–7 真跑 + `list_saves` 补验：坏档不抛错而是 `metadata_unavailable`、空目录 `count=0`、**可当 `wait --probe` 用 `result.saves.0.name` 断言**，`wait 游戏进程已退出` 真机 exit 0）。
