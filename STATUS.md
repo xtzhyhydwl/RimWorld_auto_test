@@ -5,6 +5,17 @@
 
 ## 现在（2026-10-24）
 
+- **测试流程全量试跑（2026-10-24 晚，4 个干净上下文的代理并行）**：八项全部跑到（环境自检=部分通过、2–8=走通），
+  缺陷清单 **45 条 + 13 步修复顺序**在 [docs/2026-10-25-skill试跑缺陷.md](docs/2026-10-25-skill试跑缺陷.md)。
+  **改 skill / docs / `src\` 之前等用户拍板**（清单已按"最该修的 5 条"排好）。
+  最贵的 5 条：①`node src/cli.js start --help` 不拦 help 且默认 profile=vanilla ⇒ 本轮**真起了 561 mod 实例**（pid 28384，已退出）；
+  ②`cli call` 动作失败仍 exit 0（`src\cli.js:451-471` 只 `out(res)`）⇒ 假结论；③SOP/skill 命令示例缺 `--profile`，照抄必 exit 1；
+  ④CE `part` 示例在中文包下必失败、`index 0` 实为右腿、中文 label `restore` 挂 60 s；⑤`wait` 把探针 `success:false` 当「没进图/字段名错」白等满超时。
+- **环境事实（会静默坑人）**：`pwsh` 工具是 **Windows PowerShell 5.1** —— `Set-Content` 落 GBK、`Out-File` 无参是 UTF-16LE、
+  `Out-File -Encoding utf8` 带 BOM（`node` 读它 `JSON.parse` 抛错）⇒ **写中文正文只用 `write`/`edit`**。见 `runs\2026-10-25-skill试跑\X-环境事实-pwsh5.1写文件编码.md`（`runs/` 已 gitignore，证据只在本地）。
+- **本轮新增资产**：`docs/测试SOP/存档读档-往返验证.md`（整份【未验证】）+ README「特殊流程」1 行；截图取证可量化为**白色名字标签像素 IoU**；建议登记的 wait 场景「信件栈已空」。
+- **实例已收工**：`stop --profile voiced`（PID 11476 已停）、保活 job 已杀，机上一个 RimWorld 都没剩。
+
 - **主线：票 0008（受困来客打不开门 / 离场）**，修复分支 `fix/0008-can-dig-exit`（基点 `6ab44c7`），提交链 `9b00cbd` → `95fc93c` → `3c0595d`；票据与规划在 `..\RHAH-wayfinder`（`tickets\0001`–`0011`、`EXECUTION-PLAN.md`、`HANDOFF.md`）。
 - **同一自然场景 A/B 的结论**：A＝作者原版 1.7 DLL **红**（0.45h 内不离图，2.64h 仍 `spawned=true`，门 HP 恒 104）；B＝`9b00cbd` **绿**（门 104→64→24→打烂，`curJob=Mine`，tick 2031 离图，0 异常）；B＝`95fc93c` **红**（15090 tick ≈6.04 游戏小时门 HP 恒 104，从未拿到挖掘 job；同 duty 换原版 giver，同一 pawn 1800 tick 内凿墙离图 ⇒ 卡点在 RHAH 包装层）；B＝`3c0595d`（结果缓存 + 冷却 2500 tick、首检放行）**未验证**——绿臂跑到一半被人为中止。
 - **设计方向可能错了（人类 2026-10-24 提出，最高优先）**：来客明明有门却凿墙，因为 `RHAH_DoorPatch` 对活跃来客强制 `PawnCanOpen=false`（`famineVisitorsOpenDoors` 默认 `false`），且**不看 lifecycle**——人已在 `Leaving` 仍被锁门。建议改成「**离场放开门禁、让他们走门；凿墙只做无路兜底**」，比现方案小。
@@ -41,7 +52,7 @@
     [角色编辑器](docs/测试SOP/角色编辑器.md)（CE 反射与 UI 两条路）、
     [推时间](docs/测试SOP/推时间.md)（`step_game_ticks` vs `play_for`、预算、分段）、
     [截图取证](docs/测试SOP/截图取证.md)（渲染不刷新、位置只认回读）、
-    [失败判读](docs/测试SOP/失败判读.md)。特殊流程表暂时为空，按「加文件 + 一行登记」生长。
+    [失败判读](docs/测试SOP/失败判读.md)。特殊流程表已有 1 条（[存档读档-往返验证](docs/测试SOP/存档读档-往返验证.md)，2026-10-24 试跑新增，整份【未验证】），按「加文件 + 一行登记」生长 —— 实测成本是「删占位行 + 加一行」，见缺陷清单 C6。
   - **环境实测（2026-10-24 晚，profile `voiced`）**：加了 `void.charactereditor` + `dsh.autotest` 后 8 个 mod，
     Core/Harmony/RimBridgeServer/GameLink/CE/AutoTest 六项 `loadedInSession=true`；`ce/probe` 通过（CE 1.7.1.0、42 个数据工具）。
     游戏侧 `BridgeTools\DSH.CEBridge` 是指向仓库 `bridge\DSH.CEBridge` 的 **junction**（部署已就位，`-Recurse` 不会穿过 junction，别误判为空）。
