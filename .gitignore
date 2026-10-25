@@ -26,3 +26,15 @@ data/
 *.user
 Thumbs.db
 desktop.ini
+
+# 拉取的第三方仓库（随时会被上游更新，不进本仓库）
+/RimworldMods/
+
+# 测试产物与报告（体积大、可重生成）
+/reports/
+
+# 文档只留在磁盘，不进 git（本仓库只放主要代码）
+/docs/
+
+# 工作区文件
+/RHAH.code-workspace
