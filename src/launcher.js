@@ -933,6 +933,8 @@ export async function startGame({
   let child;
   try {
     child = spawnDetached(exe, args, {
+      // cwd 必须显式钉在游戏根（exe 所在目录），不能继承本进程的工作目录：继承来的路径含中文时，
+      // Mono 会在 Harmony 初始化里抛 Illegal byte sequence，Harmony 全废（1.6 实测 A/B 见 docs\工作目录-cwd-必须指向游戏根-20261025.md）。
       cwd: root,
       hideWindow: !visible,
       env: {
