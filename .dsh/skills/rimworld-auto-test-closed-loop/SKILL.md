@@ -70,8 +70,9 @@ SOP 每一阶段都有完成判据，判据不过不进入下一阶段。动作/
 5. 每条结论带证据：产物落 `runs/<日期>-<主题>/`，正文只给路径 + 结论，并标【实测】/【未验证】。
 6. 资源：轻 profile 起实例（一个 profile 一个实例）、推时间 `Fast` 封顶、`--force`/`--all` 要用户当场同意。
 7. 探东西用 `cli call` / `wait` / `live` 组合；`runs/game-process.*.json` 只由启动器写，离线验证就传假 `client` 对象。
-8. 推时间只按 tick：`step_game_ticks{ticks, pauseFirst:true, timeoutMs:大}`，判据是 `advancedTicks`；推之前先确认 `windowsForcePause = false`。选型、单次预算、分段见 `docs/测试SOP/推时间.md`。
-9. 截图或人眼看之前先 `play_for` 400–1000 ms；位置/移动类结论只认坐标回读 + 新旧格裁剪对照（暂停态 step 后 pawn 渲染不刷新）。见 `docs/测试SOP/截图取证.md`。
+8. 推时间只按 tick：`step_game_ticks{ticks, pauseFirst:true, timeoutMs:大}`，判据是 `advancedTicks`；推之前先确认 `windowsForcePause = false`。
+   **step 不出帧**：暂停态 step 只用于数值推进（HP / 计时器 / `spawned` / 库存）；要画面、要看过程、要截图 ⇒ 必须 `play_for`；两者可**混合**分段（step 300–600 tick → 每段 `play_for` ≈100 ms 让渲染追平）。选型、预算、分段见 `docs/测试SOP/推时间.md`。
+9. **位置类结论只认坐标回读**（+ 新旧格裁剪对照）；截图只能证「画面上有东西」，不能证「谁在哪」。截图或人眼看之前硬性 `play_for` 400–1000 ms——暂停态 step 之后截的是冻结帧。见 `docs/测试SOP/截图取证.md`。
 
 ## 6 停手与缺原子
 
@@ -105,8 +106,8 @@ SOP 每一阶段都有完成判据，判据不过不进入下一阶段。动作/
 | 有哪些 SOP、怎么加一条 | 本技能 docs/测试SOP/README.md |
 | 环境自检、必备 mod、profile 现状 | 本技能 docs/测试SOP/环境自检.md |
 | 小人状态怎么摆、怎么读（Character Editor） | 本技能 docs/测试SOP/角色编辑器.md |
-| 时间怎么推（选型 / 分段 / 判据） | 本技能 docs/测试SOP/推时间.md |
-| 截图怎么才可信、位置怎么取证 | 本技能 docs/测试SOP/截图取证.md |
+| 时间怎么推（选型 / 分段 / 判据）；**step 不出帧**、step 与 `play_for` 怎么混 | 本技能 docs/测试SOP/推时间.md |
+| 截图怎么才可信、位置怎么取证；**截图前 `play_for` 硬规则**、位置证据强度分档 | 本技能 docs/测试SOP/截图取证.md |
 | 动作/等待失败怎么判 | 本技能 docs/测试SOP/失败判读.md |
 | 探针有哪些、四类采样源怎么读 | 本技能 docs/测试SOP/环境探针.md |
 | 日志与事件取证怎么取 | 本技能 docs/测试SOP/日志与事件取证.md |
