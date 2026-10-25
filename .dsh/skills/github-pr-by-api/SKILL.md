@@ -76,4 +76,4 @@ $p = Invoke-RestMethod -Headers $h 'https://api.github.com/repos/<owner>/<repo>/
 分支 `fix/0008-can-dig-exit` 推到 `xtzhyhydwl/RimworldMods`，对 `Nanaloveyuki/RimworldMods` 的 `main` 开 PR #9：`16 files / +171 / −27`，无二进制文件，`base.ref=main`。
 
 ## 相关文档
-- 完整流程与本机实测记录：`docs\GitHub-API提PR流程-20261025.md`
+- 完整流程与本机实测记录：`docs/提PR流程-20261025.md`（在本 skill 目录内）
