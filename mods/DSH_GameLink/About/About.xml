@@ -5,6 +5,7 @@
   <packageId>dsh.gamelink</packageId>
   <supportedVersions>
     <li>1.6</li>
+    <li>1.7</li>
   </supportedVersions>
   <description>
 【自动化测试专用，不属于产品 mod】把游戏里发生的事写成结构化事件（NDJSON，一行一条），让 DSH 侧可以「等一个条件」而不是「睡固定时长 + 事后读日志」。
