@@ -434,7 +434,7 @@ New-Item -ItemType Junction -Path 'D:\SteamLibrary\steamapps\common\RimWorld\Mod
 - [docs/生产自动化-设计.md](生产自动化-设计.md) —— 主设计（含大量 API 确证记录）
 - [docs/开局流程-设计.md](开局流程-设计.md) —— `BootstrapStep` 的原始设计（第 4 条泛化轴的起点）
 - [docs/游戏API符号确证.md](游戏API符号确证.md) —— **写码前先查**
-- `STATUS.md` —— 总状态
+- `STATUS.md` —— **≤25 行**关键事实与指针（**不记状态**）
 
 ★ 文档里有**大量用户原话**（引号里的）。**优先信原话，不要信转述** ——
 本项目出现过几次"转述时丢了关键限定"。

@@ -82,7 +82,7 @@
 | 实例 | **`profiles/bike`**（干净测试实例，`activeMods` **13 个**：Harmony／RimWorld + 5 DLC／XmlExtensions／HAR／Ratkin／RimBridgeServer／dsh.autotest／CharacterEditor）；桥接端口历史值 **5174** |
 | 起 | `node src/cli.js start --profile bike`（隔离存档目录 = `profiles/bike`，**不碰主力存档**）；探针 mod 的 `packageId` 先手工加进 `profiles/bike/Config/ModsConfig.xml` |
 | 日志 | `profiles/bike/Player.log`（`start` 会把上一份改名为 `Player-<时间戳>.log`）；结构化读用 `rimbridge/list_logs` |
-| ⚠ 死亡检测 | **`profiles/bike` 曾自行退出**（跑约 **48 分钟**后，登记在 [STATUS.md](../STATUS.md)「已知问题／坑」）。**每次长验证必须带死亡检测**：用 PID + `process.kill(pid, 0)` 判活（**`tasklist` 在受限沙箱下返回 Access denied，会被误读成"进程不存在"**，[docs/mod开发基础.md](mod开发基础.md) §七-4）；进程一没就**立刻中止本轮并记下"死于哪一步"**，别把"游戏退出了"当成"验证通过" |
+| ⚠ 死亡检测 | **`profiles/bike` 曾自行退出**（跑约 **48 分钟**后；该坑 2026-10-26 随 STATUS 收编迁进 `.dsh\skills\rimworld-mod-pipeline\环境陷阱.md`）。**每次长验证必须带死亡检测**：用 PID + `process.kill(pid, 0)` 判活（**`tasklist` 在受限沙箱下返回 Access denied，会被误读成"进程不存在"**，[docs/mod开发基础.md](mod开发基础.md) §七-4）；进程一没就**立刻中止本轮并记下"死于哪一步"**，别把"游戏退出了"当成"验证通过" |
 | ⚠ 起点事实 | **到目前为止这条线 0 行运行时实测**（[docs/共享单车mod-设计-v2.md](共享单车mod-设计-v2.md) §9.4、真值表文首）。本文所有判据都**没跑过** |
 | 截图 | `rimworld/take_screenshot`（截的是**游戏渲染画面**，不是桌面），文件名落在游戏截图目录，跑完**拷进 `runs/`** |
 

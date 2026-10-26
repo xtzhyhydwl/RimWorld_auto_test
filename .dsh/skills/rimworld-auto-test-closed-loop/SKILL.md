@@ -33,9 +33,10 @@ node src/cli.js tools --profile <p>        # 游戏内工具；单个参数用 d
 | 检查 | 判据 |
 | --- | --- |
 | 桥接与归属 | `status --profile <p>` 的 `bridgeResolution.ok = true` |
-| 底座 mod 已加载 | `call rimworld/list_mods`：Core / Harmony / RimBridgeServer / 被测 mod 都 `loadedInSession = true`、`unsatisfiedDependencies` 为空 |
+| 底座 mod 已加载 | `call rimworld/list_mods`：Core / Harmony / RimBridgeServer / **`dsh.gamelink`** / 被测 mod 都 `loadedInSession = true`、`unsatisfiedDependencies` 为空 |
+| **GameLink 通道可用（必需）** | `node src/cli.js link --profile <p> --cmd time.status` 拿到 `ok:true` 的 ack。**没有它就不能推时间**（推时间走 GameLink 的命令通道，不再有桥接退路）⇒ 缺了停手，先 `mods add --profile <p> --package-id dsh.gamelink --apply` 并重启实例 |
 | 加载顺序健康 | `call rimworld/get_mod_configuration_status`：无 ordering issue、`restartRequired = false` |
-| 按需能力 | 要用事件 → `dsh.gamelink`；要摆/读小人 → `void.charactereditor`；要用 `ce/*` → `call ce/probe` 有返回 |
+| 按需能力 | 要摆/读小人 → `void.charactereditor`；要用 `ce/*` → `call ce/probe` 有返回 |
 
 **按需项缺了也停手**，用【缺原子】模板报。
 profile 现状、缺了怎么补：`docs/测试SOP/环境自检.md`。缺底座的实例里跑出来的结论不可信。
@@ -70,8 +71,15 @@ SOP 每一阶段都有完成判据，判据不过不进入下一阶段。动作/
 5. 每条结论带证据：产物落 `runs/<日期>-<主题>/`，正文只给路径 + 结论，并标【实测】/【未验证】。
 6. 资源：轻 profile 起实例（一个 profile 一个实例）、推时间 `Fast` 封顶、`--force`/`--all` 要用户当场同意。
 7. 探东西用 `cli call` / `wait` / `live` 组合；`runs/game-process.*.json` 只由启动器写，离线验证就传假 `client` 对象。
-8. 推时间只按 tick：`step_game_ticks{ticks, pauseFirst:true, timeoutMs:大}`，判据是 `advancedTicks`；推之前先确认 `windowsForcePause = false`。
-   **step 不出帧**：暂停态 step 只用于数值推进（HP / 计时器 / `spawned` / 库存）；要画面、要看过程、要截图 ⇒ 必须 `play_for`；两者可**混合**分段（step 300–600 tick → 每段 `play_for` ≈100 ms 让渲染追平）。选型、预算、分段见 `docs/测试SOP/推时间.md`。
+8. **推时间只用 `node src/cli.js advance`**（相对 `--ticks N` / 绝对 `--to-tick N`）：走 GameLink 命令通道、不经桥接，游戏在 tick 边界自己刹车。
+   照这样做就不会踩坑：**给相对 tick 数**（别自己读 tick 再算 `当前+N`）、**看返回 `stopReason="target"` + `paused=true`**、**失败就处理外部暂停后用同一参数再跑一次**。
+   这样做走不通 ⇒ **停手报【缺原子】**（§6），**不要**改用 `play_for` / `step_game_ticks` / 自己算延时去推时间。
+   **可以推到「某件事发生就停」**：`--stop-when "letter[:defName[:含词]]"` / `"message[:含词]"` / `"message:def=<defName>"`；只观察不停用 `--watch`。
+   判据：`stopReason=="probe"` + `stopPayload`；跑满没等到是 `"maxTicks"`（**别把"没等到"当"到了"**）。
+   现只有**信件 / 右上角消息**两种探针；要别的（pawn 状态 / alert / 地图上出现某物）⇒ 停手报【缺原子】（§6），不要自己绕。
+   原子清单 + 组合配方：`docs/GameLink-协议-v1.md` §9（仓根 `docs\GameLink-协议-v1.md`）。
+   步骤与判据见 `docs/测试SOP/推时间.md` §0。
+   `step_game_ticks` / `play_for` 只剩两个正当用途：**取一个精确 tick 做数值断言**（`step`，不出帧）、**让画面动起来再截图**（`play_for` 400–1000 ms）——它们不是推时间手段。
 9. **位置类结论只认坐标回读**（+ 新旧格裁剪对照）；截图只能证「画面上有东西」，不能证「谁在哪」。截图或人眼看之前硬性 `play_for` 400–1000 ms——暂停态 step 之后截的是冻结帧。见 `docs/测试SOP/截图取证.md`。
 
 ## 6 停手与缺原子

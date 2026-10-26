@@ -29,9 +29,12 @@ cd "$w\RimworldMods"   # ① 编译 1.6：cwd 必须是这里；IrisMenusDll、O
 dotnet build ratkin_hunger_and_havoc\Source\HungerAndHavoc.csproj -c Release -p:RimWorldVersion=1.6 -p:RimWorldDir=D:\RimWorld-1.6 `
   -p:IrisMenusDll=D:\RimWorld-1.6\Mods\IrisMenus\1.6\Assemblies\IrisMenus.dll -p:OxygenDslBuildDir=D:\RimWorld-1.6\Mods\OxygenDSL\1.6\Assemblies
 Get-FileHash "$w\RimworldMods\ratkin_hunger_and_havoc\1.6\Assemblies\*.dll" -Algorithm SHA256   # ② 产物落 1.6\Assemblies\（junction = 游戏目录，构建即部署）；核对 SHA 与大小
-# ③ 写 D:\rw16data2\Config\ModsConfig.xml（用 write 工具，UTF-8 无 BOM）：<version>1.6.4871 rev590</version> + 下面 14 项全小写 <activeMods> + <knownExpansions> = 5 个 DLC；游戏退出会覆写，每次启动前重写
+# ③ 写 D:\rw16data2\Config\ModsConfig.xml（用 write 工具，UTF-8 无 BOM）：<version>1.6.4871 rev591</version> + 下面 14 项全小写 <activeMods> + <knownExpansions> = 5 个 DLC；游戏退出会覆写，每次启动前重写
 #    brrainz.harmony, ludeon.rimworld, ludeon.rimworld.royalty, ludeon.rimworld.ideology, ludeon.rimworld.biotech, ludeon.rimworld.anomaly, ludeon.rimworld.odyssey,
-#    brrainz.rimbridgeserver, erdelf.humanoidalienraces, solaris.ratkinracemod, nanaloveyuki.oxygendsl, void.charactereditor, nanaloveyuki.irismenus, nanaloveyuki.ratkin.hungerandhavoc
+#    brrainz.rimbridgeserver, erdelf.humanoidalienraces, solaris.ratkinracemod, nanaloveyuki.irismenus, nanaloveyuki.oxygendsl, void.charactereditor, nanaloveyuki.ratkin.hungerandhavoc
+#    ⚠ IrisMenus 必须排在 oxygendsl 之前（oxygendsl 的 About.xml 声明 loadAfter IrisMenus）。
+#      旧版这份清单把 oxygendsl 放在 IrisMenus 前面 ⇒ 每次 env-check 都报 hasOrderingIssues。
+#      2026-10-25 21:18 用户在游戏里手动排好并由游戏自己写回磁盘，以上顺序即当时落盘的事实；以 D:\rw16data2\Config\ModsConfig.xml 为准
 # ④ 启动：三条参数缺一不可（ASCII 工作目录 / 独立存档 / 独立日志）；不要用工程 CLI 起 1.6（`node src/cli.js start` 只认 1.7），只能直接 Start-Process
 $p16=Start-Process -FilePath 'D:\RimWorld-1.6\RimWorldWin64.exe' -PassThru `
   -ArgumentList '-savedatafolder=D:\rw16data2 -logFile D:\rw16data2\Player.log' -WorkingDirectory 'D:\RimWorld-1.6'
