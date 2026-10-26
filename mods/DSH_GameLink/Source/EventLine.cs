@@ -9,6 +9,10 @@ using System.Text;
 
 namespace DSH_GameLink
 {
+    /// <summary>
+    /// 一条事件的字段拼装器。**字段名不要用 `ts` / `seq` / `kind`** —— 这三个键由 LiveChannel.BuildLine 写，
+    /// 重复会造出同名键（JSON.parse 取后一个，等于把前一个静默丢掉）。
+    /// </summary>
     internal sealed class EventLine
     {
         private readonly string kind;
@@ -44,51 +48,9 @@ namespace DSH_GameLink
             LiveChannel.Write(kind, fields);
         }
 
-        /// <summary>NDJSON 的字符串转义：只处理 JSON 必须处理的那些字符。</summary>
         private static void AppendQuoted(StringBuilder sb, string raw)
         {
-            if (raw == null)
-            {
-                sb.Append("null");
-                return;
-            }
-
-            sb.Append('"');
-            for (int i = 0; i < raw.Length; i++)
-            {
-                char c = raw[i];
-                switch (c)
-                {
-                    case '"':
-                        sb.Append("\\\"");
-                        break;
-                    case '\\':
-                        sb.Append("\\\\");
-                        break;
-                    case '\n':
-                        sb.Append("\\n");
-                        break;
-                    case '\r':
-                        sb.Append("\\r");
-                        break;
-                    case '\t':
-                        sb.Append("\\t");
-                        break;
-                    default:
-                        if (c < 32)
-                        {
-                            sb.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
-                        }
-                        else
-                        {
-                            sb.Append(c);
-                        }
-
-                        break;
-                }
-            }
-
-            sb.Append('"');
+            Json.Quote(sb, raw);
         }
     }
 }

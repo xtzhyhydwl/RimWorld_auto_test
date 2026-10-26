@@ -86,7 +86,7 @@ namespace DSH_GameLink
 
         // About.xml 的 modVersion 是这条埋点的唯一真源，所以直接读文件：不走 ModMetaData，
         // 1.7（Waylith）下那个 API 是否还提供 modVersion 没有证据。
-        private static string AboutModVersion()
+        internal static string AboutModVersion()
         {
             const string Unknown = "unknown";
             const string Absent = "(About.xml 无 modVersion)";   // 本 mod 现在就是这种：About.xml 里没有这个元素

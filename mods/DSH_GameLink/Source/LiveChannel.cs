@@ -112,6 +112,19 @@ namespace DSH_GameLink
             }
         }
 
+        /// <summary>本 mod 自己的**普通记事**（不是错误）：用 Log.Message + 自有前缀，LogTap 会跳过它。</summary>
+        internal static void Note(string message)
+        {
+            try
+            {
+                Log.Message(OwnPrefix + " " + message);
+            }
+            catch (Exception)
+            {
+                // 记不下来不影响通道
+            }
+        }
+
         internal static string Describe(Exception ex)
         {
             if (ex == null)
@@ -183,14 +196,13 @@ namespace DSH_GameLink
         {
             try
             {
-                string dir = Environment.GetEnvironmentVariable(DirEnv);
-                string fileName = ProfileName() + ".ndjson";
-                if (!string.IsNullOrEmpty(dir))
+                string dir = ResolveDir();
+                if (string.IsNullOrEmpty(dir))
                 {
-                    return Path.Combine(dir, fileName);
+                    return null;
                 }
 
-                return Path.Combine(GenFilePaths.SaveDataFolderPath, FallbackSubDir, FallbackFileName);
+                return Path.Combine(dir, ResolveProfileName() + ".ndjson");
             }
             catch (Exception ex)
             {
@@ -206,10 +218,32 @@ namespace DSH_GameLink
         }
 
         /// <summary>
+        /// 事件/命令两条通道共同的根目录：`$DSH_LIVE_DIR` 优先，否则 `<存档目录>/dsh-live`。
+        /// 命令通道（CommandChannel）复用这里，保证两条通道永远在同一个根下、按同一个 profile 分目录。
+        /// </summary>
+        internal static string ResolveDir()
+        {
+            try
+            {
+                string dir = Environment.GetEnvironmentVariable(DirEnv);
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    return dir;
+                }
+
+                return Path.Combine(GenFilePaths.SaveDataFolderPath, FallbackSubDir);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// profile 名：GABS_GAME_ID（launcher 里是 `dsh-rimworld-&lt;profile&gt;`）去掉前缀。
         /// 拿不到就用 `game` —— 这时文件名固定，跟读端也知道该看哪个。
         /// </summary>
-        private static string ProfileName()
+        internal static string ResolveProfileName()
         {
             string id = Environment.GetEnvironmentVariable(GameIdEnv);
             if (!string.IsNullOrEmpty(id) && id.StartsWith(GameIdPrefix, StringComparison.OrdinalIgnoreCase))

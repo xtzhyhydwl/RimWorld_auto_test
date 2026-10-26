@@ -80,6 +80,16 @@ namespace DSH_GameLink
             {
                 LiveChannel.ReportError("heartbeat", ex);
             }
+
+            // 第二条通道：命令入向（上位机 → 游戏）。内部自己 50 ms 限频，异常自己吞（见 CommandChannel）。
+            try
+            {
+                CommandChannel.Pump();
+            }
+            catch (Exception ex)
+            {
+                LiveChannel.ReportError("command", ex);
+            }
         }
 
         // 主菜单里没有 tick，所以心跳必须挂 Update（实时时间）；进游戏后同一套逻辑继续用，不另设 tick 通道。

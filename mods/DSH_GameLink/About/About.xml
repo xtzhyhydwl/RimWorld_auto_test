@@ -3,21 +3,28 @@
   <name>DSH GameLink</name>
   <author>dsh</author>
   <packageId>dsh.gamelink</packageId>
+  <modVersion>0.2.0</modVersion>
   <supportedVersions>
     <li>1.6</li>
     <li>1.7</li>
   </supportedVersions>
   <description>
-【自动化测试专用，不属于产品 mod】把游戏里发生的事写成结构化事件（NDJSON，一行一条），让 DSH 侧可以「等一个条件」而不是「睡固定时长 + 事后读日志」。
+【自动化测试专用，不属于产品 mod】agent ↔ 游戏 的双向通道，一个 mod 两条通道：
 
-事件种类：game_loaded / colony_started / window / log（含 [VD] 行与红字）/ heartbeat / error。
+① 事件出向（NDJSON，一行一条）：game_loaded / colony_started / window / log（含 [VD] 行与红字）/ heartbeat / error / probe_hit。
+  让 DSH 侧可以「等一个条件」而不是「睡固定时长 + 事后读日志」。
 
-落点：环境变量 DSH_LIVE_DIR 存在 ⇒ &lt;DSH_LIVE_DIR&gt;\&lt;profile&gt;.ndjson（profile 取 GABS_GAME_ID 去掉 dsh-rimworld- 前缀）；
-否则 &lt;存档目录&gt;\dsh-live\game.ndjson。超过 8 MB 轮转成 .1。
+② 命令入向（&lt;root&gt;\&lt;profile&gt;.link\ 下的 hello.json / state.json / cmd\&lt;seq&gt;.req / ack\&lt;seq&gt;.ack）：
+  time.advance（游戏自己推时间，推到某个 tick 或某个事件发生）/ time.status / time.cancel / time.probe。
+  推时间是**游戏内闭环**：Harmony 在 TickManager.DoSingleTick 上逐 tick 刹车 ⇒ 落点精确到 tick、期间帧照出、结束暂停。
 
-边界：这是旁路。写盘失败只 Log.Error 一次然后停写，绝不向游戏冒泡；每帧只做常数级工作。
+落点：环境变量 DSH_LIVE_DIR 存在 ⇒ &lt;DSH_LIVE_DIR&gt;\&lt;profile&gt;.*（profile 取 GABS_GAME_ID 去掉 dsh-rimworld- 前缀）；
+否则 &lt;存档目录&gt;\dsh-live\game.*。事件文件超过 8 MB 轮转成 .1。
+
+边界：两条通道都是旁路。写盘失败只 Log.Error 一次然后停写，绝不向游戏冒泡；每帧只做常数级工作（命令轮询 50 ms 限频）。
 
 读取端：node src/cli.js live --profile &lt;名字&gt; --until 'kind=colony_started'
+        node src/cli.js advance --profile &lt;名字&gt; --to-tick &lt;tick&gt;
   </description>
   <modDependencies>
     <li>

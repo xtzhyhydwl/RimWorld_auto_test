@@ -2,40 +2,6 @@
   "schema": 1,
   "note": "场景 → 探针 + 参数 + 条件。加场景 = 加一条。verified=false 表示该 condition 未在真机经 wait 命中过（字段存在性可能有真机证据，见 evidence）。字段说明见 docs/cli-wait-P1-事件进程等待与条件登记表-设计-20261024.md §4；候选来源与证据分级见 docs/条件登记表-候选数据-20261024.md。 2026-10-24 落盘：verified 改为 verifiedLevel 四档（wait-verified/field-verified/doc-example/inferred），verified 由它派生；事件源计数统一用 result.counts.<kind>。",
   "conditions": {
-    "tick推进已结束": {
-      "source": "bridge",
-      "probe": "tick/status",
-      "args": {},
-      "condition": {
-        "path": "result.active",
-        "equals": false
-      },
-      "description": "`tick/run_to` 起跑后的标准等待口：不管因为什么停下（target/letter/timeout/externalPause/cancelled），active 都会变 false。停下原因读 result.stopReason。",
-      "evidence": "2026-10-25 真机多次命中（`runs/2026-10-25-tickdriver/12-wait-fast.txt`、`22-wait-ultra.txt`、`73-wait-62000.txt`，均 ok:true）；设计与实测见 docs/推进时间-游戏内tick驱动-tick_run_to-20261025.md",
-      "verifiedLevel": "wait-verified",
-      "timeoutMs": 120000
-    },
-    "tick落点精确": {
-      "source": "bridge",
-      "probe": "tick/status",
-      "args": {},
-      "condition": {
-        "all": [
-          {
-            "path": "result.active",
-            "equals": false
-          },
-          {
-            "path": "result.exact",
-            "equals": true
-          }
-        ]
-      },
-      "description": "要「真的落在目标 tick」时用这条：active=false 且 exact=true（等价于 overrunTicks=0）。超时/取消/外部暂停时 exact 恒 false，所以它同时能区分收尾类型。",
-      "evidence": "2026-10-25 真机：Fast 46→3046、Ultrafast 3046→23049、20000→62000 三次载荷 exact=true、overrunTicks=0（`runs/2026-10-25-tickdriver/13-status-fast-done.json`、`22-wait-ultra.txt`、`73-wait-62000.txt`）；all 组合尚未单独跑过 wait（两字段各自命中过）",
-      "verifiedLevel": "field-verified",
-      "timeoutMs": 120000
-    },
     "已进图可玩": {
       "source": "bridge",
       "probe": "rimbridge/get_bridge_status",

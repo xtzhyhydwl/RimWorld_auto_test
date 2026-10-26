@@ -11,6 +11,7 @@
  *   node src/cli.js tools [关键词] [--profile vanilla]
  *   node src/cli.js call <工具名> ['{"参数":...}'] [--profile vanilla]
  *   node src/cli.js wait --profile voiced --probe rimworld/list_colonists --condition '{"path":"result.colonists","countEquals":3}' [--timeout 60000]
+ *   node src/cli.js advance --profile rhah --to-tick 79200                             推时间到指定 tick（成功即暂停）
  *   node src/cli.js logs [行数] [--profile vanilla]
  *   node src/cli.js live --profile voiced --until 'kind=colony_started' [--timeout 120000]
  *   node src/cli.js stop --profile voiced [--force]                                  （--profile 必填）
@@ -42,6 +43,9 @@ import {
   WS,
 } from './launcher.js';
 import { baseModsFile, readBaseModsFile, diffBaseMods, rewriteActiveMods } from './base-mods.js';
+import { ADVANCE_USAGE, parseAdvanceFlags, runAdvance } from './advance.js';
+import { PARSE_SAVE_USAGE, formatParseSave, parseSave } from './save-parse.js';
+import { TEXT_CHECK_USAGE, checkTextFile, formatTextCheck, textCheckPassed } from './text-check.js';
 
 /**
  * 必须带值的全局 flag。少了值不能退化成 `true`（否则文件会真叫 "true"），
@@ -334,6 +338,9 @@ const COMMAND_HELP = {
     '  --timeout 默认 60 s（与 gabp.js 同一个常量）：桥接把调用排在游戏主线程上，长操作要显式给大值。',
   ].join('\n'),
   wait: WAIT_USAGE,
+  advance: ADVANCE_USAGE,
+  'parse-save': PARSE_SAVE_USAGE,
+  'text-check': TEXT_CHECK_USAGE,
   logs: ['用法: node src/cli.js logs [行数] [--profile <名字>]', '', '  打印该 profile 的 Player.log 尾部（1.7 起这份日志全机共用）。'].join('\n'),
   live: [
     '用法: node src/cli.js live --profile <名字> (--until \'<条件>\' | --last N) [选项]',
@@ -369,6 +376,10 @@ const GENERAL_USAGE = [
   '  dump-tools  把所有工具 schema 导出到 runs/tools.json',
   '  call     调用一个游戏内工具（载荷 success:false ⇒ exit 1）',
   '  wait     等条件成立（反复调探针 + 条件 JSON；0 命中 / 2 超时 / 1 其它），见 .dsh/skills/rimworld-auto-test-closed-loop/docs/cli-wait-用法-20261024.md',
+  '  advance  把游戏推进到指定 tick（--to-tick N）或推到某事件发生（--stop-when）：走 GameLink 命令通道，游戏自己刹在 tick 边界，成功即暂停',
+  '  link     给命令通道发一条命令（--cmd time.status|time.probe|time.cancel），只打 ack',
+  '  parse-save 从 .rws 存档读一条 hediff 的取证信息（severity / ttd / healthState / 营养不良）',
+  '  text-check 验文件有没有被 PS 5.1 写坏（严格 UTF-8 / 无 U+FFFD / 无 BOM）',
   '  atoms    原子能力清单（算子 / 四类来源的快照字段 / 登记表统计）—— 写测试前先看这个',
   '  base-mods 底座 mod 清单（base-mods.json）；带 --profile <p> 只报告该 profile 缺哪几个，不写文件',
   '  mods     被测 mod 清单（profiles/<p>/tested-mods.json）：list / add / remove / apply —— 只有 --apply 才改 ModsConfig',
@@ -417,6 +428,7 @@ const PROFILE_REQUIRED = {
   smoke: '默认会起一个实例、跑完再关掉；缺省值 vanilla 是满配 profile（几百个 mod），猜错代价最大',
   'env-check': '报的是「某个 profile 的」环境事实，猜错了等于把别人的事实钉进你的上下文',
   mods: '读写的是「某个 profile 的被测 mod 清单」并会改写它的 ModsConfig.xml，猜错了就是把 mod 加进别人的环境',
+  advance: '会长时间推进某个实例的游戏时间（几分钟起），猜错 profile 等于把别人的局推走几万个 tick 且不可逆',
 };
 
 function requireExplicitProfile(cmd, flags, positional = []) {
@@ -1656,6 +1668,8 @@ async function main() {
         gameTools: '游戏内可用工具随 mod 变：node src/cli.js tools [关键词]；单个参数：describe <工具名>',
         docs: {
           usage: '.dsh/skills/rimworld-auto-test-closed-loop/docs/cli-wait-用法-20261024.md',
+          // 推时间的口径（速率表 / 预算公式 / 时间↔tick）与 advance 的边界都在这份 SOP 里
+          advance: '.dsh/skills/rimworld-auto-test-closed-loop/docs/测试SOP/推时间.md',
           compose: 'docs/组合skill-草案-20261024.md',
           flow: '.dsh/skills/rimworld-auto-test-closed-loop/docs/自动化测试-流程与原子能力清单-20261024.md',
         },
@@ -2244,6 +2258,70 @@ async function main() {
        */
       const { runLive } = await import('./live.js');
       process.exitCode = await runLive({ profile, flags });
+      break;
+    }
+
+    case 'link': {
+      /**
+       * 命令通道的通用入口（调试/取证用）：`--cmd time.status|time.probe|time.cancel`。
+       * 只发一条命令、打回 ack；长命令（time.advance）请用 `advance`（它负责等到落点）。
+       */
+      const cmd = flags.cmd === undefined ? 'time.status' : String(flags.cmd);
+      const { call } = await import('./gamelink.js');
+      const ack = await call(profile, cmd, {});
+      out(ack);
+      if (!ack.ok) process.exitCode = 1;
+      break;
+    }
+
+    case 'advance': {
+      /**
+       * 推时间到**指定 tick**（或推到某个事件发生）：参数在 src/advance.js 校验，
+       * 执行走 GameLink 的命令通道（`src/gamelink.js`）—— 不再经过桥接，也不需要 RimBridgeServer。
+       */
+      const opts = parseAdvanceFlags(flags);
+      const result = await runAdvance({ profile, ...opts });
+      out(result);
+      if (!result.ok) process.exitCode = 1;
+      break;
+    }
+
+    case 'parse-save': {
+      /**
+       * 存档取证：buff 类验证唯一可信的来源是存档原文（桥接读不到 ticksToDisappear）。
+       * defName 由 `--def` 给 —— 写死 defName 的旧脚本在改名后会静默返回 carriers=0（假阴性）。
+       */
+      const file = positional[0];
+      if (!file) throw new Error(`缺少存档路径\n\n${PARSE_SAVE_USAGE}`);
+      if (!fs.existsSync(file)) throw new Error(`存档不存在：${file}\n\n${PARSE_SAVE_USAGE}`);
+      const def = flags.def === undefined ? 'RHAH_SiegeFury' : String(flags.def);
+      const report = parseSave({ file, def });
+      if (flags.json !== undefined) out(report);
+      else console.log(formatParseSave(report));
+      break;
+    }
+
+    case 'text-check': {
+      /**
+       * 验「文件有没有被 PS 5.1 写坏」。以前是 skill 里一句 `node -e`（一次性脚本），现在固化成子命令：
+       * 中文坏掉时文件照样存在、大小正常、git 也显示改过，靠肉眼看不住。
+       */
+      const files = positional;
+      if (!files.length) throw new Error(`缺少文件路径\n\n${TEXT_CHECK_USAGE}`);
+      let bad = 0;
+      let unreadable = 0;
+      for (const file of files) {
+        if (!fs.existsSync(file)) {
+          console.error(`MISSING ${file}`);
+          unreadable += 1;
+          continue;
+        }
+        const report = checkTextFile(file);
+        console.log(formatTextCheck(report));
+        if (!textCheckPassed(report)) bad += 1;
+      }
+      if (unreadable) process.exitCode = 2;
+      else if (bad) process.exitCode = 1;
       break;
     }
 
