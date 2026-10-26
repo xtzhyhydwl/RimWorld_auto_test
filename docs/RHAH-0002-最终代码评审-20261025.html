@@ -1,0 +1,905 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>围城来客越饿越凶：改动与评审</title>
+<!--
+  来源：docs/RHAH-0002-最终代码评审-20261025.md（A 改动清单 / B 问题清单 / C 结论 / D 修复记录）
+  模板：md-to-html 0001 · 分层结构与执行流
+  取舍：删掉了模板里的"数据流带"？没有——本次改动的核心恰恰是一条"营养不良 → 档位 → 效果"的变形，保留。
+  "边界与术语"保留，用来放不采纳项与容易误读的设计。
+-->
+<style>
+  :root {
+    --bg: #faf9f6;
+    --card: #ffffff;
+    --ink: #1b1a17;
+    --muted: #6f6c64;
+    --line: #e6e2d9;
+    --accent: #1f6f63;
+    --accent-soft: rgba(31, 111, 99, 0.07);
+    --flag: #a15c1e;
+    --sans: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+    --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+    --max: 1080px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101211;
+      --card: #171a18;
+      --ink: #e9e7e1;
+      --muted: #9a978f;
+      --line: #272c29;
+      --accent: #52b6a6;
+      --accent-soft: rgba(82, 182, 166, 0.1);
+      --flag: #d08a4a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: var(--max); margin: 0 auto; padding: 72px 32px 96px; }
+
+  /* ---------- 头部 ---------- */
+  .kicker {
+    margin: 0 0 14px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    margin: 0 0 18px;
+    font-size: clamp(28px, 4vw, 40px);
+    line-height: 1.22;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    max-width: 22ch;
+  }
+  .lede {
+    margin: 0 0 28px;
+    font-size: 17px;
+    line-height: 1.7;
+    color: var(--muted);
+    max-width: 62ch;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 28px;
+    margin: 0;
+    padding: 16px 0 0;
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .meta div { display: flex; gap: 8px; }
+  .meta dt { color: var(--muted); }
+  .meta dd { margin: 0; font-family: var(--mono); font-size: 12.5px; }
+  .ghost {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 12.5px;
+    padding: 3px 11px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ---------- 分节 ---------- */
+  .part { margin-top: 72px; }
+  .part-head {
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 0 14px;
+    align-items: baseline;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 30px;
+  }
+  .part-head .n {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 0.06em;
+  }
+  .part-head h2 {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .part-head p {
+    grid-column: 2;
+    margin: 6px 0 0;
+    font-size: 14px;
+    color: var(--muted);
+    max-width: 62ch;
+  }
+
+  /* ---------- 01 分层带 ---------- */
+  .layer {
+    display: grid;
+    grid-template-columns: 132px 1fr;
+    gap: 0 26px;
+    padding: 20px 0;
+    border-bottom: 1px dashed var(--line);
+  }
+  .layer:last-child { border-bottom: 0; }
+  .layer-label { padding-top: 9px; }
+  .layer-label b {
+    display: block;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+  .layer-label span { display: block; font-size: 15px; font-weight: 600; }
+  .layer-label small { display: block; margin-top: 4px; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+  .boxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+
+  /* ---------- 节点按钮 ---------- */
+  .node {
+    appearance: none;
+    display: block;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 11px 13px;
+    cursor: pointer;
+    transition: border-color .12s ease, background .12s ease;
+  }
+  .node:hover { border-color: var(--accent); }
+  .node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .node[aria-expanded="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  .node .name { display: block; font-size: 14px; font-weight: 600; line-height: 1.4; }
+  .node .note { display: block; margin-top: 3px; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+  .node .tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    padding: 1px 6px;
+    margin-bottom: 5px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    color: var(--flag);
+  }
+  .node .tag.must { color: #a33a2a; border-color: #a33a2a; }
+  .node .tag.ok { color: var(--accent); border-color: var(--accent); }
+
+  /* ---------- 展开面板 ---------- */
+  .detail {
+    margin: 12px 0 4px;
+    padding: 15px 18px 17px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    font-size: 14.5px;
+    line-height: 1.7;
+  }
+  .detail[hidden] { display: none; }
+  .detail h4 {
+    margin: 0 0 8px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .detail p { margin: 0 0 10px; }
+  .detail p:last-child { margin-bottom: 0; }
+  .detail ul { margin: 0 0 10px; padding-left: 20px; }
+  .detail li { margin-bottom: 4px; }
+  .detail code {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    background: var(--accent-soft);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .detail .verdict {
+    display: block;
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px solid var(--line);
+    font-size: 13.5px;
+  }
+
+  /* ---------- 02 执行流 ---------- */
+  .flow { list-style: none; margin: 0; padding: 0; }
+  .step { position: relative; padding: 0 0 30px 40px; }
+  .step::before {
+    content: "";
+    position: absolute;
+    left: 12px;
+    top: 30px;
+    bottom: 2px;
+    width: 1px;
+    background: var(--line);
+  }
+  .step:last-child { padding-bottom: 0; }
+  .step:last-child::before { display: none; }
+  .step .dot {
+    position: absolute;
+    left: 0;
+    top: 3px;
+    width: 25px;
+    height: 25px;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: var(--card);
+    display: grid;
+    place-items: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  .step.open .dot { border-color: var(--accent); color: var(--accent); }
+  .step-head {
+    appearance: none;
+    display: block;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+  }
+  .step-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 3px; }
+  .step-head .t { display: block; font-size: 15.5px; font-weight: 600; line-height: 1.45; }
+  .step-head .s { display: block; margin-top: 3px; font-size: 13.5px; line-height: 1.6; color: var(--muted); }
+  .step-head:hover .t { color: var(--accent); }
+
+  /* ---------- 03 数据流带 ---------- */
+  .lanes { display: flex; gap: 46px; }
+  .lane { flex: 1; position: relative; }
+  .lane + .lane::before {
+    content: "→";
+    position: absolute;
+    left: -32px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 18px;
+    color: var(--accent);
+  }
+  .lane .tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .lane .body {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--card);
+    padding: 13px 15px;
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+
+  /* ---------- 04 两栏 ---------- */
+  .cols { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 44px; }
+  .cols h3 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+  .cols ul { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.7; }
+  .cols li { margin-bottom: 9px; }
+  .cols li b { font-weight: 600; }
+  .terms { margin: 0; font-size: 13.5px; }
+  .terms div { padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .terms div:last-child { border-bottom: 0; }
+  .terms dt { font-weight: 600; }
+  .terms dd { margin: 2px 0 0; color: var(--muted); line-height: 1.55; }
+
+  .verdict-line {
+    margin: 0 0 26px;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    background: var(--card);
+    font-size: 14.5px;
+    line-height: 1.7;
+  }
+
+  footer {
+    margin-top: 84px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  footer a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); }
+  footer a:hover { color: var(--accent); border-color: var(--accent); }
+
+  @media (max-width: 780px) {
+    main { padding: 44px 20px 64px; }
+    .layer { grid-template-columns: 1fr; gap: 12px; }
+    .layer-label { padding-top: 0; }
+    .lanes { flex-direction: column; gap: 26px; }
+    .lane + .lane::before { content: "↓"; left: 50%; top: -22px; transform: translateX(-50%); }
+    .cols { grid-template-columns: 1fr; gap: 32px; }
+  }
+  @media print {
+    body { background: #fff; }
+    .ghost { display: none; }
+    .detail { display: block !important; break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+  <header>
+    <p class="kicker">代码评审 · 票 0002 · 鼠族：饥与祸</p>
+    <h1>围城来客越饿越凶：改动与评审</h1>
+    <p class="lede">这是票 0002 的最终评审与整改记录。先按模组既有分层看 19 个文件各自改了什么、为什么改，再看一次「来客到场 → 挂增益 → 换档 → 两日到期」的执行流，最后是评审给出的 3 条必修、6 条建议与逐条处置。</p>
+    <dl class="meta">
+      <div><dt>对象</dt><dd>feat/0002-siege-fury @ 5fb94a2</dd></div>
+      <div><dt>规模</dt><dd>19 files · +458 −7（新增 5）</dd></div>
+      <div><dt>基线</dt><dd>origin/main 2799c57</dd></div>
+      <div><dt>日期</dt><dd>2026-10-25</dd></div>
+      <div style="margin-left:auto"><button class="ghost" id="toggle-all" type="button">全部展开</button></div>
+    </dl>
+  </header>
+
+  <section class="part">
+    <div class="part-head">
+      <span class="n">01</span>
+      <h2>改动落在哪一层</h2>
+      <p>改动全部落在既有分层里：Defs 只放数据，Core 只放设置与 Def 引用，Generation 管到场，Pawn 管状态，最外一圈只做接线、文案与登记。点开任一个文件看它改了什么、为什么改。</p>
+    </div>
+
+    <div class="layer">
+      <div class="layer-label">
+        <b>L1</b>
+        <span>Defs 数据</span>
+        <small>只描述 buff 与心情，不含任何逻辑</small>
+      </div>
+      <div>
+        <div class="boxes">
+          <button class="node" type="button" data-toggle="d-def-1" aria-expanded="false" aria-controls="d-def-1">
+            <span class="name">RHAH_SiegeFury.xml ×2</span>
+            <span class="note">新 HediffDef：三档数值 + 两日到期</span>
+          </button>
+          <button class="node" type="button" data-toggle="d-def-2" aria-expanded="false" aria-controls="d-def-2">
+            <span class="name">RHAH_Famine.xml ×2</span>
+            <span class="note">三条心情：40 / 50 / 60</span>
+          </button>
+        </div>
+        <div class="detail" id="d-def-1" hidden>
+          <h4>新增 · 1.6 与 1.7 逐字节相同</h4>
+          <p><code>initialSeverity 0.10</code>、<code>isBad false</code>；<code>comps</code> 里挂两个组件：本票的档位组件，以及原版的 <code>HediffCompProperties_Disappears</code>（<code>disappearsAfterTicks 120000</code>、<code>showRemainingTime true</code>）。</p>
+          <ul>
+            <li>三个 <code>stage</code> 的 <code>minSeverity</code> 是 0 / 0.40 / 0.80，对应代码写入的 0.10 / 0.50 / 0.90——两者必须同时对，否则档位会串。</li>
+            <li>每档给 <code>painFactor</code>、近战命中 / 伤害 / 出手间隔、闪避、承伤、移速、意识；逐档递增。</li>
+          </ul>
+          <p class="verdict">为什么：把"越饿越凶"做成一个可挂载、可显示剩余时间、到点自己消失的伤病载体，而不是另写一套计时器。</p>
+        </div>
+        <div class="detail" id="d-def-2" hidden>
+          <h4>修改 · 追加三条 ThoughtDef</h4>
+          <p><code>RHAH_Thought_SiegeFuryFoodInSight</code> / <code>…MealSoon</code> / <code>…Starving</code>，<code>thoughtClass</code> 指向新的"不过期"记忆类，<code>baseMoodEffect</code> 40 / 50 / 60。</p>
+          <p class="verdict">为什么：三档各配一条心情，用心情抵消围攻期间的崩溃风险；文案已由用户改定，本次不动。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer">
+      <div class="layer-label">
+        <b>L2</b>
+        <span>Core 设置</span>
+        <small>设置数据留 Core，Def 一律走 DefOf</small>
+      </div>
+      <div>
+        <div class="boxes">
+          <button class="node" type="button" data-toggle="d-core-1" aria-expanded="false" aria-controls="d-core-1">
+            <span class="name">RHAH_Settings.cs</span>
+            <span class="note">新字段 siegeFuryEnabled + 一行 Scribe</span>
+          </button>
+          <button class="node" type="button" data-toggle="d-core-2" aria-expanded="false" aria-controls="d-core-2">
+            <span class="name">RHAH_DefOf.cs</span>
+            <span class="note">1 个 HediffDef + 3 个 ThoughtDef 字段</span>
+          </button>
+        </div>
+        <div class="detail" id="d-core-1" hidden>
+          <h4>修改 · 字段与存档</h4>
+          <p><code>siegeFuryEnabled = true</code>，紧跟在 <code>armedWeaponsEnabled</code> 之后；<code>ExposeData</code> 里一行 <code>Scribe_Values.Look</code>，key 与字段同名、默认值与字段一致。</p>
+          <p class="verdict">为什么：开关属于设置数据，按分层规则留在 Core。顺带确认过 <code>ResetToDefaults</code> 是反射遍历字段，新字段自动被重置，不需要改。</p>
+        </div>
+        <div class="detail" id="d-core-2" hidden>
+          <h4>修改 · Def 引用</h4>
+          <p>新增 <code>RHAH_SiegeFury</code>（HediffDef）与三条 <code>RHAH_Thought_SiegeFury*</code>（ThoughtDef）。</p>
+          <p class="verdict">为什么：本仓既有写法是 Def 全走 DefOf，业务代码里不拼字符串；新代码也就没再用 <code>GetNamedSilentFail</code>。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer">
+      <div class="layer-label">
+        <b>L3</b>
+        <span>Generation 到场</span>
+        <small>谁该拿到这份增益，只在这里判一次</small>
+      </div>
+      <div>
+        <div class="boxes">
+          <button class="node" type="button" data-toggle="d-gen-1" aria-expanded="false" aria-controls="d-gen-1">
+            <span class="name">RHAH_SiegeFuryGrant.cs</span>
+            <span class="note">新增：闸门 + 挂增益（评审后改名）</span>
+          </button>
+          <button class="node" type="button" data-toggle="d-gen-2" aria-expanded="false" aria-controls="d-gen-2">
+            <span class="name">RHAH_PawnFactory.cs</span>
+            <span class="note">一行接线</span>
+          </button>
+          <button class="node" type="button" data-toggle="d-gen-3" aria-expanded="false" aria-controls="d-gen-3">
+            <span class="name">RHAH_FamineArrival.cs</span>
+            <span class="note">只剩形参改名</span>
+          </button>
+          <button class="node" type="button" data-toggle="d-gen-4" aria-expanded="false" aria-controls="d-gen-4">
+            <span class="name">RHAH_FamineWeapons.cs</span>
+            <span class="note">形参改名，逻辑未动</span>
+          </button>
+        </div>
+        <div class="detail" id="d-gen-1" hidden>
+          <h4>新增 · 闸门 + 挂增益</h4>
+          <p><code>GrantingEnabled</code> = 索粮总开关 && 本票开关（注释写明"两个开关都要开"）；<code>CanApply</code> 是纯函数：开 / 有来客快照 / 非玩家派系 / 事件属于三种索粮围攻之一；<code>AppliesTo(pawn)</code> 只取一次快照再调 <code>CanApply</code>；<code>Apply</code> 先撤掉携带的营养不良，再 <code>AddHediff</code>（有 <code>HasHediff</code> 幂等保护）。</p>
+          <p class="verdict">评审前这个类叫 <code>RHAH_SiegeFury</code>，与 HediffDef 同名、读不出"这是挂增益的入口"，B-4 改名 <code>…Grant</code>，文件同步。</p>
+        </div>
+        <div class="detail" id="d-gen-2" hidden>
+          <h4>修改 · 生成流水线</h4>
+          <p>在 <code>Initialize</code> → <code>FamineWeapons.Apply</code> 之后加一行 <code>RHAH_SiegeFuryGrant.Apply(pawn)</code>，位置在关系绑定之前。</p>
+          <p class="verdict">为什么：新角色登记来源后立刻挂增益，不加入场钩子、也不加读档钩子。</p>
+        </div>
+        <div class="detail" id="d-gen-3" hidden>
+          <h4>修改 · 形参改名（评审后缩减）</h4>
+          <p><code>marked → hasVisitorSnapshot</code>、<code>player → isPlayerFaction</code>。评审前这里还有一段"围攻者不给入场营养不良"的分支——B-2 指出那是拿 A 特性的闸门决定 B 特性的事，已整段删掉，挪回 <code>SiegeFuryGrant.Apply</code>。</p>
+          <p class="verdict">为什么：入场营养不良是"所有饥荒来客"的共同行为，围攻者的特殊处理应当属于围攻特性本身。</p>
+        </div>
+        <div class="detail" id="d-gen-4" hidden>
+          <h4>修改 · 形参改名</h4>
+          <p><code>marked → hasVisitorSnapshot</code>、<code>player → isPlayerFaction</code>、<code>source → incidentDisplayId</code>。</p>
+          <p class="verdict">为什么：旧名读不出到底标记的是什么、source 指的是事件编号还是别的东西；逻辑一字未动。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer">
+      <div class="layer-label">
+        <b>L4</b>
+        <span>Pawn 状态</span>
+        <small>档位跟着真实营养不良走，心情跟着档位走</small>
+      </div>
+      <div>
+        <div class="boxes">
+          <button class="node" type="button" data-toggle="d-pawn-1" aria-expanded="false" aria-controls="d-pawn-1">
+            <span class="name">HediffComp_RHAH_SiegeFuryStage.cs</span>
+            <span class="note">新增：档位同步 + 到期清心情</span>
+          </button>
+          <button class="node" type="button" data-toggle="d-pawn-2" aria-expanded="false" aria-controls="d-pawn-2">
+            <span class="name">RHAH_FamineMood.cs</span>
+            <span class="note">三条心情的挂与清</span>
+          </button>
+          <button class="node" type="button" data-toggle="d-pawn-3" aria-expanded="false" aria-controls="d-pawn-3">
+            <span class="name">RHAH_VisitorMood.cs</span>
+            <span class="note">不过期记忆类 + 旧名别名</span>
+          </button>
+        </div>
+        <div class="detail" id="d-pawn-1" hidden>
+          <h4>新增 · 档位组件</h4>
+          <p><code>SeverityPerStage {0.10, 0.50, 0.90}</code>（注释写明每个值必须落在 XML 第 n 档区间）；<code>StageOf</code> 按营养不良 0.25 / 0.50 分档；<code>CompPostPostAdd</code> 初设档位并挂心情；<code>CompPostTick</code> 每游戏内小时对齐一次；<code>CompPostPostRemoved</code> 清心情。</p>
+          <p class="verdict">为什么：慢状态按游戏内小时检查，不新增 tick 扫描器；每处只查一次营养不良（B-7 整改），档位没变就直接返回。</p>
+        </div>
+        <div class="detail" id="d-pawn-2" hidden>
+          <h4>修改 · 心情收口</h4>
+          <p><code>SetSiegeFuryMood(pawn, stage)</code> 先清三档旧心情再挂当前档（三档互斥）；<code>ClearSiegeFuryMood(pawn)</code> 到期时清空；私有的 <code>RemoveThought</code> 统一做"取不到 Def 就跳过"。</p>
+          <p class="verdict">为什么：心情的期限不另存，交给 hediff 的生命周期；原方法名 <code>Notify…</code> 读起来像"发通知"，实际是在改写心情，B 段把它改成 Set / Clear。</p>
+        </div>
+        <div class="detail" id="d-pawn-3" hidden>
+          <h4>修改 · 记忆类</h4>
+          <p><code>Thought_Memory_RHAH_NoExpiry</code> 是唯一实现（<code>ShouldDiscard =&gt; false</code>，读档后不按 age 过期）；旧的 <code>Thought_Memory_RHAH_EnslavedServing</code> 改成它的空子类，只作读档兼容。</p>
+          <p class="verdict">为什么：实测存档里是 <code>Class="Thought_Memory…"</code> 这种按类名重建的写法，直接删旧类会让旧存档里的记忆加载失败，所以保留旧名做别名（B-3 的安全变体）。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer">
+      <div class="layer-label">
+        <b>L5</b>
+        <span>外围接线与登记</span>
+        <small>UI 适配、三份文案、存档归属清单、测试</small>
+      </div>
+      <div>
+        <div class="boxes">
+          <button class="node" type="button" data-toggle="d-out-1" aria-expanded="false" aria-controls="d-out-1">
+            <span class="name">RHAH_IrisMenusCompat.cs</span>
+            <span class="note">事件页组头开关 + 搜索条目</span>
+          </button>
+          <button class="node" type="button" data-toggle="d-out-2" aria-expanded="false" aria-controls="d-out-2">
+            <span class="name">三份语言（中 / 英 / 日）</span>
+            <span class="note">2 条 keyed：正文 + tooltip</span>
+          </button>
+          <button class="node" type="button" data-toggle="d-out-3" aria-expanded="false" aria-controls="d-out-3">
+            <span class="name">save-ownership.md</span>
+            <span class="note">新 Def / 组件 / 记忆的归属登记</span>
+          </button>
+          <button class="node" type="button" data-toggle="d-out-4" aria-expanded="false" aria-controls="d-out-4">
+            <span class="name">RHAH_SiegeFuryTests.cs</span>
+            <span class="note">新增：两个纯函数用例</span>
+          </button>
+        </div>
+        <div class="detail" id="d-out-1" hidden>
+          <h4>修改 · 两处</h4>
+          <p>① <code>DrawEvents</code> 循环到索粮组（I-014 所在组）时，先 <code>MenuControls.Anchor("siege-fury")</code> 再画 checkbox——三种索粮围攻同属一组，开关贴在组头而不是页顶；② <code>SearchCatalogEvents</code> 改成迭代器，先吐一条 <code>siege-fury</code> 再吐原有事件条目，让全局搜索能定位到它。</p>
+          <p class="verdict">评审建议在核心设置窗口再放一个同样的开关（怕没装 IrisMenus 的玩家关不掉）——未采纳：IrisMenus 是 About.xml 里的硬依赖，且"开关只放事件页"是定稿口径。</p>
+        </div>
+        <div class="detail" id="d-out-2" hidden>
+          <h4>修改 · 三条 keyed ×2</h4>
+          <p><code>RHAH_Settings_SiegeFuryEnabled</code> 与 <code>…_Tooltip</code>，中文 / 英文 / 日文各一份。</p>
+          <p class="verdict">为什么：新增开关必须有显示文本；文案由用户改定，本次不动措辞。</p>
+        </div>
+        <div class="detail" id="d-out-3" hidden>
+          <h4>修改 · 存档归属</h4>
+          <p>登记新 HediffDef、两个新组件类型、新的不过期记忆类与三条 ThoughtDef 的卸载行为；<code>SiegeFuryGrant</code> 是静态类，不入档，不登记。</p>
+          <p class="verdict">为什么：这一页是本仓"什么会进存档、卸载时怎么处理"的唯一清单，新增可序列化类型必须同步。</p>
+        </div>
+        <div class="detail" id="d-out-4" hidden>
+          <h4>新增 · 两个 Fact</h4>
+          <p>① <code>CanApply</code> 的 8 组真值（三种索粮事件为真；非索粮事件、null 事件、玩家派系、无快照、开关关为假）；② <code>SeverityForStage</code> / <code>StageOf</code> 的阈值边界（0 / 0.249 / 0.25 / 0.499 / 0.50 / 1.0）。</p>
+          <p class="verdict">为什么：闸门与档位都是纯函数，单测成本最低、回归价值最高。⚠ 本机 testhost 起不来，这两个用例**没有实际跑过**。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="part">
+    <div class="part-head">
+      <span class="n">02</span>
+      <h2>一次围攻来客的生命周期</h2>
+      <p>从生成到消失只有一条主路径。分支（开关关掉、不是索粮事件、是玩家派系）都收在第一步的闸门里，不在这条线上分叉。</p>
+    </div>
+
+    <ol class="flow">
+      <li class="step">
+        <span class="dot">01</span>
+        <button class="step-head" type="button" data-toggle="d-step-1" aria-expanded="false" aria-controls="d-step-1">
+          <span class="t">生成新来客</span>
+          <span class="s">生成器产出角色，并登记来源事件</span>
+        </button>
+        <div class="detail" id="d-step-1" hidden>
+          <h4>这一步发生什么</h4>
+          <p>建角色后先跑两项初始化，再绑定关系。闸门只看两件事：这个角色有没有来客快照、来源事件是不是三种索粮围攻之一——不看身份标签，也不看阵营字符串。</p>
+        </div>
+      </li>
+
+      <li class="step">
+        <span class="dot">02</span>
+        <button class="step-head" type="button" data-toggle="d-step-2" aria-expanded="false" aria-controls="d-step-2">
+          <span class="t">到场初始化</span>
+          <span class="s">食物清零，并保证携带营养不良到入场值（默认 0.25）</span>
+        </button>
+        <div class="detail" id="d-step-2" hidden>
+          <h4>这一步发生什么</h4>
+          <p>这是"所有饥荒来客"的共同行为，不是围攻专属。围攻者的那份营养不良紧接着在下一步被撤掉，所以最终状态与他们"从零开始饿"一致。</p>
+        </div>
+      </li>
+
+      <li class="step">
+        <span class="dot">03</span>
+        <button class="step-head" type="button" data-toggle="d-step-3" aria-expanded="false" aria-controls="d-step-3">
+          <span class="t">挂增益</span>
+          <span class="s">撤掉携带的营养不良 → 挂 Hediff，初始 0.10</span>
+        </button>
+        <div class="detail" id="d-step-3" hidden>
+          <h4>这一步发生什么</h4>
+          <p>闸门通过才动手：先撤掉身上携带的营养不良，再 <code>AddHediff</code>；已有同类 Hediff 时直接返回（幂等）。初始档位按当下营养不良算，通常就是第 1 档 0.10。</p>
+          <p>真机实测（1.7）：新生成的 5 个载体全部 <code>sev = 0.10</code>、剩余时间 120000、营养不良 <code>none</code>，全场营养不良 Hediff 数为 0。</p>
+        </div>
+      </li>
+
+      <li class="step">
+        <span class="dot">04</span>
+        <button class="step-head" type="button" data-toggle="d-step-4" aria-expanded="false" aria-controls="d-step-4">
+          <span class="t">每游戏内小时对齐档位</span>
+          <span class="s">营养不良过 0.25 换 0.50，过 0.50 换 0.90</span>
+        </button>
+        <div class="detail" id="d-step-4" hidden>
+          <h4>这一步发生什么</h4>
+          <p>按整点散列触发，只读一次营养不良；档位没变就直接返回，变了才写回 severity。这样既不会漏掉缓慢变化，也不会每 tick 扫一遍。</p>
+        </div>
+      </li>
+
+      <li class="step">
+        <span class="dot">05</span>
+        <button class="step-head" type="button" data-toggle="d-step-5" aria-expanded="false" aria-controls="d-step-5">
+          <span class="t">换档时换心情</span>
+          <span class="s">三条心情互斥，只留当前档（40 / 50 / 60）</span>
+        </button>
+        <div class="detail" id="d-step-5" hidden>
+          <h4>这一步发生什么</h4>
+          <p>先把三档旧心情都清掉，再挂当前档那一条；心情本身不设期限，只由 Hediff 的生命周期负责收尾。设计目的是让围攻期间别先精神崩溃。</p>
+        </div>
+      </li>
+
+      <li class="step">
+        <span class="dot">06</span>
+        <button class="step-head" type="button" data-toggle="d-step-6" aria-expanded="false" aria-controls="d-step-6">
+          <span class="t">两日到期</span>
+          <span class="s">Hediff 自身移除 → 三条心情清空</span>
+        </button>
+        <div class="detail" id="d-step-6" hidden>
+          <h4>这一步发生什么</h4>
+          <p>到期由原版 <code>Disappears</code> 组件负责（第 120000 tick），移除时回调清掉三条心情。真机实测：读档后剩余时间不重置——74859 → 74819，对应 tick 45172 → 45212。</p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section class="part">
+    <div class="part-head">
+      <span class="n">03</span>
+      <h2>数据怎么变形</h2>
+      <p>整条链只有一个输入：营养不良的 severity。它决定档位，档位决定 Hediff 的 severity、心情与全部 stat 修正。</p>
+    </div>
+    <div class="lanes">
+      <div class="lane">
+        <div class="tag">输入</div>
+        <div class="body">营养不良 severity（原版 Hediff）。低于 0.25 算第 1 档；0.25–0.50 第 2 档；0.50 以上第 3 档。<strong>不压上限</strong>：原版 0.8 / 1.0 的后果照常，实测见过 0.9014。</div>
+      </div>
+      <div class="lane">
+        <div class="tag">判定</div>
+        <div class="body">两个纯函数：<code>StageOf</code> 分档，<code>SeverityPerStage</code> 给对应的 0.10 / 0.50 / 0.90。这两个值必须落进 XML 三档的 <code>minSeverity</code>（0 / 0.40 / 0.80）区间，否则档位会串——这条约定写在注释里。</div>
+      </div>
+      <div class="lane">
+        <div class="tag">输出</div>
+        <div class="body">三档逐级增强：耐痛（painFactor 0.70 / 0.40 / 0.10）、近战命中与伤害、出手间隔、闪避、承伤、移速、意识；外加 40 / 50 / 60 的心情。两日后一起消失。</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="part">
+    <div class="part-head">
+      <span class="n">04</span>
+      <h2>评审结论与逐条处置</h2>
+      <p>评审按"命名不能有歧义、不许破分层与模块接口、能最小改动就最小改动"三条尺子过了一遍。结论：3 条必修、6 条建议、1 条可不改；下面每一条都能点开看位置、现状与最终处置。</p>
+    </div>
+
+    <p class="verdict-line"><strong>结论：可以提 PR。</strong> 必修全部处置：2 条按原方案改（B-2、B-3 的核心），1 条不采纳且有实测依据（B-1），1 条走安全变体（B-3 改为保留旧类名做读档别名）；建议 6 条里 5 条已改、1 条按评审建议不动。整改后 1.6 / 1.7 双版本构建 0 警告 0 错误，并重跑了一遍真机（含读档）。</p>
+
+    <div class="boxes" style="grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));">
+      <button class="node" type="button" data-toggle="d-rev-1" aria-expanded="false" aria-controls="d-rev-1">
+        <span class="tag must">必修</span>
+        <span class="name">B-1 开关只有 IrisMenus 一个入口</span>
+        <span class="note">未采纳：硬依赖 + 定稿口径</span>
+      </button>
+      <button class="node" type="button" data-toggle="d-rev-2" aria-expanded="false" aria-controls="d-rev-2">
+        <span class="tag must">必修</span>
+        <span class="name">B-2 借别的特性闸门决定入场营养不良</span>
+        <span class="note">已改：搬回 SiegeFuryGrant.Apply</span>
+      </button>
+      <button class="node" type="button" data-toggle="d-rev-3" aria-expanded="false" aria-controls="d-rev-3">
+        <span class="tag must">必修</span>
+        <span class="name">B-3 两个"不过期"记忆类一字不差</span>
+        <span class="note">安全变体：旧名留作读档别名</span>
+      </button>
+      <button class="node" type="button" data-toggle="d-rev-4" aria-expanded="false" aria-controls="d-rev-4">
+        <span class="tag ok">建议</span>
+        <span class="name">B-4 类名与 defName 同名</span>
+        <span class="note">已改：RHAH_SiegeFuryGrant</span>
+      </button>
+      <button class="node" type="button" data-toggle="d-rev-5" aria-expanded="false" aria-controls="d-rev-5">
+        <span class="tag ok">建议</span>
+        <span class="name">B-5 Enabled 读起来像"总开关"</span>
+        <span class="note">已改：GrantingEnabled</span>
+      </button>
+      <button class="node" type="button" data-toggle="d-rev-6" aria-expanded="false" aria-controls="d-rev-6">
+        <span class="tag ok">建议</span>
+        <span class="name">B-6 档位阈值是代码与 XML 的隐式契约</span>
+        <span class="note">已改：改名 + 契约注释</span>
+      </button>
+      <button class="node" type="button" data-toggle="d-rev-7" aria-expanded="false" aria-controls="d-rev-7">
+        <span class="tag ok">建议</span>
+        <span class="name">B-7 同一份营养不良算两遍</span>
+        <span class="note">已改：每处只查一次</span>
+      </button>
+      <button class="node" type="button" data-toggle="d-rev-8" aria-expanded="false" aria-controls="d-rev-8">
+        <span class="tag ok">建议</span>
+        <span class="name">B-8 测试名残留 Marked</span>
+        <span class="note">已改：改用 visitor snapshot</span>
+      </button>
+      <button class="node" type="button" data-toggle="d-rev-9" aria-expanded="false" aria-controls="d-rev-9">
+        <span class="tag ok">建议</span>
+        <span class="name">B-9 三条心情被"饥荒心情"开关暗中接管</span>
+        <span class="note">已改：加注释，不改继承</span>
+      </button>
+      <button class="node" type="button" data-toggle="d-rev-10" aria-expanded="false" aria-controls="d-rev-10">
+        <span class="tag">可不改</span>
+        <span class="name">B-10 同一文件两种取 Def 方式</span>
+        <span class="note">按评审建议不动</span>
+      </button>
+    </div>
+
+    <div class="detail" id="d-rev-1" hidden>
+      <h4>B-1 · 必修 · 不采纳</h4>
+      <p><strong>位置</strong>：<code>RHAH_IrisMenusCompat.cs:237-238</code>（唯一绘制点）；对照 <code>ModEntry.cs:150-153</code> 里两个同级开关。</p>
+      <p><strong>评审担心</strong>：没装 IrisMenus 的玩家没有地方关这个功能。</p>
+      <p><strong>处置</strong>：不采纳。实测 <code>About/About.xml</code> 的 <code>modDependencies</code> 里就列着 <code>Nanaloveyuki.IrisMenus</code>——它是硬依赖，缺了模组根本启用不了；而且"开关只放事件页、不放核心设置窗口与访客页"是已经定稿的设计口径。这一条不改代码。</p>
+      <p class="verdict">状态：不改。若以后 IrisMenus 降级为软依赖，这条要重新拿回来做。</p>
+    </div>
+
+    <div class="detail" id="d-rev-2" hidden>
+      <h4>B-2 · 必修 · 已改（按评审推荐方案）</h4>
+      <p><strong>位置</strong>：<code>RHAH_FamineArrival.cs:21-28</code> 与紧接其后的 <code>RHAH_PawnFactory.cs:57-59</code>。</p>
+      <p><strong>现状</strong>：到场初始化里拿"能不能挂这份增益"的闸门，去决定另一件事（要不要给入场营养不良），同一个闸门在生成流水线里连判两次——命名与语义错位，且让入场类知道了另一特性的开关。</p>
+      <p><strong>改法</strong>：整段删掉；改成在 <code>SiegeFuryGrant.Apply</code> 里、<code>AddHediff</code> 之前撤掉携带的营养不良。闸门只判一次，入场类回到单一职责。</p>
+      <p class="verdict">验证：真机新生成 5 个载体，营养不良 <code>none</code>、全场营养不良 Hediff 数为 0——"先加后撤"没有留下痕迹。</p>
+    </div>
+
+    <div class="detail" id="d-rev-3" hidden>
+      <h4>B-3 · 必修 · 安全变体</h4>
+      <p><strong>位置</strong>：<code>RHAH_VisitorMood.cs:86-96</code>：新旧两个"永不过期"记忆类实现一字不差，旧名 <code>EnslavedServing</code> 说的是另一件具体的事。</p>
+      <p><strong>评审改法</strong>：以新名作唯一实现，把 XML 的 <code>thoughtClass</code> 指过去，删旧类。</p>
+      <p><strong>为什么没照做</strong>：存档里记忆是按类名重建的（<code>.rws</code> 里可见 <code>Class="Thought_Memory…"</code>），删掉旧类会让旧存档里的这类记忆加载失败。</p>
+      <p><strong>实际做法</strong>：<code>NoExpiry</code> 成为唯一实现（去掉 sealed），旧名改成它的空子类，注释写明"只留作读档兼容，新代码不要再引用"；XML 与登记表不动。</p>
+      <p class="verdict">验证：用修复后的构建加载"修复前构建写出的"存档，加载成功、日志里没有类名解析错误，心情与剩余时间都在。</p>
+    </div>
+
+    <div class="detail" id="d-rev-4" hidden>
+      <h4>B-4 · 建议 · 已改</h4>
+      <p>静态类原来叫 <code>RHAH_SiegeFury</code>，与 HediffDef 的 defName 一字不差，看到 <code>RHAH_SiegeFury.Apply(pawn)</code> 分不清说的是那个 Def 还是挂增益的入口。</p>
+      <p><strong>改法</strong>：类与文件都改成 <code>RHAH_SiegeFuryGrant</code>；Def 与 DefOf 不动。调用点两处、测试一处同步。</p>
+      <p class="verdict">纯改名，不动行为、不动存档。</p>
+    </div>
+
+    <div class="detail" id="d-rev-5" hidden>
+      <h4>B-5 · 建议 · 已改</h4>
+      <p><code>Enabled</code> 实际是"两个开关都开"，读起来却像"本特性总开关"。</p>
+      <p><strong>改法</strong>：改名 <code>GrantingEnabled</code>，保留"关掉整个索粮事件就不该还挂这份增益"的注释。</p>
+      <p class="verdict">不动行为。</p>
+    </div>
+
+    <div class="detail" id="d-rev-6" hidden>
+      <h4>B-6 · 建议 · 已改（不加断言）</h4>
+      <p>代码写入的 0.10 / 0.50 / 0.90 必须落在 XML 三档 0 / 0.40 / 0.80 的区间里，这条契约只存在于两个文件之间；字段名 <code>StageSeverities</code> 又读起来像"档位门槛"。</p>
+      <p><strong>改法</strong>：字段改名 <code>SeverityPerStage</code>，上方加一行契约注释。</p>
+      <p><strong>没做</strong>：评审还建议在测试里抄一份阈值做断言——数值已经由用户冻结，再抄一份等于制造第二个来源，按 YAGNI 跳过。</p>
+      <p class="verdict">零行为变化。</p>
+    </div>
+
+    <div class="detail" id="d-rev-7" hidden>
+      <h4>B-7 · 建议 · 已改</h4>
+      <p>档位同步时同一份营养不良查了两遍、分档也算了两次（加档与改档两处都是）。</p>
+      <p><strong>改法</strong>：每处只查一次，档位与 severity 复用同一个局部值。</p>
+      <p class="verdict">等价改写，不动行为。</p>
+    </div>
+
+    <div class="detail" id="d-rev-8" hidden>
+      <h4>B-8 · 建议 · 已改</h4>
+      <p>生产代码本次已把 <code>marked</code> 改成 <code>hasVisitorSnapshot</code>，测试方法名里还留着 <code>Marked</code>。</p>
+      <p><strong>改法</strong>：→ <code>SiegeFuryOnlyAppliesToVisitorSnapshotNonPlayerSiegeMembers</code>。</p>
+      <p class="verdict">只改名字。</p>
+    </div>
+
+    <div class="detail" id="d-rev-9" hidden>
+      <h4>B-9 · 建议 · 已改（加注释）</h4>
+      <p>三条新心情继承自饥荒心情的记忆基类，于是"关掉饥荒心情"会连它们一起变成 0 并隐藏——同一个特性被两个设置交叉控制，第二个判断藏在继承里。</p>
+      <p><strong>改法</strong>：在记忆类上方补一行说明，把这条关系写到明面上。</p>
+      <p><strong>没做</strong>：真要分开就得改继承并显式读新开关，那是会改行为的设计决定，留给用户拍板。</p>
+      <p class="verdict">零行为变化。</p>
+    </div>
+
+    <div class="detail" id="d-rev-10" hidden>
+      <h4>B-10 · 可不改 · 不动</h4>
+      <p>同一份文件里，旧方法用字符串取 Def，新代码用 DefOf。新的更合规范，但把旧的改过来要在 DefOf 里补字段，反而变大。</p>
+      <p class="verdict">按评审建议保持现状。</p>
+    </div>
+  </section>
+
+  <section class="part">
+    <div class="part-head">
+      <span class="n">05</span>
+      <h2>边界与术语</h2>
+      <p>读完前面容易产生的四个误解，以及这份报告里反复出现的四个名字。</p>
+    </div>
+    <div class="cols">
+      <div>
+        <h3>容易误读的地方</h3>
+        <ul>
+          <li><b>饥饿上限没被压住。</b>这是刻意的：围攻者照样会在原版的 0.8 / 1.0 后果里倒下，增益只是让他们在那之前更凶。</li>
+          <li><b>三条心情同时受"饥荒心情"开关管。</b>因为继承关系，关掉那个开关它们也会归零并隐藏；本次只加了注释，没有改行为。</li>
+          <li><b>旧记忆类不是死代码。</b>留着它是为了让旧存档按类名重建记忆时不报错，新代码不该再引用。</li>
+          <li><b>单测没跑成。</b>xunit 在本机 testhost 起不来（进程句柄被拒），这两个用例绿不绿未知；数值结论来自真机取证与用户目视复核。</li>
+        </ul>
+      </div>
+      <div>
+        <h3>术语</h3>
+        <dl class="terms">
+          <div><dt>档位（stage）</dt><dd>按营养不良 0.25 / 0.50 切出来的三档，不是原版 Hediff 的 stage 概念，但写入的 severity 正好落进 XML 三档区间。</dd></div>
+          <div><dt>Hediff severity</dt><dd>buff 自身的强度值，0.10 / 0.50 / 0.90，决定原版按哪一段 stat 修正生效。</dd></div>
+          <div><dt>Disappears</dt><dd>原版组件：到期自动移除 Hediff，并保存剩余时间；两日消退就靠它。</dd></div>
+          <div><dt>来客快照</dt><dd>每个访客身上记录的来源事件等字段；闸门判断"是不是索粮围攻的来客"靠它，不靠身份标签。</dd></div>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>源报告：docs/RHAH-0002-最终代码评审-20261025.md（A 改动清单 / B 问题清单 / C 结论 / D 修复记录）。本页是它的投影，不含原文之外的事实。</span>
+    <a href="RHAH-0002-最终代码评审-20261025.md">源文件 RHAH-0002-最终代码评审-20261025.md</a>
+  </footer>
+
+</main>
+
+<script>
+  (function () {
+    var panels = function () { return document.querySelectorAll('.detail'); };
+
+    function setOpen(panel, open, btn) {
+      panel.hidden = !open;
+      if (btn) btn.setAttribute('aria-expanded', String(open));
+      var step = panel.closest('.step');
+      if (step) step.classList.toggle('open', open);
+    }
+
+    function buttonFor(id) {
+      return document.querySelector('[data-toggle="' + id + '"]');
+    }
+
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-toggle]');
+      if (!btn) return;
+      var panel = document.getElementById(btn.dataset.toggle);
+      if (!panel) return;
+      var open = panel.hidden;
+      setOpen(panel, open, btn);
+      history.replaceState(null, '', open ? '#' + panel.id : location.pathname + location.search);
+      if (open) panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+
+    var allBtn = document.getElementById('toggle-all');
+    if (allBtn) {
+      allBtn.addEventListener('click', function () {
+        var anyClosed = [].slice.call(panels()).some(function (p) { return p.hidden; });
+        [].slice.call(panels()).forEach(function (p) { setOpen(p, anyClosed, buttonFor(p.id)); });
+        allBtn.textContent = anyClosed ? '全部收起' : '全部展开';
+      });
+    }
+
+    var hash = location.hash.slice(1);
+    if (hash) {
+      var panel = document.getElementById(hash);
+      if (panel && panel.classList.contains('detail') && panel.hidden) {
+        setOpen(panel, true, buttonFor(hash));
+        panel.scrollIntoView({ block: 'center' });
+      }
+    }
+  })();
+</script>
+</body>
+</html>

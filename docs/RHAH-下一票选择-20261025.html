@@ -1,0 +1,1271 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RHAH 下一票选择：为什么是 0009</title>
+<!--
+  由 docs\RHAH-下一票选择-20261025.md 投影而来（模板 0001 · 分层结构与执行流）。
+  MD 是源，本文件只是视图：所有数字、行号、命令、结论都来自 MD，未补事实。
+  细节一律收在 .detail 里；节点不够就加节点，不平铺进正文。
+-->
+<style>
+  :root {
+    --bg: #faf9f6;
+    --card: #ffffff;
+    --ink: #1b1a17;
+    --muted: #6f6c64;
+    --line: #e6e2d9;
+    --accent: #1f6f63;
+    --accent-soft: rgba(31, 111, 99, 0.07);
+    --flag: #a15c1e;
+    --sans: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+    --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+    --max: 1080px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101211;
+      --card: #171a18;
+      --ink: #e9e7e1;
+      --muted: #9a978f;
+      --line: #272c29;
+      --accent: #52b6a6;
+      --accent-soft: rgba(82, 182, 166, 0.1);
+      --flag: #d08a4a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: var(--max); margin: 0 auto; padding: 72px 32px 96px; }
+
+  /* ---------- 头部 ---------- */
+  .kicker {
+    margin: 0 0 14px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    margin: 0 0 18px;
+    font-size: clamp(28px, 4vw, 40px);
+    line-height: 1.22;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    max-width: 22ch;
+  }
+  .lede {
+    margin: 0 0 28px;
+    font-size: 17px;
+    line-height: 1.7;
+    color: var(--muted);
+    max-width: 62ch;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 28px;
+    margin: 0;
+    padding: 16px 0 0;
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .meta div { display: flex; gap: 8px; }
+  .meta dt { color: var(--muted); }
+  .meta dd { margin: 0; font-family: var(--mono); font-size: 12.5px; }
+  .ghost {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 12.5px;
+    padding: 3px 11px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ---------- 分节 ---------- */
+  .part { margin-top: 72px; }
+  .part-head {
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 0 14px;
+    align-items: baseline;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 30px;
+  }
+  .part-head .n {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 0.06em;
+  }
+  .part-head h2 {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .part-head p {
+    grid-column: 2;
+    margin: 6px 0 0;
+    font-size: 14px;
+    color: var(--muted);
+    max-width: 62ch;
+  }
+
+  /* ---------- 01 分层带 ---------- */
+  .layer {
+    display: grid;
+    grid-template-columns: 132px 1fr;
+    gap: 0 26px;
+    padding: 20px 0;
+    border-bottom: 1px dashed var(--line);
+  }
+  .layer:last-child { border-bottom: 0; }
+  .layer-label { padding-top: 9px; }
+  .layer-label b {
+    display: block;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+  .layer-label span { display: block; font-size: 15px; font-weight: 600; }
+  .layer-label small { display: block; margin-top: 4px; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+  .boxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+  .boxes.wide { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+
+  /* ---------- 节点按钮 ---------- */
+  .node {
+    appearance: none;
+    display: block;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 11px 13px;
+    cursor: pointer;
+    transition: border-color .12s ease, background .12s ease;
+  }
+  .node:hover { border-color: var(--accent); }
+  .node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .node[aria-expanded="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  .node .name { display: block; font-size: 14px; font-weight: 600; line-height: 1.4; }
+  .node .note { display: block; margin-top: 3px; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+  .node .vline { display: block; margin-top: 5px; font-family: var(--mono); font-size: 12px; }
+
+  /* ---------- 展开面板 ---------- */
+  .detail {
+    margin: 12px 0 4px;
+    padding: 15px 18px 17px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    font-size: 14.5px;
+    line-height: 1.7;
+  }
+  .detail[hidden] { display: none; }
+  .detail h4 {
+    margin: 0 0 8px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .detail h5 {
+    margin: 14px 0 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .detail p { margin: 0 0 10px; }
+  .detail p:last-child { margin-bottom: 0; }
+  .detail ul { margin: 0 0 10px; padding-left: 20px; }
+  .detail li { margin-bottom: 4px; }
+  .detail code {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    background: var(--accent-soft);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* ---------- 02 执行流 ---------- */
+  .flow { list-style: none; margin: 0; padding: 0; }
+  .step { position: relative; padding: 0 0 30px 40px; }
+  .step::before {
+    content: "";
+    position: absolute;
+    left: 12px;
+    top: 30px;
+    bottom: 2px;
+    width: 1px;
+    background: var(--line);
+  }
+  .step:last-child { padding-bottom: 0; }
+  .step:last-child::before { display: none; }
+  .step .dot {
+    position: absolute;
+    left: 0;
+    top: 3px;
+    width: 25px;
+    height: 25px;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: var(--card);
+    display: grid;
+    place-items: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  .step.open .dot { border-color: var(--accent); color: var(--accent); }
+  .step-head {
+    appearance: none;
+    display: block;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+  }
+  .step-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 3px; }
+  .step-head .t { display: block; font-size: 15.5px; font-weight: 600; line-height: 1.45; }
+  .step-head .s { display: block; margin-top: 3px; font-size: 13.5px; line-height: 1.6; color: var(--muted); }
+  .step-head:hover .t { color: var(--accent); }
+
+  /* ---------- 04 两栏 ---------- */
+  .cols { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 44px; }
+  .cols h3 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+  .cols ul { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.7; }
+  .cols li { margin-bottom: 9px; }
+  .cols li b { font-weight: 600; }
+  .terms { margin: 0; font-size: 13.5px; }
+  .terms div { padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .terms div:last-child { border-bottom: 0; }
+  .terms dt { font-weight: 600; }
+  .terms dd { margin: 2px 0 0; color: var(--muted); line-height: 1.55; }
+
+  footer {
+    margin-top: 84px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  footer a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); }
+  footer a:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* ============ 本报告新增（模板没规定的中间元素） ============ */
+  /* 结论块 */
+  .verdict-card {
+    margin: 34px 0 0;
+    padding: 22px 26px 24px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+  }
+  .verdict-card .lead { margin: 0 0 12px; font-size: 20px; font-weight: 600; line-height: 1.5; }
+  .verdict-card p { margin: 0 0 10px; font-size: 14.5px; line-height: 1.75; }
+  .verdict-card p:last-child { margin-bottom: 0; }
+
+  /* 来源标签：实测 / 票述 / 推测 三色，文字本身也在标签里（不只靠颜色） */
+  .tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.6;
+    padding: 0 5px;
+    border-radius: 3px;
+    border: 1px solid;
+    white-space: nowrap;
+    vertical-align: 1px;
+  }
+  .tag-m { color: #1f6f63; border-color: rgba(31, 111, 99, .45); background: rgba(31, 111, 99, .08); }
+  .tag-t { color: #8a5a1a; border-color: rgba(161, 92, 30, .45); background: rgba(161, 92, 30, .08); }
+  .tag-i { color: #5b5f8a; border-color: rgba(91, 95, 138, .45); background: rgba(91, 95, 138, .08); }
+  @media (prefers-color-scheme: dark) {
+    .tag-m { color: #6fd0be; border-color: rgba(111, 208, 190, .45); background: rgba(111, 208, 190, .1); }
+    .tag-t { color: #e0a469; border-color: rgba(224, 164, 105, .45); background: rgba(224, 164, 105, .1); }
+    .tag-i { color: #9aa0cf; border-color: rgba(154, 160, 207, .45); background: rgba(154, 160, 207, .1); }
+  }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 22px;
+    margin: 14px 0 0;
+    padding: 12px 14px;
+    border: 1px dashed var(--line);
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--muted);
+  }
+  .legend .item { display: flex; gap: 7px; align-items: baseline; }
+
+  /* 总览表 */
+  .tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .tbl caption {
+    caption-side: top;
+    text-align: left;
+    font-size: 12.5px;
+    color: var(--muted);
+    padding-bottom: 8px;
+  }
+  .tbl th, .tbl td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .tbl th {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .tbl tr:last-child td { border-bottom: 0; }
+  .tbl td:first-child { white-space: nowrap; }
+  .tbl a.jump {
+    color: var(--accent);
+    text-decoration: none;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    border-bottom: 1px solid var(--accent-soft);
+  }
+  .tbl a.jump:hover { border-color: var(--accent); }
+  .tbl .why { color: var(--muted); }
+
+  /* 票内字段表 */
+  .kv { margin: 0 0 10px; font-size: 13.5px; }
+  .kv > div {
+    display: grid;
+    grid-template-columns: 92px 1fr;
+    gap: 0 12px;
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--line);
+  }
+  .kv > div:last-child { border-bottom: 0; }
+  .kv dt { color: var(--muted); font-size: 12.5px; padding-top: 1px; }
+  .kv dd { margin: 0; }
+
+  /* 引用与代码块 */
+  .quote {
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    border-left: 2px solid var(--line);
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+  .chain {
+    margin: 0 0 14px;
+    padding: 14px 16px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.95;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  /* 闸门顺序条 */
+  .gate-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin: 0 0 16px;
+    font-size: 13px;
+  }
+  .gate {
+    font-family: var(--mono);
+    font-size: 12px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    border-radius: 999px;
+    padding: 3px 11px;
+  }
+  .gate b { color: var(--accent); font-weight: 600; }
+  .gate.gap { border-style: dashed; color: var(--muted); }
+  .gate-arrow { color: var(--accent); font-size: 13px; }
+
+  .subhead {
+    margin: 34px 0 14px;
+    font-size: 15px;
+    font-weight: 600;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .subhead:first-child { margin-top: 0; }
+  .mini { font-size: 12.5px; color: var(--muted); }
+  .method {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 26px;
+    margin: 18px 0 0;
+    padding: 14px 0 0;
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .method b { color: var(--ink); font-weight: 600; }
+
+  @media (max-width: 780px) {
+    main { padding: 44px 20px 64px; }
+    .layer { grid-template-columns: 1fr; gap: 12px; }
+    .layer-label { padding-top: 0; }
+    .cols { grid-template-columns: 1fr; gap: 32px; }
+    .kv > div { grid-template-columns: 1fr; gap: 2px; }
+  }
+  @media print {
+    body { background: #fff; }
+    .ghost { display: none; }
+    .detail { display: block !important; break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+  <!-- ============ 头部 ============ -->
+  <header>
+    <p class="kicker">决策报告 · RimWorld 模组 RHAH · 下一张票</p>
+    <h1>RHAH 下一票选择：为什么是 0009</h1>
+    <p class="lede">这是在动代码之前，对「下一个该做哪张票」的一次判定，等一个人工确认。判据只有两条：与 0008 未合并分支有没有文件重叠，以及现在能不能过五道闸门。读下去你会拿到一张逐票判定带、一条阻塞链、三条理由各自的证据原文，以及开工前要你拍板的三件事。</p>
+    <dl class="meta">
+      <div><dt>对象</dt><dd>10 张候选票（0001–0011）</dd></div>
+      <div><dt>判定</dt><dd>0009 工具腐化</dd></div>
+      <div><dt>规模</dt><dd>16 个未合并文件 / 5 道闸门</dd></div>
+      <div><dt>日期</dt><dd>2026-10-25</dd></div>
+      <div style="margin-left:auto"><button class="ghost" id="toggle-all" type="button">全部展开</button></div>
+    </dl>
+  </header>
+
+  <!-- ============ 结论（模板外新增：这份报告的第一句就是结论） ============ -->
+  <div class="verdict-card">
+    <p class="lead">选 0009（测试工程文档/工具腐化）。</p>
+    <p>它是 EXECUTION-PLAN §2 的<b>第 1 步</b>，也是今天<b>唯一一张</b>「不碰 <code>Source\</code>、不碰 0008 未合并分支的 16 个文件、不碰 1.6 环境」的票——其余候选分别被「0008 还没合并」和「1.6 切换能力还没落地」卡住（切换已确认在做，见 §1.3）。</p>
+    <p class="mini">本文件不含任何实施动作：未改任何代码、未启动游戏、未碰 <code>D:\RimWorld-1.6</code>。</p>
+  </div>
+
+  <!-- 来源标注：三色标签的图例。含义抄 MD 开头的标注规则。 -->
+  <div class="legend">
+    <span class="item"><span class="tag tag-m">实测</span>本轮亲自跑/读到的证据（命令、文件、git diff）</span>
+    <span class="item"><span class="tag tag-t">票述</span>票或计划里的判断，未复验</span>
+    <span class="item"><span class="tag tag-i">推测</span>推断（MD 定义了此类，正文未出现）</span>
+  </div>
+
+  <!-- 不选 0009 的替代方案，紧贴结论，因为它回答的是同一个问题 -->
+  <div class="boxes wide" style="margin-top:22px">
+    <button class="node" type="button" data-toggle="d-alt" aria-expanded="false" aria-controls="d-alt">
+      <span class="name">如果你更想先出玩家侧成果：不选 0009 的三条替代</span>
+      <span class="note">0005 方案 2+3 / 0001 / 0007·0002·0003 —— 都写清了「为什么现在不建议」</span>
+    </button>
+  </div>
+  <div class="detail" id="d-alt" hidden>
+    <h4>替代方案（MD §5）</h4>
+    <ul>
+      <li><b>0005（方案 2 + 3）</b>：文件与 0008 零重叠，改动小（1 个文件 + 2–3 个语言 key ×3 语种 + 一个纯函数），直接对着玩家原话「点了像没生效」。开工前需你先拍：<b>收尾时机</b>（点击时 / 真离图时 / 点击后 N 天保底）、<b>哪些事件保留「送往盟友」</b>、<b>要不要顺手修 #14</b>（武装索粮信的「忽视」是彻底空操作）。</li>
+      <li><b>0001</b>：用户价值最高，但闸门 2 要 1.6 重建版真机，而 1.6 环境现在「通过一次、7 次带 mod 全崩」，切换能力已确认在做、做法后定 ⇒ 按「缺一不过」现在只能做到 draft；且「敌对后还能不能补交粮」这个产品决定会同时定死 0003/0005 的语义，适合等人在场时一次拍完。</li>
+      <li><b>0007 / 0002 / 0003</b>：都要动 0008 未合并分支里的文件，现在开工等于给将来制造 rebase 冲突，不建议。</li>
+    </ul>
+  </div>
+
+  <!-- ============ 01 候选票与阻塞关系 ============ -->
+  <section class="part">
+    <div class="part-head">
+      <span class="n">01</span>
+      <h2>候选票 × 阻塞关系</h2>
+      <p>先给一个硬事实（0008 的 16 个文件还没合并），再给十张票的总览表，然后按「现在能不能过五道闸门」分成四层逐票下沉，最后是两张环境牌和一条阻塞链。</p>
+    </div>
+
+    <!-- 1.1 硬事实 -->
+    <div class="boxes wide">
+      <button class="node" type="button" data-toggle="d-0008-fact" aria-expanded="false" aria-controls="d-0008-fact">
+        <span class="name">硬事实：0008 的 16 个文件还没合并</span>
+        <span class="note">HEAD 是 <code>fix/0008-can-dig-exit</code>，单提交；与这些文件重叠的票现在<b>不许动</b>，不是「注意别冲突」</span>
+        <span class="vline"><span class="tag tag-m">实测</span></span>
+      </button>
+    </div>
+    <div class="detail" id="d-0008-fact" hidden>
+      <h4>命令与清单（MD §1.1）</h4>
+      <p><code>git -C RimworldMods\ratkin_hunger_and_havoc diff --name-only fbca6ca..4279aa0</code>（HEAD 是 <code>fix/0008-can-dig-exit</code>，单提交）<span class="tag tag-m">实测</span></p>
+<pre class="chain">Languages/{ChineseSimplified,English,Japanese}/Keyed/Settings/RHAH_Visitors.xml
+Source/Core/ModEntry.cs
+Source/Core/RHAH_Settings.cs
+Source/Identity/RHAH_ApiHost.cs
+Source/Pawn/Compat/RHAH_IrisMenusCompat.cs
+Source/Pawn/JobGiver_RHAH_DigOutWhenNoExit.cs   （新增）
+Source/Pawn/JobGiver_RHAH_Leave.cs
+Source/Pawn/LordJob_RHAH_Visitor.cs
+Source/Pawn/RHAH_BatchAttitude.cs
+Source/Pawn/RHAH_DoorPatch.cs
+Source/Pawn/RHAH_VisitorRules.cs
+Source/Pawn/RHAH_VisitorStay.cs
+Source/Tests/RHAH_DoorPatchTests.cs
+docs/references/save-ownership.md</pre>
+      <h5>它的后果：派工硬规则</h5>
+      <p class="quote">EXECUTION-PLAN §4 派工硬规则 1：「谁都不许同时改同一文件……前一票合并后下一票才开工」。<span class="tag tag-t">票述</span></p>
+      <p>⇒ 与这 16 个文件重叠的票，<b>现在不能开工</b>（不是「注意别冲突」，是不许动）。</p>
+      <p class="mini">注：块内第一行是花括号展开，代表 3 份语言文件；合计 16 个文件。</p>
+    </div>
+
+    <!-- 1.2 总览表 -->
+    <h3 class="subhead">逐票判定总览（点票号展开该票的完整字段）</h3>
+    <table class="tbl">
+      <caption>四列原文见每张票的展开面板；✅ / ⚠️ / ❌ 语义按 MD 原样保留。</caption>
+      <thead>
+        <tr><th>票</th><th>现在能不能过五道闸门</th><th>一句话</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><a class="jump" href="#d-t-0009">0009 工具腐化</a></td><td>✅ <b>能</b></td><td class="why">唯一「三不碰」全满足：闸门 1 只需 1.7 构建，闸门 2 替身 = 照改后文档起一次实例</td></tr>
+        <tr><td><a class="jump" href="#d-t-0001">0001 E12 请求信关不掉</a></td><td>⚠️ <b>现在不能</b></td><td class="why">闸门 2 要 1.6 重建版真机（7 次带 mod 全崩），且要产品决定 ⇒ 按「缺一不过」只能停在 draft</td></tr>
+        <tr><td><a class="jump" href="#d-t-0005">0005 「送往盟友」</a></td><td>⚠️ 方案 2（+3）可做可验</td><td class="why">文件与 0008 零重叠，但三条产品决定要先拍；方案 1 另需 0001 定案</td></tr>
+        <tr><td><a class="jump" href="#d-t-0011">0011 1.7 桥接适配</a></td><td>⚠️ 票的状态已过期</td><td class="why">T2 已逐项对账：6 条失效点里 4 类已落地，只剩 6 条边角（见风险 5）</td></tr>
+        <tr><td><a class="jump" href="#d-t-0007">0007 投喂三问题</a></td><td>❌</td><td class="why">撞 <code>LordJob_RHAH_Visitor.cs</code>，现在动 = 与未合并分支改同一文件</td></tr>
+        <tr><td><a class="jump" href="#d-t-0002">0002 到达状态</a></td><td>❌</td><td class="why">撞 Settings / ModEntry / IrisMenusCompat，另需 0001 先</td></tr>
+        <tr><td><a class="jump" href="#d-t-0003">0003 鼠疫分层</a></td><td>❌</td><td class="why">撞 4 个文件；0008/0005/0001 全部先，本来就是最后一张</td></tr>
+        <tr><td><a class="jump" href="#d-t-0010">0010 流程缺口</a></td><td>❌ 顺序</td><td class="why">必须排在 0009 之后（计划 §1 明写）</td></tr>
+        <tr><td><a class="jump" href="#d-t-0008">0008 门/离场</a></td><td>— 不归本会话</td><td class="why">已收口（单提交 <code>4279aa0</code>，待人工抽验）；PR 归另一会话</td></tr>
+        <tr><td><a class="jump" href="#d-t-0004">0004 PR 边界</a></td><td>— 只能等</td><td class="why">待 0001/0002/0003 定案；U1 更新点要等 0009 完成</td></tr>
+      </tbody>
+    </table>
+
+    <!-- 1.2 分层带：按闸门判定分层 -->
+    <h3 class="subhead">按判定分层：十张票的实际处境</h3>
+
+    <!-- L1 -->
+    <div class="layer">
+      <div class="layer-label">
+        <b>L1</b>
+        <span>✅ 能开工</span>
+        <small>今天没有任何外部阻塞的只有一张</small>
+      </div>
+      <div>
+        <div class="boxes">
+          <button class="node" type="button" data-toggle="d-t-0009" aria-expanded="false" aria-controls="d-t-0009">
+            <span class="name">0009 工具腐化</span>
+            <span class="note">未决定（等待决 1/2 表态；③ 不做就只剩两件纯文档）</span>
+            <span class="vline">✅ 能 · 重叠 <b>零</b> <span class="tag tag-t">票述</span></span>
+          </button>
+        </div>
+        <div class="detail" id="d-t-0009" hidden>
+          <h4>0009 · 为什么它没被卡住</h4>
+          <dl class="kv">
+            <div><dt>状态原文</dt><dd>未决定（等待决 1/2 表态；③ 不做就只剩两件纯文档）<span class="tag tag-t">票述</span></dd></div>
+            <div><dt>与 0008 重叠</dt><dd><b>零</b>（只改测试工程 <code>README.md</code> / <code>.dsh\skills\*</code> / <code>docs\*</code>）</dd></div>
+            <div><dt>其它前置</dt><dd>③ 形态、② 覆盖口径；票里的数字与路径<b>已过期</b>需重测</dd></div>
+            <div><dt>闸门判定</dt><dd>✅ <b>能</b>：闸门 1 只需 1.7 构建（0008 已跑通 0/0）；闸门 2 替身 = 照改后文档起一次实例</dd></div>
+          </dl>
+          <p>它不是没卡——它卡在<b>自己那 3 条待决</b>上（见下面的「待拍板」），但那些不需要等别人、也不要环境就绪。</p>
+          <p>T2 对账后范围更小了：<span class="tag tag-m">实测</span>「0009 仍然是零冲突、可验证、且卡在它自己那 3 条待决上；只是它比票写的更小了（仓库内 ①② + 可选 ③；仓库外 skill 由用户自己合并，不占本票）。」（MD §8）</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- L2 -->
+    <div class="layer">
+      <div class="layer-label">
+        <b>L2</b>
+        <span>⚠️ 卡在人或环境</span>
+        <small>不是不能做，是现在开工就不合规/不可验</small>
+      </div>
+      <div>
+        <div class="boxes">
+          <button class="node" type="button" data-toggle="d-t-0001" aria-expanded="false" aria-controls="d-t-0001">
+            <span class="name">0001 E12 请求信关不掉</span>
+            <span class="note">重建版就绪，待游戏内验证；卡 1.6 真机 + 产品决定</span>
+            <span class="vline">⚠️ 现在不能 · 重叠零 <span class="tag tag-m">实测</span></span>
+          </button>
+          <button class="node" type="button" data-toggle="d-t-0005" aria-expanded="false" aria-controls="d-t-0005">
+            <span class="name">0005 「送往盟友」</span>
+            <span class="note">方案 2（+3）可做且可验；但要先拍产品</span>
+            <span class="vline">⚠️ · 重叠零 <span class="tag tag-m">实测</span></span>
+          </button>
+          <button class="node" type="button" data-toggle="d-t-0011" aria-expanded="false" aria-controls="d-t-0011">
+            <span class="name">0011 1.7 桥接适配</span>
+            <span class="note">票写「1.7 下 A 起不来、没桥/没日志」——T2 已逐项对账，票的状态已过期</span>
+            <span class="vline">⚠️ 票的状态已过期 · 重叠零 <span class="tag tag-t">票述</span></span>
+          </button>
+        </div>
+        <div class="detail" id="d-t-0001" hidden>
+          <h4>0001 · 为什么现在不能开工</h4>
+          <dl class="kv">
+            <div><dt>状态原文</dt><dd>未决定（旧二进制缺兜底已确证；重建版就绪，待游戏内验证）<span class="tag tag-t">票述</span></dd></div>
+            <div><dt>与 0008 重叠</dt><dd>零（<code>RHAH_ArmedDemand.cs</code> / <code>RHAH_ChoiceRuntime.cs</code> / <code>Tests/RHAH_AttackChoiceTests.cs</code> / <code>docs/references/incidents.md</code> 都不在 0008 diff 里）<span class="tag tag-m">实测</span></dd></div>
+            <div><dt>其它前置</dt><dd>① 产品决定「敌对后还能不能补交粮」；② 闸门 2 明确要<b>重建版 1.6 真机</b>（杀光围攻者 ≤1 游戏小时收信）</dd></div>
+            <div><dt>闸门判定</dt><dd>⚠️ <b>现在不能</b>：1.6 只成功通过一次、同日 7 次带 mod 全崩（见环境事实），且要产品决定；按「缺一不过」只能停在 draft</dd></div>
+          </dl>
+          <p>它的用户价值最高，但闸门 2 不卡在「1.6 有没有可能」，而卡在「切换能力什么时候稳定可用」——这件事已确认在做、具体做法后定，本会话不认领。</p>
+          <p class="mini">T1 佐证：0001 票里明确要 1.6 真机；且 0001 依赖信件 UI 交互，闸门 2 成本高（详见附录 A）。</p>
+        </div>
+        <div class="detail" id="d-t-0005" hidden>
+          <h4>0005 · 为什么它只差一次拍板</h4>
+          <dl class="kv">
+            <div><dt>状态原文</dt><dd>未决定（等「收尾时机」与「哪些事件保留」表态）<span class="tag tag-t">票述</span></dd></div>
+            <div><dt>与 0008 重叠</dt><dd>零（<code>ChoiceLetter_RHAH_Visitors.cs</code> / <code>RHAH_ChoiceRuntime.cs</code> / <code>RHAH_AllyTransfer.cs</code> / <code>Languages\*\RHAH_Choices.xml</code> 都不在 0008 diff 里）<span class="tag tag-m">实测</span></dd></div>
+            <div><dt>其它前置</dt><dd>三条产品决定（收尾时机 / 保留清单 / 要不要顺手修 #14）；方案 1 另需 0001 定案</dd></div>
+            <div><dt>闸门判定</dt><dd>⚠️ 方案 2（+3）可做且可验；<b>但要先拍产品</b></dd></div>
+          </dl>
+          <p>改动小：1 个文件 + 2–3 个语言 key ×3 语种 + 一个纯函数，对着玩家原话「点了像没生效」。</p>
+          <p class="mini">T1 发现一处<b>票间矛盾未裁决</b>：0005 事实 24 说盟友符号（<code>TryJoinAlly</code>/<code>CanTransfer</code>）在 1.6 与 1.7 两份 DLL 里都在；0001 事实 30 说 1.7 那份只有 75 个类型、<code>RHAH_ChoiceRuntime</code> 都不存在——二者不能同时为真（详见附录 A）。</p>
+        </div>
+        <div class="detail" id="d-t-0011" hidden>
+          <h4>0011 · 为什么说它的状态已经过期</h4>
+          <dl class="kv">
+            <div><dt>状态原文</dt><dd>票写「未决定」：已确证「1.7 下 A 起不来、没桥/没日志」<span class="tag tag-t">票述</span></dd></div>
+            <div><dt>与 0008 重叠</dt><dd>零</dd></div>
+            <div><dt>其它前置</dt><dd>路线 ②/③ 与人拍的三件事</dd></div>
+            <div><dt>闸门判定</dt><dd>⚠️ <b>票的状态已过期</b>：T2 已逐项对账（6 条失效点里 4 类已落地，只剩 6 条边角，见风险 5）</dd></div>
+          </dl>
+          <p>T2 逐项对账（MD §4 风险 5）：票里 6 条失效点里入口/进程、日志落点、版本戳、桥接与事件通道<b>都已落地</b>；剩 6 条边角（<code>smoke --doorstop</code> 未接线、<code>--force</code> 未真机、屏参被忽略、1.6 无事件通道、桥接 mod 仍只声明 1.6、日志格式判据绕开）＋ 1.6 稳定化。</p>
+          <p><b>不要</b>顺手改 0011 的正文（别人的票），只在 0009 的产物里记一笔。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- L3 -->
+    <div class="layer">
+      <div class="layer-label">
+        <b>L3</b>
+        <span>❌ 现在不能动</span>
+        <small>撞未合并分支，或顺序在后</small>
+      </div>
+      <div>
+        <div class="boxes">
+          <button class="node" type="button" data-toggle="d-t-0007" aria-expanded="false" aria-controls="d-t-0007">
+            <span class="name">0007 投喂三问题</span>
+            <span class="note">撞 <code>LordJob_RHAH_Visitor.cs</code>（票要改 :233-236 / :779）</span>
+            <span class="vline">❌ 撞车 <span class="tag tag-m">实测</span></span>
+          </button>
+          <button class="node" type="button" data-toggle="d-t-0002" aria-expanded="false" aria-controls="d-t-0002">
+            <span class="name">0002 到达状态</span>
+            <span class="note">撞 Settings / ModEntry / IrisMenusCompat；另需 0001 先</span>
+            <span class="vline">❌ 撞车 <span class="tag tag-m">实测</span></span>
+          </button>
+          <button class="node" type="button" data-toggle="d-t-0003" aria-expanded="false" aria-controls="d-t-0003">
+            <span class="name">0003 鼠疫分层</span>
+            <span class="note">撞 4 个文件；0008/0005/0001 全部先</span>
+            <span class="vline">❌ 撞车 <span class="tag tag-m">实测</span></span>
+          </button>
+          <button class="node" type="button" data-toggle="d-t-0010" aria-expanded="false" aria-controls="d-t-0010">
+            <span class="name">0010 流程缺口</span>
+            <span class="note">零重叠，但必须排在 0009 之后（计划 §1 明写）</span>
+            <span class="vline">❌ 顺序</span>
+          </button>
+        </div>
+        <div class="detail" id="d-t-0007" hidden>
+          <h4>0007 · 为什么现在动它等于制造 rebase 冲突</h4>
+          <dl class="kv">
+            <div><dt>状态原文</dt><dd>未决定<span class="tag tag-t">票述</span></dd></div>
+            <div><dt>与 0008 重叠</dt><dd><b>撞</b> <code>Source/Pawn/LordJob_RHAH_Visitor.cs</code>（票要改 <code>:233-236</code> / <code>:779</code>）<span class="tag tag-m">实测</span></dd></div>
+            <div><dt>其它前置</dt><dd>0008 合并后才好判断「他还是不动」的归因（<code>0008…:156</code>、计划 §2 第 4 步）</dd></div>
+            <div><dt>闸门判定</dt><dd>❌ 现在动 = 与未合并分支改同一文件</dd></div>
+          </dl>
+          <p class="mini">T1 佐证：0007 与 0008 <b>症状重叠</b>，涉及「他还是不动」的验收必须在 0008 合并后重跑；0007 依赖右键浮窗（另一套 UI）。</p>
+        </div>
+        <div class="detail" id="d-t-0002" hidden>
+          <h4>0002 · 为什么它排在 0001 后</h4>
+          <dl class="kv">
+            <div><dt>状态原文</dt><dd>未决定<span class="tag tag-t">票述</span></dd></div>
+            <div><dt>与 0008 重叠</dt><dd><b>撞</b> <code>RHAH_Settings.cs</code>、<code>ModEntry.cs</code>、<code>RHAH_IrisMenusCompat.cs</code>（另 C11 的 <code>RHAH_BehaviorGate</code> / <code>RHAH_PawnDefaults</code>）<span class="tag tag-m">实测</span></dd></div>
+            <div><dt>其它前置</dt><dd>0001 先（C1：同一段 5 行）；若走 hediff 要 1.6+1.7 Def 双写</dd></div>
+            <div><dt>闸门判定</dt><dd>❌</dd></div>
+          </dl>
+          <p class="mini">T1 佐证：0002 不需要信件 UI（只看 pawn 状态），闸门 2 相对便宜——但文件重叠这条先把它拦住了。</p>
+        </div>
+        <div class="detail" id="d-t-0003" hidden>
+          <h4>0003 · 为什么它本来就是最后一张</h4>
+          <dl class="kv">
+            <div><dt>状态原文</dt><dd>未决定<span class="tag tag-t">票述</span></dd></div>
+            <div><dt>与 0008 重叠</dt><dd><b>撞</b> <code>RHAH_VisitorRules.cs</code>、<code>RHAH_VisitorStay.cs</code>、<code>RHAH_Settings.cs</code>、<code>RHAH_IrisMenusCompat.cs</code><span class="tag tag-m">实测</span></dd></div>
+            <div><dt>其它前置</dt><dd>0008/0005/0001 全部先（C2/C3/C4），本来就是最后一张</dd></div>
+            <div><dt>闸门判定</dt><dd>❌</dd></div>
+          </dl>
+          <p class="mini">T1 佐证：0003 依赖信件 UI 交互（点选项、分页 <code>DiaNode</code>），而信件对话框会冻结游戏时间、<code>ESC</code> 无效 ⇒ 闸门 2 成本高。</p>
+        </div>
+        <div class="detail" id="d-t-0010" hidden>
+          <h4>0010 · 为什么文件零重叠也不能开工</h4>
+          <dl class="kv">
+            <div><dt>状态原文</dt><dd>未决定（等 A1 与落地时机）<span class="tag tag-t">票述</span></dd></div>
+            <div><dt>与 0008 重叠</dt><dd>零（测试工程 <code>AGENTS.md</code> / skill）</dd></div>
+            <div><dt>其它前置</dt><dd><b>必须排在 0009 之后</b>（计划 §1 明写）</dd></div>
+            <div><dt>闸门判定</dt><dd>❌ 顺序</dd></div>
+          </dl>
+          <p>T2 另附的残余量：<code>AGENTS.md</code> 对「闸门/一票/Ticket:/埋点/双写」<b>0 命中</b>（0010 一字未落）——这正是它必须跟 0009 后面做的原因。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- L4 -->
+    <div class="layer">
+      <div class="layer-label">
+        <b>L4</b>
+        <span>— 不归本会话</span>
+        <small>一张已收口待抽验，一张只能等</small>
+      </div>
+      <div>
+        <div class="boxes">
+          <button class="node" type="button" data-toggle="d-t-0008" aria-expanded="false" aria-controls="d-t-0008">
+            <span class="name">0008 门/离场</span>
+            <span class="note">已收口（单提交 4279aa0，待人工抽验）；PR 归另一会话</span>
+            <span class="vline">— <span class="tag tag-m">实测</span></span>
+          </button>
+          <button class="node" type="button" data-toggle="d-t-0004" aria-expanded="false" aria-controls="d-t-0004">
+            <span class="name">0004 PR 边界</span>
+            <span class="note">待前三票定案；U1 更新点要等 0009 完成</span>
+            <span class="vline">— 只能等 <span class="tag tag-t">票述</span></span>
+          </button>
+        </div>
+        <div class="detail" id="d-t-0008" hidden>
+          <h4>0008 · 为什么它是本次判定的地基</h4>
+          <dl class="kv">
+            <div><dt>状态原文</dt><dd>已收口（单提交 <code>4279aa0</code>，待人工抽验；PR 归另一会话）<span class="tag tag-m">实测</span></dd></div>
+            <div><dt>与 0008 重叠</dt><dd>—</dd></div>
+            <div><dt>其它前置</dt><dd>人工抽验</dd></div>
+            <div><dt>闸门判定</dt><dd>不归本会话</dd></div>
+          </dl>
+          <p>它不是「已合并」：T1 佐证 <code>0008</code> 在文件里只到「<b>代码完成 + 待人工复验</b>，PR 未提」——与 §1.1 的 diff 事实一致。</p>
+          <p>所以「与 0008 未合并 diff 的文件重叠」才成为一条硬拦：合并发生之前，那些文件谁都不许动。</p>
+        </div>
+        <div class="detail" id="d-t-0004" hidden>
+          <h4>0004 · 为什么它只能等</h4>
+          <dl class="kv">
+            <div><dt>状态原文</dt><dd>未决定（待前三票定案）<span class="tag tag-t">票述</span></dd></div>
+            <div><dt>与 0008 重叠</dt><dd>—</dd></div>
+            <div><dt>其它前置</dt><dd>0001/0002/0003 定案；U1 更新点要等 0009 完成</dd></div>
+            <div><dt>闸门判定</dt><dd>现在只能等</dd></div>
+          </dl>
+        </div>
+      </div>
+    </div>
+
+    <!-- 1.3 环境事实 -->
+    <h3 class="subhead">两件决定「现在能不能验证」的环境事实</h3>
+    <div class="boxes wide">
+      <button class="node" type="button" data-toggle="d-env-17" aria-expanded="false" aria-controls="d-env-17">
+        <span class="name">1.7 能驱动</span>
+        <span class="note">⇒ 闸门 2/3 在 1.7 上可用</span>
+        <span class="vline"><span class="tag tag-m">实测</span></span>
+      </button>
+      <button class="node" type="button" data-toggle="d-env-16" aria-expanded="false" aria-controls="d-env-16">
+        <span class="name">1.6 切换：方向已定，做法后定</span>
+        <span class="note">能通一次、配置敏感、未复现 ⇒ 0001 的闸门 2 卡在稳定性，不是可能性</span>
+        <span class="vline"><span class="tag tag-m">实测</span> 通过一次</span>
+      </button>
+    </div>
+    <div class="detail" id="d-env-17" hidden>
+      <h4>1.7 能驱动（MD §1.3）</h4>
+      <p><span class="tag tag-m">实测</span><code>docs\RHAH-0008-最终验证-20261025.md:3-6</code> 记录被测环境是 <b>RimWorld 1.7.4985 rev1269</b>、profile <code>rhah</code>（16 条 activeMods）、实例 <code>127.0.0.1:5174</code>，两场景（有门/全墙）都是真机跑出来的绿，含 <code>list</code>/<code>call</code>/<code>step_game_ticks</code>/存档 XML 回读。</p>
+      <p>⇒ <b>闸门 2/3 在 1.7 上是可用的。</b></p>
+    </div>
+    <div class="detail" id="d-env-16" hidden>
+      <h4>1.6 切换（MD §1.3）</h4>
+      <p>用户 2026-10-25 13:1x 确认：1.7 ⇄ 1.6 的切换<b>正在做，且「能切」是已确认的事实</b>，只剩「具体怎么做、什么时候落到哪一步」待定——技能目录里已出现 <code>rimworld-switch-test-version</code>，就是这件事的产物。</p>
+      <h5>已实测通过一次（T2 对账）<span class="tag tag-m">实测</span></h5>
+      <p>今天 12:44 <code>--profile rhah16</code> 在 <code>D:\RimWorld-1.6</code> 上真机起过一次，桥接 5174 通、进图、摆了 0008 场景，截图 <code>profiles\rhah16\Screenshots\16-before-refuse.png</code> 里能看到 RHAH 来客信（<code>runs\game-process.rhah16.json</code>、<code>profiles\rhah16\Player.log:124</code>）。</p>
+      <h5>但同日 8 次 1.6 尝试里 7 次带 mod 的全崩</h5>
+      <p>（Harmony 初始化失败为主）⇒ 现状「能通一次、配置敏感、未复现」。</p>
+      <p>⇒ 0001 的闸门 2 不卡在「1.6 有没有可能」，而卡在「切换能力什么时候稳定可用」。按用户口径，这是<b>已排上日程的前置</b>，不是未知风险；本会话不认领它。</p>
+    </div>
+
+    <!-- 1.4 阻塞链 -->
+    <h3 class="subhead">阻塞链（读法：左被右卡）</h3>
+<pre class="chain">0008 合并（人工抽验 → PR） ──→ 0007 ──→ 0003
+                            └─→ 0002（另需 0001 先）──→ 0003
+0001 定案（治标/治本） ──→ 0002 / 0003 / 0005 方案1
+1.6 切换能力稳定（已确认在做，做法后定） ──→ 0001 的闸门 2
+0009 完成 ──→ 0010（skill 补充必须在其后）、0004 的 U1 更新点</pre>
+    <p style="font-size:14.5px;line-height:1.75;margin:0 0 10px"><b>今天没有任何外部阻塞的只有 0009。</b>0001 卡在「1.6 切换能力稳定可用」（已确认在做，具体做法后定，不归本会话）；0005 只卡产品决定（人能当场拍，备选见结论下面的「替代方案」）。</p>
+  </section>
+
+  <!-- ============ 02 为什么是 0009 ============ -->
+  <section class="part">
+    <div class="part-head">
+      <span class="n">02</span>
+      <h2>为什么是 0009</h2>
+      <p>三条理由按硬度排序：依赖就绪（最硬）→ 用户价值 → 能否验证。每条下面的证据都带来源标签，命令行与文件行号原样可复制。</p>
+    </div>
+
+    <!-- 理由一 -->
+    <div class="layer">
+      <div class="layer-label">
+        <b>理由一</b>
+        <span>依赖就绪</span>
+        <small>最硬的一条：它是唯一「三不碰」全满足的票</small>
+      </div>
+      <div>
+        <p style="margin:0 0 12px;font-size:14.5px">不碰 <code>Source\</code>、不碰 0008 未合并的 16 个文件、不碰 <code>D:\RimWorld-1.6</code>。其余票按 §1.2 都被这两个未合并/未就绪的前置卡住。</p>
+        <p style="margin:0 0 12px;font-size:14.5px">同时它是 EXECUTION-PLAN §2 的<b>第 1 步</b>——目前唯一被跳过的一步（第 3 步的 0008 反而先做了）。当时跳过它的理由（等 0008 腾出实施位）现在已经消失，而计划给它的排序理由仍然成立：</p>
+        <p class="quote">「先把工具修对，后面 8 张票才不会一边改模组、一边被自己的文档骗。」（<code>EXECUTION-PLAN.md:54</code>）<span class="tag tag-t">票述</span></p>
+      </div>
+    </div>
+
+    <!-- 理由二 -->
+    <div class="layer">
+      <div class="layer-label">
+        <b>理由二</b>
+        <span>用户价值</span>
+        <small>不是文档洁癖：今天还有活性腐化</small>
+      </div>
+      <div>
+        <p style="margin:0 0 12px;font-size:14.5px">用今天的文件实测了票里点名的几处，<b>没修，还活着</b>。后面 5 张票每张都要过闸门 2/3（起实例、读日志、断言）。文档错一处，就是一个不知情的新 agent 当场撞墙——这正是 <code>map.md:5</code> 把「支撑本次改动的工具与文档的可用性」写进 Destination 的原因。</p>
+        <div class="boxes wide">
+          <button class="node" type="button" data-toggle="d-r2" aria-expanded="false" aria-controls="d-r2">
+            <span class="name">7 条实测证据 · 展开看原文、行号与数字</span>
+            <span class="note">3 个不存在的脚本、562 项「纯净基线」、13 条而非 6 条、16 个而非 11 个子命令……</span>
+            <span class="vline"><span class="tag tag-m">实测</span> ×7</span>
+          </button>
+        </div>
+        <div class="detail" id="d-r2" hidden>
+          <h4>理由二的全部证据（MD §2 逐条转载）</h4>
+          <ul>
+            <li><span class="tag tag-m">实测</span><code>.dsh\skills\rimworld-mod-compat\SKILL.md:46</code> 让 agent 跑 <code>node scripts/check-ratkin.mjs</code>、<code>:92</code>/<code>:173</code> 让跑 <code>node scripts/modsconfig.mjs</code>——<b>三个脚本 <code>Test-Path</code> 全 False</b>；<code>scripts\</code> 目录在，里面没有这些文件。照做 = ENOENT。</li>
+            <li><span class="tag tag-m">实测</span><code>README.md:122-125</code>/<code>:132</code>/<code>:282-287</code> 把 <code>scripts\test-plugin.mjs</code> / <code>install-plugin.mjs</code> / <code>uninstall-plugin.mjs</code> 当成「装进 DSH 的唯一入口」，三个都不存在；<code>:239</code> 让参考 <code>scripts\raid-full.mjs</code>，也不存在。</li>
+            <li><span class="tag tag-m">实测</span><code>README.md:155-156</code> 说 <code>profiles/vanilla</code> 是「8 项纯净基线」；实际 <code>profiles\vanilla\Config\ModsConfig.xml</code> = <b>562 条</b> activeMods。而不传 <code>--profile</code> 默认就落到 <code>vanilla</code>（<code>src\cli.js</code> 帮助里写明）——这正是 <code>AGENTS.md</code> 硬约束 6 最怕的「一上手就拉起全量档」。</li>
+            <li><span class="tag tag-m">实测</span>计划/AGENTS 里反复写的「轻 profile（例 <code>voiced</code>）6 个」，实测 <code>profiles\voiced</code> = <b>13 条</b>；<code>rhah</code> = 16、<code>rhah16</code> = 8、<code>bike</code> = 14。</li>
+            <li><span class="tag tag-m">实测</span><code>README.md:3</code> 与架构图 <code>:50</code> 仍写「RimWorld <b>1.6</b> 闭环自动化测试基础设施 / RimWorld 1.6（隔离实例）」，而今天实测跑的是 <b>1.7.4985 rev1269</b>。</li>
+            <li><span class="tag tag-m">实测</span><code>node src/cli.js --help</code> 实测 <b>16 个</b>子命令（<code>env-check/start/status/bridge/tools/describe/dump-tools/call/wait/atoms/base-mods/mods/logs/live/stop/smoke</code>），而 0009 票里写的验收口径是「11 个子命令」。</li>
+            <li><span class="tag tag-m">实测</span><b>票本身也过期了</b>：0009 票的 ② 点名要改 <code>.dsh\skills\rimworld-auto-test\SKILL.md</code>，该目录<b>已不存在</b>（只剩 <code>rimworld-auto-test-closed-loop</code> / <code>rimworld-mod-compat</code> / <code>rimworld-mod-pipeline</code>，是 <code>037ccc3</code>「skill 瘦身 + 文档搬进技能目录」之后的结果）。⇒ 越晚做，票里的行号/数字越不可用。</li>
+          </ul>
+          <h5>T2 修正：最危险的那一条已被代码消解</h5>
+          <p><span class="tag tag-m">实测</span><code>start</code>/<code>stop</code>/<code>smoke</code>/<code>env-check</code> 现在缺 <code>--profile</code> 直接 <code>exit 1</code> 拒绝（<code>src\cli.js:407-420</code>，回归 R7）⇒ 「新 agent 一上手拉起 562 项全量档」不再可能发生。但 README <b>全文仍没有一处 <code>--profile</code> 教学</b>、仍写「纯净基线…共 8 项」（<code>:155-156</code>）、<code>:289</code> 仍挂「纯净」标签 ⇒ ① 仍要做，价值重心从「防拉全量档」移到「教对入口 + 数字过期」。</p>
+          <h5>T2 修正：② 的目标文件已经不在仓库里</h5>
+          <p><span class="tag tag-m">实测</span>票点名的 <code>.dsh\skills\rimworld-auto-test\SKILL.md</code> 已在 <code>8a66ac4</code>（2026-10-24 20:02）整份删除；真正还带 7 处 <code>scripts/*.mjs</code> 失效引用、<b>并且仍被加载</b>的是<b>仓库外</b>的 <code>C:\Users\MikanseiP\.dsh\skills\rimworld-auto-test\SKILL.md</code>（16,493 B，<code>description</code> 仍写 1.6）。⇒ <b>0009 的 PR 只能覆盖仓库内文件</b>；仓库外那些 skill 由<b>用户自己合并成一个 skill</b>（2026-10-25 13:1x 拍板），不进 0009 的 PR。⇒ 0009 只做仓库内：<code>README.md</code> + <code>.dsh\skills\</code> 下仍含失效引用的（本轮实测 <code>rimworld-mod-compat/SKILL.md</code> 有 3 处）+ 可选 ③。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 理由三 -->
+    <div class="layer">
+      <div class="layer-label">
+        <b>理由三</b>
+        <span>能否验证</span>
+        <small>这一关今天过得去</small>
+      </div>
+      <div>
+        <div class="gate-row">
+          <span class="gate"><b>闸门 1</b> 构建</span>
+          <span class="gate-arrow">→</span>
+          <span class="gate"><b>闸门 2</b> 自动化替身</span>
+          <span class="gate-arrow">→</span>
+          <span class="gate"><b>闸门 3</b> 读日志/断言</span>
+          <span class="gate-arrow">→</span>
+          <span class="gate"><b>闸门 4</b> 独立 review</span>
+          <span class="gate-arrow">→</span>
+          <span class="gate"><b>闸门 5</b> 人工抽验</span>
+        </div>
+        <div class="boxes wide">
+          <button class="node" type="button" data-toggle="d-r3" aria-expanded="false" aria-controls="d-r3">
+            <span class="name">逐道说清：为什么 0009 今天过得去</span>
+            <span class="note">构建零代码零 Def、替身只是「照改后的文档起一次实例」、闸门 5 天然由人做</span>
+          </button>
+        </div>
+        <div class="detail" id="d-r3" hidden>
+          <h4>五道闸门逐条（MD §2 理由三）</h4>
+          <ul>
+            <li><b>闸门 1（构建）</b>：本票 diff <b>零模组代码、零 Def</b>，不触发 1.6/1.7 Def 双写判据；1.7 构建基线已由 0008 跑通（0 警告 0 错误）。</li>
+            <li><b>闸门 2（自动化替身）</b>：计划 §3 给 0009 的替身是「照改后的文档起一次实例不撞墙（<code>0009:106</code>）」——<b>1.7 真机能跑</b>，不需要 1.6、不需要新桥接。</li>
+            <li><b>闸门 3（读日志/断言）</b>：改后文档的每条命令都能真跑一遍（<code>--help</code>、<code>status</code>、<code>env-check</code> 不启动游戏），断言是「命令成立 / 文件存在 / 数字复现」。</li>
+            <li><b>闸门 4（独立 review）</b>：新上下文代理只看 diff + 验收标准，不看我的推理；本票 review 面 = 「每处改动能否指回盘点报告的行号、有没有顺手带进『本票明确不做』的条目」。</li>
+            <li><b>闸门 5（人工抽验）</b>：本来就是「人照改后的文档走一遍」——这一关天然由人做，正好省掉一次专门安排。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 03 开工顺序 ============ -->
+  <section class="part">
+    <div class="part-head">
+      <span class="n">03</span>
+      <h2>开工顺序：先只读调研，再动文档</h2>
+      <p>要回答的问题：今天还剩哪些「照做会撞墙」的活性腐化，且它们都落在 agent 真正会走到的入口上。调研只读，不改文件；产物落盘之后才动 <code>README.md</code>/skill。</p>
+    </div>
+
+    <ol class="flow">
+      <li class="step">
+        <span class="dot">01</span>
+        <button class="step-head" type="button" data-toggle="d-step-1" aria-expanded="false" aria-controls="d-step-1">
+          <span class="t">重新定入口清单（不照抄票）</span>
+          <span class="s">先划出「谁算入口」，后面的核对才不跑偏</span>
+        </button>
+        <div class="detail" id="d-step-1" hidden>
+          <h4>入口清单（MD §3 第 1 步）</h4>
+          <ul>
+            <li><code>README.md</code>、<code>AGENTS.md</code></li>
+            <li><code>.dsh\skills\{rimworld-auto-test-closed-loop, rimworld-mod-compat, rimworld-mod-pipeline}\SKILL.md</code></li>
+            <li>以及这三处 skill 直接点名的 <code>docs\</code> 交接文档</li>
+          </ul>
+        </div>
+      </li>
+      <li class="step">
+        <span class="dot">02</span>
+        <button class="step-head" type="button" data-toggle="d-step-2" aria-expanded="false" aria-controls="d-step-2">
+          <span class="t">对入口里每条可执行声明逐条核对</span>
+          <span class="s">脚本路径、子命令、每一个数字——三类都过一遍</span>
+        </button>
+        <div class="detail" id="d-step-2" hidden>
+          <h4>三类逐条核对（MD §3 第 2 步）</h4>
+          <ul>
+            <li>每个出现的 <code>scripts\*.mjs</code> → <code>Test-Path</code>（本轮粗测：全仓 <code>*.md</code> 仍有 <b>201 处</b>匹配，不能全量改，按入口筛）；</li>
+            <li>每个 <code>node src/cli.js &lt;子命令&gt;</code> → 与 <code>--help</code> 的 16 条对表；</li>
+            <li>每个数字（mod 数、工具数 125、rev 号、<code>1.6</code>/<code>1.7</code> 日志路径）→ 复现或标「不可复现」。</li>
+          </ul>
+        </div>
+      </li>
+      <li class="step">
+        <span class="dot">03</span>
+        <button class="step-head" type="button" data-toggle="d-step-3" aria-expanded="false" aria-controls="d-step-3">
+          <span class="t">把 0009 票的 25 条清单用今天的现状过滤一遍</span>
+          <span class="s">只留仍在入口文档里的，其余写清「为什么没碰」</span>
+        </button>
+        <div class="detail" id="d-step-3" hidden>
+          <h4>筛法（MD §3 第 3 步）</h4>
+          <p>只留仍在入口文档里的；其余（历史 <code>docs\</code>、其它线）按「不做全量扫除」不碰，但在报告里写清「为什么没碰」。</p>
+        </div>
+      </li>
+      <li class="step">
+        <span class="dot">04</span>
+        <button class="step-head" type="button" data-toggle="d-step-4" aria-expanded="false" aria-controls="d-step-4">
+          <span class="t">量一次 ③ 的代价</span>
+          <span class="s">给出 (a)/(b)/(c) 三案的实现量与维护成本，供人拍板</span>
+        </button>
+        <div class="detail" id="d-step-4" hidden>
+          <h4>怎么量、量出什么（MD §3 第 4 步）</h4>
+          <p>入口文档里「命令 / 路径引用」的总数与可解析比例，给出三案的实现量与维护成本：</p>
+          <ul>
+            <li>(a) <code>node src/cli.js doccheck</code></li>
+            <li>(b) 独立测试</li>
+            <li>(c) 仅文档约定</li>
+          </ul>
+          <p class="mini">三案的取舍理由见下面「待拍板」第 1 条。</p>
+        </div>
+      </li>
+      <li class="step">
+        <span class="dot">05</span>
+        <button class="step-head" type="button" data-toggle="d-step-5" aria-expanded="false" aria-controls="d-step-5">
+          <span class="t">游戏内取证：不需要</span>
+          <span class="s">本票零行为改动，唯一的「跑一遍」是验收 1 的替身</span>
+        </button>
+        <div class="detail" id="d-step-5" hidden>
+          <h4>为什么不需要（MD §3 第 5 步）</h4>
+          <p>唯一的「跑一遍」是验收 1 的替身——改完照 README 快速开始起一次 1.7 实例（<code>start --profile voiced</code>），确认不会误导到 562 项全量档。</p>
+        </div>
+      </li>
+    </ol>
+
+    <div class="method">
+      <span><b>读哪些文件</b> 入口清单 + <code>src\cli.js</code> 的子命令表 + <code>profiles\*\Config\ModsConfig.xml</code></span>
+      <span><b>产物</b> <code>docs\RHAH-0009-现状重测-20261025.md</code>（现状清单 + 建议 diff 面 + 三案对比），然后才动 <code>README.md</code>/skill</span>
+    </div>
+  </section>
+
+  <!-- ============ 04 风险与待拍板 ============ -->
+  <section class="part">
+    <div class="part-head">
+      <span class="n">04</span>
+      <h2>风险与需要你拍板的点</h2>
+      <p>三件事必须开工前由人定；五条风险里有两条标了【实测】——是现状，不是假设。</p>
+    </div>
+
+    <h3 class="subhead">需要人拍板（开工前）</h3>
+    <div class="boxes wide">
+      <button class="node" type="button" data-toggle="d-decide-1" aria-expanded="false" aria-controls="d-decide-1">
+        <span class="name">拍板 1 · ③ 防再犯检查做不做、做成什么形态？</span>
+        <span class="note">(a) doccheck / (b) 独立测试 / (c) 仅文档约定 —— 三案的代价与倾向</span>
+      </button>
+      <button class="node" type="button" data-toggle="d-decide-2" aria-expanded="false" aria-controls="d-decide-2">
+        <span class="name">拍板 2 · ② 的覆盖口径</span>
+        <span class="note">只标 agent 真正会走到的入口（推荐），还是 33 份 md 全标</span>
+      </button>
+      <button class="node" type="button" data-toggle="d-decide-3" aria-expanded="false" aria-controls="d-decide-3">
+        <span class="name">拍板 3 · 认不认这张票的「用户价值」</span>
+        <span class="note">它不含任何游戏内行为改变；若不认，见「替代方案」</span>
+      </button>
+    </div>
+    <div class="detail" id="d-decide-1" hidden>
+      <h4>拍板 1 · ③ 的形态（MD §4）</h4>
+      <ul>
+        <li>(a) <code>node src/cli.js doccheck</code> —— <b>我倾向这案</b>：符合「长期能力进统一入口、不复活 <code>scripts\</code>」，且它能直接当闸门；</li>
+        <li>(b) 独立测试 —— 仓库 0 测试、无 CI，红不红取决于谁记得跑；</li>
+        <li>(c) 仅文档约定 —— 这次的根因就是「只有口头约定、没有 gate」。</li>
+      </ul>
+      <p class="mini">三案在票里：<code>0009:113-116</code>。</p>
+    </div>
+    <div class="detail" id="d-decide-2" hidden>
+      <h4>拍板 2 · ② 的覆盖口径（MD §4）</h4>
+      <p>只标 agent 真正会走到的入口（我推荐），还是 33 份 md 全标（会重演「改到一半又是新错配」）。</p>
+      <p class="mini">T2 残余量可当基准：<code>scripts/*.mjs</code> 失效引用 31 份文件 / 167 行（票写 33 份/187 行，已降）。</p>
+    </div>
+    <div class="detail" id="d-decide-3" hidden>
+      <h4>拍板 3 · 认不认「用户价值」（MD §4）</h4>
+      <p>它不含任何游戏内行为改变。若不认，见结论下面的「如果你更想先出玩家侧成果」。</p>
+    </div>
+
+    <h3 class="subhead">风险（MD §4，五条）</h3>
+    <div class="boxes wide">
+      <button class="node" type="button" data-toggle="d-risk-1" aria-expanded="false" aria-controls="d-risk-1">
+        <span class="name">1. 工作区不干净</span>
+        <span class="note">7 个已改未提交 + 92 个未跟踪；0009 要改的正是同一片</span>
+        <span class="vline"><span class="tag tag-m">实测</span></span>
+      </button>
+      <button class="node" type="button" data-toggle="d-risk-2" aria-expanded="false" aria-controls="d-risk-2">
+        <span class="name">2. 票里的数字/路径全部过期</span>
+        <span class="note">不重测，验收 2 的 fixture 本身就是错的</span>
+        <span class="vline"><span class="tag tag-m">实测</span></span>
+      </button>
+      <button class="node" type="button" data-toggle="d-risk-3" aria-expanded="false" aria-controls="d-risk-3">
+        <span class="name">3. 边界失焦</span>
+        <span class="note">票明列「本票明确不做」的 7 项，顺手带进来就变味</span>
+      </button>
+      <button class="node" type="button" data-toggle="d-risk-4" aria-expanded="false" aria-controls="d-risk-4">
+        <span class="name">4. 写权冲突</span>
+        <span class="note">README/skill 是所有会话都读的文件，必须串行</span>
+      </button>
+      <button class="node" type="button" data-toggle="d-risk-5" aria-expanded="false" aria-controls="d-risk-5">
+        <span class="name">5. 0011 的「## 状态：未决定」已经不准确</span>
+        <span class="note">T2 逐项对账：6 条失效点已落地，剩 6 条边角 + 1.6 稳定化</span>
+      </button>
+    </div>
+    <div class="detail" id="d-risk-1" hidden>
+      <h4>风险 1 · 工作区不干净 <span class="tag tag-m">实测</span></h4>
+      <p>测试工程有 <b>7 个已改未提交文件</b>（<code>.dsh\skills\rimworld-auto-test-closed-loop\SKILL.md</code> + 其 <code>docs\测试SOP\{README,截图取证,推时间}.md</code>、<code>STATUS.md</code>、<code>mods\DSH_GameLink\About\About.xml</code>、<code>mods\DSH_GameLink\LoadFolders.xml</code>）+ <b>92 个未跟踪文件</b>。</p>
+      <p>0009 要改的正是同一片文件 ⇒ 开工前必须先定：这批先单独提交？由 0009 吸收？分开？<b>吸收会违反「一个 PR 一个可回滚变化」</b>。</p>
+    </div>
+    <div class="detail" id="d-risk-2" hidden>
+      <h4>风险 2 · 数字/路径全部过期 <span class="tag tag-m">实测</span></h4>
+      <p>skill 已改名、<code>vanilla</code> 562 而非 8/561、<code>voiced</code> 13 而非 6、子命令 16 而非 11 ⇒ 必须重测，不许照抄；否则验收 2 的 fixture 本身是错的。</p>
+    </div>
+    <div class="detail" id="d-risk-3" hidden>
+      <h4>风险 3 · 边界失焦</h4>
+      <p><code>0009:100</code> 明列「本票明确不做」（M3/M5/M4/H3/H2/#20–#25）。顺手带进来会让 PR 从「三件事」变「三件事 + 五条小修」。</p>
+    </div>
+    <div class="detail" id="d-risk-4" hidden>
+      <h4>风险 4 · 写权冲突</h4>
+      <p>README/skill 是所有会话都读的文件。若另一会话收尾 0008 的 PR 时也要动它们，必须串行（同一时间只一个会话改同一文件）。</p>
+    </div>
+    <div class="detail" id="d-risk-5" hidden>
+      <h4>风险 5 · 0011 的状态已不准确（T2 逐项对账）</h4>
+      <p>票里 6 条失效点里入口/进程、日志落点、版本戳、桥接与事件通道都<b>已落地</b>；剩 6 条边角（<code>smoke --doorstop</code> 未接线、<code>--force</code> 未真机、屏参被忽略、1.6 无事件通道、桥接 mod 仍只声明 1.6、日志格式判据绕开）＋ 1.6 稳定化。</p>
+      <p><b>不要</b>顺手改 0011 的正文（别人的票），只在 0009 的产物里记一笔。</p>
+    </div>
+  </section>
+
+  <!-- ============ 05 边界与容易误读 ============ -->
+  <section class="part">
+    <div class="part-head">
+      <span class="n">05</span>
+      <h2>边界与容易误读</h2>
+      <p>左栏是这份报告主动划的边界：哪些格子容易被读成「可以开工」。右栏只收报告里反复出现、读者可能不熟的名字。</p>
+    </div>
+    <div class="cols">
+      <div>
+        <h3>容易误读的地方</h3>
+        <ul>
+          <li><b>「0008 已收口」≠ 已合并。</b>它是单提交 <code>4279aa0</code>、待人工抽验、PR 未提；正因为没合并，与那 16 个文件重叠的票才不许动。</li>
+          <li><b>「⚠️ 0005 方案 2 可做且可验」≠ 现在能开工。</b>零重叠只说明不会撞车，三条产品决定没拍之前，它仍然停在「未决定」。</li>
+          <li><b>「0009 重叠为零」≠ 没风险。</b>0009 要改的文件，正是那 7 个已改未提交 + 92 个未跟踪文件所在的同一片工作区（风险 1）。</li>
+          <li><b>「票里的数字」不可信。</b>vanilla 562 而不是 8/561、voiced 13 而不是 6、子命令 16 而不是 11、<code>rimworld-auto-test</code> skill 已改名——票述一律当过期处理。</li>
+          <li><b>「0011 未决定」也不准了。</b>T2 已逐项对账：6 条失效点里 4 类已落地，只剩 6 条边角（风险 5）。</li>
+        </ul>
+      </div>
+      <div>
+        <h3>术语</h3>
+        <dl class="terms">
+          <div><dt>五道闸门</dt><dd>1 构建 → 2 自动化替身 → 3 读日志/断言 → 4 独立 review → 5 人工抽验；「缺一不过」。</dd></div>
+          <div><dt>替身（闸门 2）</dt><dd>计划 §3 给 0009 的替身是「照改后的文档起一次实例不撞墙（<code>0009:106</code>）」。</dd></div>
+          <div><dt>三不碰</dt><dd>不碰 <code>Source\</code>、不碰 0008 未合并的 16 个文件、不碰 <code>D:\RimWorld-1.6</code>。</dd></div>
+          <div><dt>活性腐化</dt><dd>文档里今天仍「照做会撞墙」的条目（命令不存在、数字过期、目录已改名）。</dd></div>
+          <div><dt>【票述】</dt><dd>票或计划里的判断，未复验；本报告里凡带此标签的数字都要按「待重测」读。</dd></div>
+          <div><dt>轻 profile</dt><dd>例 <code>voiced</code>；文档写 6 个、实测 13 条——正是要被修掉的数字之一。</dd></div>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 06 附录 ============ -->
+  <section class="part">
+    <div class="part-head">
+      <span class="n">06</span>
+      <h2>附录：两份只读调研的佐证</h2>
+      <p>T1 读票（<code>runs\2026-10-25-选票\T1-tickets-0001-0007.md</code>，348 行）与 T2 工具/桥接对账（<code>T2-工具与桥接现状.md</code>，170 行）。三条 T2 修正已回填正文。</p>
+    </div>
+
+    <h3 class="subhead">附录 A · T1 读票代理的佐证</h3>
+    <div class="boxes wide">
+      <button class="node" type="button" data-toggle="d-apx-a1" aria-expanded="false" aria-controls="d-apx-a1">
+        <span class="name">A1 与本文判断一致的三条</span>
+        <span class="note">0001/0007 都要 1.6 真机；0007 与 0008 症状重叠；0008 只是「代码完成」</span>
+      </button>
+      <button class="node" type="button" data-toggle="d-apx-a2" aria-expanded="false" aria-controls="d-apx-a2">
+        <span class="name">A2 会影响「0009 之后」排期的三条</span>
+        <span class="note">闸门 2 成本按票差很多；一处票间矛盾未裁决；行号基线过期</span>
+      </button>
+      <button class="node" type="button" data-toggle="d-apx-a3" aria-expanded="false" aria-controls="d-apx-a3">
+        <span class="name">A3 需要你点头的一件事：一次性诊断脚本</span>
+        <span class="note">扫两份 DLL 的「类型数 + 6 个 E12 符号 + 7 个盟友符号」，裁决票间矛盾</span>
+      </button>
+    </div>
+    <div class="detail" id="d-apx-a1" hidden>
+      <h4>A1 · 与上面判断一致的三条（MD §7）</h4>
+      <ol style="margin:0;padding-left:20px">
+        <li>0001、0007 <b>都要 1.6 真机</b>（票里明确）；1.6 现在「能通一次、未稳定」，而切换能力本身已确认在做（见环境事实）⇒ 这类验收要等切换稳定后再排。</li>
+        <li>0007 与 0008 <b>症状重叠</b>，涉及「他还是不动」的验收必须在 0008 合并后重跑。</li>
+        <li><code>0008</code> 在文件里只到「<b>代码完成 + 待人工复验</b>，PR 未提」，不是已合并——与 §1.1 的 diff 事实一致。</li>
+      </ol>
+    </div>
+    <div class="detail" id="d-apx-a2" hidden>
+      <h4>A2 · 新增三条影响「0009 之后」排期的事实（MD §7）</h4>
+      <ol style="margin:0;padding-left:20px">
+        <li><b>闸门 2 的成本按票差很多</b>：0001 / 0003 / 0005 都依赖<b>信件 UI 交互</b>（点选项、分页 <code>DiaNode</code>），而信件对话框会冻结游戏时间、<code>ESC</code> 无效；0002 不需要 UI（只看 pawn 状态）；0007 依赖右键浮窗（另一套 UI）。</li>
+        <li><b>有一处票间矛盾未裁决</b>：0005 事实 24 说盟友符号（<code>TryJoinAlly</code>/<code>CanTransfer</code>）在 1.6 与 1.7 两份 DLL 里都在；0001 事实 30 说 1.7 那份只有 75 个类型、<code>RHAH_ChoiceRuntime</code> 都不存在。二者不能同时为真，需要一次只读复核。</li>
+        <li><b>行号基线过期</b>：五票全部按 <code>6ab44c7</code>，main 已到 <code>fbca6ca</code>，0008 又改了 16 个文件 ⇒ 任何一张票开工前都要重核行号。</li>
+      </ol>
+    </div>
+    <div class="detail" id="d-apx-a3" hidden>
+      <h4>A3 · 需要你点头的一件事（MD §7）</h4>
+      <p>（按项目规则我不能自己写脚本）是否写一个<b>一次性</b>诊断脚本，对「1.7 那份 DLL」与「玩家实跑 1.6 的备份」（<code>runs\build-backup-20261024\</code>，不碰工坊）各扫一次「类型数 + 6 个 E12 符号 + 7 个盟友符号」的命中表，把上面第 2 条裁决掉。</p>
+      <p>判断：<b>一次性</b>，定性完即删；与 0009 无关，可以等 0009 之后再决定。</p>
+    </div>
+
+    <h3 class="subhead">附录 B · T2 对账后的三条修正</h3>
+    <div class="boxes wide">
+      <button class="node" type="button" data-toggle="d-apx-b1" aria-expanded="false" aria-controls="d-apx-b1">
+        <span class="name">B1 三条修正</span>
+        <span class="note">1.6 不是「驱动不了」而是「通过一次不稳定」；① 最危险那条已消解；② 的目标文件已不在仓库</span>
+      </button>
+      <button class="node" type="button" data-toggle="d-apx-b2" aria-expanded="false" aria-controls="d-apx-b2">
+        <span class="name">B2 残余量（可用于验收 fixture）</span>
+        <span class="note">31 份文件 / 167 行失效引用；0 处标「已移除」；16 个子命令；AGENTS.md 0 命中</span>
+      </button>
+    </div>
+    <div class="detail" id="d-apx-b1" hidden>
+      <h4>B1 · 三条修正（MD §8，已回填正文）</h4>
+      <ol style="margin:0;padding-left:20px">
+        <li><b>1.6 不是「驱动不了」，是「通过一次、不稳定」</b> → 已回填环境事实。影响：0001 的可行性从「不可能」变成「取决于 1.6 切换能力落地」——而按用户 13:1x 的口径，这件事<b>已经是确认在做的事实</b>，只剩做法与时间。</li>
+        <li><b>0009 ① 最危险的那条已被代码消解</b> → 见理由二的证据面板末尾。价值重心从「防拉全量档」移到「教对入口 + 数字过期」。</li>
+        <li><b>0009 ② 的目标文件已经不在仓库里</b>（这条最要紧）→ 见理由二的证据面板末尾。0009 的 PR 只能覆盖仓库内文件；仓库外 skill 由用户自己合并，不进 PR。</li>
+      </ol>
+    </div>
+    <div class="detail" id="d-apx-b2" hidden>
+      <h4>B2 · 残余量（MD §8 末段）</h4>
+      <ul>
+        <li><code>scripts/*.mjs</code> 失效引用 <b>31 份文件 / 167 行</b>（票写 33 份/187 行，已降）；</li>
+        <li><b>0 处</b>按 0009 的句式标「已移除」；</li>
+        <li>CLI 子命令 <b>16 个</b>（票的验收写 11）；</li>
+        <li><code>AGENTS.md</code> 对「闸门/一票/Ticket:/埋点/双写」<b>0 命中</b>（0010 一字未落）。</li>
+      </ul>
+      <p><b>对选票结论的影响：不改。</b></p>
+    </div>
+
+    <h3 class="subhead">附：本轮做了什么 / 没做什么（可复核）</h3>
+    <div class="boxes wide">
+      <button class="node" type="button" data-toggle="d-apx-do" aria-expanded="false" aria-controls="d-apx-do">
+        <span class="name">读过的、实测过的、没做的、未验证的</span>
+        <span class="note">四份清单，用来判断这份报告的证据边界在哪</span>
+      </button>
+    </div>
+    <div class="detail" id="d-apx-do" hidden>
+      <h4>本轮记录（MD §6）</h4>
+      <h5>读了</h5>
+      <p><code>map.md</code>、<code>HANDOFF.md</code>、<code>EXECUTION-PLAN.md</code>（全文）、票 0009（腐化规模/决策/PR 边界/验收/待决）、0001（候选修法/待人类决定）、0005（候选修法/待人类决定）、<code>STATUS.md</code> 顶部、两份命名债审计、<code>HANDOFF-安装1.6并行环境-20261025.md</code>、<code>HANDOFF-下一会话提示词-20261025.md</code>。</p>
+      <h5>实测了</h5>
+      <p>0008 分支 diff 文件名清单、<code>scripts\</code> 内 5 个脚本是否存在、各 profile 的 activeMods 数、<code>node src/cli.js --help</code> 子命令表、全仓 <code>*.md</code> 里 <code>scripts/xxx.mjs</code> 引用总数（201）、两份 skill 里的 <code>scripts\</code> 命中。</p>
+      <h5>没做</h5>
+      <p>没改任何文件（除 MD 本身）、没编译、没启动/停止游戏、没碰 <code>D:\RimWorld-1.6</code>、没动 0008 分支、没 push。</p>
+      <h5>未验证</h5>
+      <p>0002/0003/0007 票正文只读了与 0008 diff 交叉的部分（逐票细读见附录 A 的代理产物）；0011 已由 T2 逐项对账（票的「未决定」已过期，见风险 5）。</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>本页是 <code>docs\RHAH-下一票选择-20261025.md</code> 的视图；MD 是源，如与本页有出入以 MD 为准。</span>
+    <a href="RHAH-下一票选择-20261025.md">源文档</a>
+  </footer>
+
+</main>
+
+<script>
+  (function () {
+    var panels = function () { return document.querySelectorAll('.detail'); };
+
+    function setOpen(panel, open, btn) {
+      panel.hidden = !open;
+      if (btn) btn.setAttribute('aria-expanded', String(open));
+      var step = panel.closest('.step');
+      if (step) step.classList.toggle('open', open);
+    }
+
+    function buttonFor(id) {
+      return document.querySelector('[data-toggle="' + id + '"]');
+    }
+
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-toggle]');
+      if (!btn) return;
+      var panel = document.getElementById(btn.dataset.toggle);
+      if (!panel) return;
+      var open = panel.hidden;
+      setOpen(panel, open, btn);
+      history.replaceState(null, '', open ? '#' + panel.id : location.pathname + location.search);
+      if (open) panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+
+    var allBtn = document.getElementById('toggle-all');
+    if (allBtn) {
+      allBtn.addEventListener('click', function () {
+        var anyClosed = [].slice.call(panels()).some(function (p) { return p.hidden; });
+        [].slice.call(panels()).forEach(function (p) { setOpen(p, anyClosed, buttonFor(p.id)); });
+        allBtn.textContent = anyClosed ? '全部收起' : '全部展开';
+      });
+    }
+
+    // 深链：#节点id 打开即展开（首屏加载与页内跳转都算）
+    function openFromHash() {
+      var hash = decodeURIComponent(location.hash.slice(1));
+      if (!hash) return;
+      var panel = document.getElementById(hash);
+      if (panel && panel.classList.contains('detail') && panel.hidden) {
+        setOpen(panel, true, buttonFor(hash));
+        panel.scrollIntoView({ block: 'center' });
+      }
+    }
+    window.addEventListener('hashchange', openFromHash);
+    openFromHash();
+  })();
+</script>
+</body>
+</html>

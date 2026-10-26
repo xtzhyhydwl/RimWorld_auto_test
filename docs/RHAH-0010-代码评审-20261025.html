@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>围攻儿童参战 · 代码评审</title>
+<style>
+  :root{
+    --paper:#fbfaf7; --ink:#1c1c1a; --ink-soft:#5b5b56; --line:#e2dfd8;
+    --teal:#0f6b6b; --teal-soft:#e6f0ef;
+    --must:#a8412b; --must-soft:#fbeee9;
+    --sug:#8a6b16; --sug-soft:#fbf4e2;
+    --keep:#4f5b57; --keep-soft:#eef0ee;
+    --fact:#0f6b6b; --guess:#8a6b16;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:0 0 6rem;
+    background:var(--paper); color:var(--ink);
+    font:16px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC","Microsoft YaHei",sans-serif;
+  }
+  .wrap{max-width:900px;margin:0 auto;padding:0 24px}
+  header.top{padding:4rem 0 2rem;border-bottom:1px solid var(--line)}
+  .kicker{font-size:.8rem;letter-spacing:.14em;text-transform:uppercase;color:var(--teal);margin:0 0 1rem}
+  h1{font-size:2rem;line-height:1.3;margin:0 0 1rem;letter-spacing:-.01em}
+  .lede{font-size:1.05rem;color:var(--ink-soft);margin:0;max-width:46em}
+  .meta{display:flex;flex-wrap:wrap;gap:.5rem 1.5rem;margin-top:1.5rem;font-size:.85rem;color:var(--ink-soft)}
+  .meta b{color:var(--ink);font-weight:600}
+
+  .verdict{
+    margin:2rem 0 0;padding:1.25rem 1.5rem;border:1px solid var(--teal);
+    background:var(--teal-soft);border-radius:2px;
+  }
+  .verdict p{margin:0;font-size:1.02rem}
+  .verdict strong{color:var(--teal)}
+
+  section{padding:3rem 0;border-bottom:1px solid var(--line)}
+  h2{font-size:1.15rem;margin:0 0 .35rem;letter-spacing:.01em}
+  .sec-note{color:var(--ink-soft);font-size:.9rem;margin:0 0 2rem;max-width:46em}
+
+  /* ---------- 因果链 ---------- */
+  .chain{list-style:none;margin:0;padding:0;counter-reset:step}
+  .chain li{
+    position:relative;padding:0 0 1.6rem 3.2rem;counter-increment:step;
+  }
+  .chain li::before{
+    content:counter(step);position:absolute;left:0;top:.1rem;
+    width:2rem;height:2rem;border-radius:50%;border:1px solid var(--teal);
+    color:var(--teal);background:var(--paper);
+    display:flex;align-items:center;justify-content:center;
+    font-size:.85rem;font-variant-numeric:tabular-nums;
+  }
+  .chain li::after{
+    content:"";position:absolute;left:calc(1rem - .5px);top:2.2rem;bottom:.2rem;
+    width:1px;background:var(--line);
+  }
+  .chain li:last-child::after{display:none}
+  .chain .t{font-weight:600}
+  .chain .d{color:var(--ink-soft);font-size:.92rem}
+  .chain .where{font-family:ui-monospace,Consolas,monospace;font-size:.8rem;color:var(--teal)}
+  .chain .fixed{color:var(--teal);font-weight:600}
+  .chain li.is-fix::before{background:var(--teal);color:#fff}
+
+  /* ---------- 卡片 ---------- */
+  .card{border:1px solid var(--line);border-radius:2px;background:#fff;margin:0 0 1rem}
+  .card-head{display:flex;gap:.75rem;align-items:flex-start;padding:1rem 1.15rem;flex-wrap:wrap}
+  .badge{
+    flex:0 0 auto;font-size:.72rem;letter-spacing:.06em;padding:.18rem .5rem;border-radius:2px;
+    border:1px solid currentColor;font-weight:600;white-space:nowrap;margin-top:.2rem;
+  }
+  .badge.must{color:var(--must);background:var(--must-soft)}
+  .badge.sug{color:var(--sug);background:var(--sug-soft)}
+  .badge.keep{color:var(--keep);background:var(--keep-soft)}
+  .card-title{font-weight:600;flex:1 1 20rem;min-width:14rem}
+  .card-title code{font-size:.86em}
+  code{font-family:ui-monospace,Consolas,monospace;font-size:.86em;background:#f2f0ea;padding:.08em .35em;border-radius:2px}
+
+  button.toggle{
+    font:inherit;font-size:.85rem;color:var(--teal);background:none;border:1px solid var(--line);
+    border-radius:2px;padding:.3rem .7rem;cursor:pointer;flex:0 0 auto;
+  }
+  button.toggle:hover{border-color:var(--teal)}
+  button.toggle:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+  button.toggle::after{content:" ▾"}
+  button.toggle[aria-expanded="true"]::after{content:" ▴"}
+
+  .panel{padding:0 1.15rem 1.15rem;border-top:1px dashed var(--line);margin-top:.2rem}
+  .panel[hidden]{display:none}
+  .kv{display:grid;grid-template-columns:5.5rem 1fr;gap:.35rem 1rem;margin:.9rem 0 0;font-size:.92rem}
+  .kv dt{color:var(--ink-soft)}
+  .kv dd{margin:0}
+  .kv dd.why{color:var(--ink)}
+  .decided{
+    margin-top:1rem;padding:.75rem .9rem;background:var(--teal-soft);
+    border-left:3px solid var(--teal);font-size:.92rem;
+  }
+  .decided b{color:var(--teal)}
+
+  /* ---------- 真值表 ---------- */
+  table{border-collapse:collapse;width:100%;font-size:.88rem;margin:1rem 0 0}
+  th,td{text-align:left;padding:.45rem .6rem;border-bottom:1px solid var(--line)}
+  th{font-weight:600;color:var(--ink-soft);font-size:.8rem;letter-spacing:.04em}
+  td.same{color:var(--teal);font-weight:600}
+  td.diff{color:var(--must);font-weight:600}
+  caption{caption-side:bottom;text-align:left;color:var(--ink-soft);font-size:.8rem;padding-top:.5rem}
+
+  /* ---------- 两栏 ---------- */
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
+  @media (max-width:720px){.two{grid-template-columns:1fr}}
+  .col{border-top:2px solid var(--line);padding-top:1rem}
+  .col.fact{border-top-color:var(--fact)}
+  .col.guess{border-top-color:var(--guess)}
+  .col h3{margin:0 0 .6rem;font-size:.9rem;letter-spacing:.06em;text-transform:uppercase}
+  .col.fact h3{color:var(--fact)}
+  .col.guess h3{color:var(--guess)}
+  .col ul{margin:0;padding-left:1.1rem;font-size:.9rem;color:var(--ink-soft)}
+  .col li{margin-bottom:.45rem}
+
+  .stats{display:flex;flex-wrap:wrap;gap:1.5rem;margin:0;padding:0;list-style:none}
+  .stats li{font-size:.9rem;color:var(--ink-soft)}
+  .stats b{display:block;font-size:1.6rem;color:var(--ink);font-weight:600;line-height:1.2}
+
+  .small{font-size:.85rem;color:var(--ink-soft)}
+  footer{padding:2.5rem 0 0;font-size:.85rem;color:var(--ink-soft)}
+  footer a{color:var(--teal)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <p class="kicker">票 0010 · 代码评审 · 2026-10-25</p>
+  <h1>围攻里的儿童为什么只会闲逛<br>以及那三处必须先改的地方</h1>
+  <p class="lede">改动方向对、落点小，<b>可以合</b>；但有一条判据放错了层、一处名字与语义打架、还有一个在原版下恒真的死条件——而那个死条件在装了 Toddlers 时会把儿童重新推回"闲逛 + 饿死"。</p>
+  <div class="meta">
+    <span>评审对象 <b>未提交的 2 个源文件</b></span>
+    <span>基准 <b>d699404</b></span>
+    <span>评审方式 <b>只读（read / grep / git）</b></span>
+    <span>未做 <b>未编译、未跑单测、未起游戏</b></span>
+  </div>
+
+  <div class="verdict">
+    <p><strong>结论：</strong>先做 3 条必修（1 条分层 + 2 条命名/语义）。<code>RHAH_FamineWeapons</code> 的两个判据不一致判为<b>加注释</b>、不改行为；<b>Pawn → Compat 不算越界</b>（既有约定，有 3 处先例），别顺手去改它。</p>
+    <p style="margin-top:.9rem"><strong>后续（21:3x，用户口径覆盖了 B-1）：</strong>本模组<b>不该对"能不能打"加任何条件</b>。所以最终不是"把判据搬到规则层"，而是<b>把年龄判据整个删掉、不加替代</b>——
+    原版婴儿天然执行不了暴力，玩家装了让婴儿能打的模组也不归我们管。</p>
+  </div>
+</header>
+
+<section>
+  <h2>一、症状是怎么一步步发生的</h2>
+  <p class="sec-note">这是整份评审的前提。每一次"为什么错"的判断，最终都挂在这条链的某一环上。</p>
+
+  <ol class="chain">
+    <li>
+      <div class="t">围攻开始，来客全员拿到 <code>role = Siege</code></div>
+      <div class="d">到这里成人和儿童<b>没有任何差别</b>——<code>Fight</code> 闸门（<code>role == Siege</code>）对他们一律放行。</div>
+    </li>
+    <li>
+      <div class="t"><code>CanFight</code> 里的 <code>Adult()</code> 把儿童拦下</div>
+      <div class="d">成人过，儿童不过。这是本票要改的那一行。</div>
+      <div class="where">JobGiver_RHAH_Visitor.cs:52</div>
+    </li>
+    <li>
+      <div class="t">派 duty 的地方按 <code>CanFight</code> 分流</div>
+      <div class="d">成人 → <code>AssaultColony</code>；儿童 → <code>RHAH_VisitorSeek</code>，而它的焦点是<b>儿童自己站的那一格</b>。</div>
+      <div class="where">LordToil_RHAH_ArmedAssault.cs:19-21</div>
+    </li>
+    <li>
+      <div class="t">这条 giver 在武装进攻期间直接返回 null</div>
+      <div class="d">于是"去吃东西"那一段<b>一次都走不到</b>——不是被闸门挡住，是根本没轮到。</div>
+      <div class="where">JobGiver_RHAH_Visitor.cs:88</div>
+    </li>
+    <li>
+      <div class="t">只剩原地闲逛，最后饿倒</div>
+      <div class="d">行为上看起来就是"这孩子什么都不会干"。</div>
+    </li>
+    <li class="is-fix">
+      <div class="t">修法：把"能不能打"从"是不是成人"改成"是不是婴儿"</div>
+      <div class="d">一处判据同时决定"派 duty"和"派战斗 job"，所以两处一起好；吃饭那一半也跟着好，不用单独改取食逻辑。</div>
+      <div class="where">CanFight → RHAH_VisitorRules.AllowsCombat</div>
+    </li>
+  </ol>
+</section>
+
+<section>
+  <h2>二、三条必修</h2>
+  <p class="sec-note">点开看"现状 / 为什么错 / 怎么改 / 影响面"。三条都不改行为（第三条只在装了 Toddlers 时才可能改行为）。</p>
+
+  <!-- B-1 -->
+  <article class="card">
+    <div class="card-head">
+      <span class="badge must">必修 · 分层</span>
+      <span class="card-title"><code>B-1</code> 年龄规则留在了 JobGiver 层，与紧邻先例相反</span>
+      <button class="toggle" aria-expanded="false" aria-controls="p-b1" id="b-b1">展开</button>
+    </div>
+    <div class="panel" id="p-b1" hidden>
+      <dl class="kv">
+        <dt>位置</dt><dd><code>JobGiver_RHAH_Visitor.cs:59-64</code>，调用点 <code>:52</code></dd>
+        <dt>现状</dt><dd>新方法把"年龄 + 身体"两条判断自己捂着：<code>!= Baby &amp;&amp; ManipulationStage &gt; 0</code></dd>
+        <dt class="why">为什么错</dt><dd class="why">
+          ① <code>RHAH_VisitorRules</code> 自述职责就含"年龄"，文件里已有一整族年龄规则（<code>KeepsAge</code> / <code>YoungAge</code> / <code>WalkingAgeFloor</code>…），新规则却落在 JobGiver；
+          ② <code>ManipulationStage</code> 的 <code>0/1/2</code> 是 Compat 的内部约定，Pawn 层裸写 <code>&gt; 0</code> 等于把阈值知识复制到第三处；
+          ③ <b>同一个目录里的先例正好相反</b>：<code>JobGiver_RHAH_Feed</code> 把原始 stage 交给 <code>RHAH_VisitorRules.BlocksReliefFeed</code> 去判阈值。
+        </dd>
+        <dt>建议</dt><dd>下沉成 <code>RHAH_VisitorRules.AllowsCombat(stage, manipulationStage)</code>，JobGiver 只负责取数。</dd>
+        <dt>影响面</dt><dd>2 个文件约 6 行 + 一条纯函数单测；<b>不动行为</b>。</dd>
+      </dl>
+      <div class="decided"><b>处置：不适用。</b>这条判据最终被<b>整个删掉</b>了（见顶部口径与 C-2），所以不存在"该放哪一层"——规则层<b>不</b>加这个函数。</div>
+    </div>
+  </article>
+
+  <!-- C-1 -->
+  <article class="card">
+    <div class="card-head">
+      <span class="badge must">必修 · 命名</span>
+      <span class="card-title"><code>C-1</code> <code>AbleToFight</code> 与 <code>CanFight</code> 是同义词</span>
+      <button class="toggle" aria-expanded="false" aria-controls="p-c1" id="b-c1">展开</button>
+    </div>
+    <div class="panel" id="p-c1" hidden>
+      <dl class="kv">
+        <dt>现状</dt><dd>同一件事在代码里有<b>四个带 fight 的名字</b>：闸门 <code>Fight</code>、查询 <code>Allows(pawn, Fight)</code>、合成判据 <code>CanFight</code>、子条件 <code>AbleToFight</code>。前三个各自名副其实，第四个是纯同义重复——<code>Can</code> 和 <code>Able</code> 在英文里都是"能"。</dd>
+        <dt class="why">为什么错</dt><dd class="why">
+          违反"同一个概念在代码里只有一个名字"；更实际的问题是<b>名字隐去了真正的判据</b>（年龄 + 动手阶段）——
+          下一个想知道"这人算不算能打"的地方（<code>RHAH_FamineWeapons</code>）无名字可复用，只能再写一遍 <code>Adult()</code>，于是有了 D-1。
+        </dd>
+        <dt>建议</dt><dd>并进规则层；若坚持留原层，改名 <code>CombatCapable</code>（<code>Can*</code> = 判据，<code>Capable</code> = 身体条件）。</dd>
+        <dt>影响面</dt><dd>纯改名 2 行，零行为变化。</dd>
+      </dl>
+      <div class="decided"><b>处置：</b>采纳前者——名字直接消失，<code>CanFight</code> 保持唯一入口名。</div>
+    </div>
+  </article>
+
+  <!-- C-2 -->
+  <article class="card">
+    <div class="card-head">
+      <span class="badge must">必修 · 语义</span>
+      <span class="card-title"><code>C-2</code> <code>ManipulationStage &gt; 0</code> 在原版下恒真，只在 Toddlers 下生效——而生效时方向是反的</span>
+      <button class="toggle" aria-expanded="false" aria-controls="p-c2" id="b-c2">展开</button>
+    </div>
+    <div class="panel" id="p-c2" hidden>
+      <table>
+        <caption>为什么说它是死条件：<code>ManipulationStage</code> 返回 0 只有两条路，其中第一条就要求 <code>== Baby</code>。</caption>
+        <thead><tr><th>场景</th><th><code>ManipulationStage&gt;0</code></th><th><code>!= Baby</code></th><th>结果</th></tr></thead>
+        <tbody>
+          <tr><td>原版 · 成人</td><td>真</td><td>真</td><td class="same">等价</td></tr>
+          <tr><td>原版 · 儿童</td><td>真（无 hediff ⇒ 恒返回 2）</td><td>真</td><td class="same">等价</td></tr>
+          <tr><td>原版 · 婴儿</td><td>假（第一条就返回 0）</td><td>假</td><td class="same">等价</td></tr>
+          <tr><td>Toddlers · 能走但动手阶段 0</td><td>假</td><td><b>真</b></td><td class="diff">分歧：被挡在战斗外</td></tr>
+        </tbody>
+      </table>
+      <dl class="kv">
+        <dt class="why">为什么错</dt><dd class="why">
+          ① 死条件 + 只在第三方模组下才活的分支，没有注释、没有测试；
+          ② <b>它生效的方向正好与口径相反</b>：Toddlers 下"能走、但动手阶段还是 0"的儿童会被判成不能打 ⇒ 又落回 <code>RHAH_VisitorSeek</code> ⇒ 还是闲逛、还是不吃——正是本票要修的那个症状；
+          ③ 注释写的"能动手"也不准：stage 0 的另一半含义是"原版不能动的婴儿"，"能动"和"动手"不是同一个轴。
+        </dd>
+        <dt>建议</dt><dd>判据只留 <code>!= Baby</code>（倒地/昏迷 <code>CanFight</code> 已判）；若确实要"不能动手就不许打"，改用与"能动"同源的命名判据，并补 stage 0 的用例。</dd>
+        <dt>影响面</dt><dd>判据 1 行 + 1 条测试；行为变化<b>只在 Toddlers 场景</b>（推测，未在游戏内验证）。</dd>
+      </dl>
+      <div class="decided"><b>处置：比"删掉"更彻底。</b>不只是删 <code>ManipulationStage &gt; 0</code>，而是<b>把整条年龄判据删掉、不加任何替代</b>——
+      婴儿本来就被原版的 <code>!pawn.Downed</code> 挡住（原版婴儿恒为 <code>alwaysDowned</code>）；装了"让婴儿能走 / 能打"的模组，那是玩家的选择，不由本模组阻塞。</div>
+    </div>
+  </article>
+</section>
+
+<section>
+  <h2>三、七条建议</h2>
+  <p class="sec-note">不阻塞合并。其中 <code>D-3</code> 直接贴着改动的判据，是"语义变了名字没跟上"的典型。</p>
+
+  <article class="card">
+    <div class="card-head">
+      <span class="badge sug">建议</span>
+      <span class="card-title"><code>D-1</code> 两套"能打"判据不一致 → 只加注释</span>
+      <button class="toggle" aria-expanded="false" aria-controls="p-d1" id="b-d1">展开</button>
+    </div>
+    <div class="panel" id="p-d1" hidden>
+      <dl class="kv">
+        <dt>现状</dt><dd><code>RHAH_FamineWeapons</code> 仍用 <code>Adult()</code> 决定发不发武器 ⇒ 改动后合成结论是"儿童会徒手参战、永远拿不到武器"。</dd>
+        <dt>为什么只加注释</dt><dd>本票非目标明写"不新增儿童专属武器"；给儿童发武器会直接改变围攻里儿童存活率，是设计决定，不该由一次修 bug 顺带做；<code>adult</code> 这个形参名在"发放武器"语境里是准确的，不构成命名债。</dd>
+        <dt>处置</dt><dd>加一行注释说明"两个判据不同是刻意的"，<b>行为不变</b>。</dd>
+      </dl>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <span class="badge sug">建议 · 口径</span>
+      <span class="card-title"><code>D-2</code> 实际作用域是「所有被玩家打成敌对的来客」，不止围攻</span>
+      <button class="toggle" aria-expanded="false" aria-controls="p-d2" id="b-d2">展开</button>
+    </div>
+    <div class="panel" id="p-d2" hidden>
+      <dl class="kv">
+        <dt>链路</dt><dd><code>RHAH_BatchAttitude</code> 会把批次成员态度置 <code>Hostile</code> → <code>Fight</code> 闸门对 <code>Hostile</code> 一律放行 → 乞讨 / 偷窃等事件被下令开打后，<b>儿童这次也会跟着打</b>（以前不会）。</dd>
+        <dt>性质</dt><dd>不是 bug，是<b>口径问题</b>：票面原写"其它事件类型的儿童不被顺带改掉"。</dd>
+        <dt>处置</dt><dd><b>未决，需拍板</b>：① 一视同仁；② 只在围攻 lord 里放行儿童。</dd>
+      </dl>
+      <div class="decided"><b>注意：</b>这条不建议默默过去——它决定这个改动对外的影响面有多大。</div>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <span class="badge sug">建议 · 命名</span>
+      <span class="card-title"><code>D-3</code> <code>LordToil</code> 里的 <code>fights</code> 名不副实，还带一个死项</span>
+      <button class="toggle" aria-expanded="false" aria-controls="p-d3" id="b-d3">展开</button>
+    </div>
+    <div class="panel" id="p-d3" hidden>
+      <table>
+        <caption>原式 <code>fights = (swarm || Enabled) &amp;&amp; CanFight</code>，却只在 <code>fights &amp;&amp; !swarm</code> 时给突击 duty ⇒ <code>swarm</code> 那一支永远被丢弃。</caption>
+        <thead><tr><th>swarm</th><th>Enabled</th><th>CanFight</th><th>改前 duty</th><th>改后 duty</th></tr></thead>
+        <tbody>
+          <tr><td>真</td><td>任意</td><td>任意</td><td><code>VisitorSeek</code></td><td><code>VisitorSeek</code></td></tr>
+          <tr><td>假</td><td>假</td><td>任意</td><td><code>VisitorSeek</code></td><td><code>VisitorSeek</code></td></tr>
+          <tr><td>假</td><td>真</td><td>假</td><td><code>VisitorSeek</code></td><td><code>VisitorSeek</code></td></tr>
+          <tr><td>假</td><td>真</td><td>真</td><td><code>AssaultColony</code></td><td><code>AssaultColony</code></td></tr>
+        </tbody>
+      </table>
+      <dl class="kv">
+        <dt>另一个错</dt><dd>蜂群单位其实照样打（走 <code>RHAH_MouseSwarm</code> / <code>Wait_Combat</code>），所以叫 <code>fights</code> 也不对——它表示的是"拿 <code>AssaultColony</code> duty"。</dd>
+        <dt>处置</dt><dd>改名 <code>assaults</code>、去掉死项；<b>八格真值表逐格等价</b>。同时给 <code>VisitorSeek</code> 那行加注释（借它的 think tree，站位就是原地）。</dd>
+      </dl>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <span class="badge sug">建议 · 语义</span>
+      <span class="card-title"><code>D-4</code> <code>!= Baby</code> 与仓里既有的 flags 惯用法不一致</span>
+      <button class="toggle" aria-expanded="false" aria-controls="p-d4" id="b-d4">展开</button>
+    </div>
+    <div class="panel" id="p-d4" hidden>
+      <dl class="kv">
+        <dt>现状</dt><dd>被替换掉的是扩展方法 <code>Adult()</code>（按位测试），新代码用不等号。</dd>
+        <dt>为什么错</dt><dd><code>DevelopmentalStage</code> 是 <code>[Flags]</code>，<code>Baby|Child</code> 这种组合在 lifestage XML 里合法 ⇒ <code>!= Baby</code> 会把它判成"不是婴儿"。</dd>
+        <dt>处置</dt><dd>随年龄判据一起作废——判据整个删掉了，已经没有"是不是婴儿"要判。</dd>
+      </dl>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <span class="badge sug">建议 · 测试</span>
+      <span class="card-title"><code>D-5</code> / <code>D-6</code> 用例名超出断言、辅助方法名偏轻</span>
+      <button class="toggle" aria-expanded="false" aria-controls="p-d56" id="b-d56">展开</button>
+    </div>
+    <div class="panel" id="p-d56" hidden>
+      <dl class="kv">
+        <dt>D-5</dt><dd>用例名原本声称"Siege 让成人与儿童行为等价"，但它只断言 <code>CanFight</code> 为真 ⇒ 改名 <code>VisitorCombatAcceptsChild</code>，行为等价的证据留在票面文档（那里有真机取证）。</dd>
+        <dt>D-6</dt><dd><code>SetLifeStage</code> 其实是"替换整张寿命表"（重写 <code>lifeStageAges</code> + 重建 <code>ageTracker</code>），不是"设一个值"⇒ 名字保留、加一行注释说明适用范围。</dd>
+        <dt>附带确认</dt><dd>不存在跨用例污染：每个 <code>Visitor()</code> 都新建 <code>RaceProperties</code> 与 <code>ThingDef</code>。</dd>
+      </dl>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <span class="badge sug">建议 · 验证缺口</span>
+      <span class="card-title"><code>D-7</code> 新用例是 <code>CanFight</code> 第一次被断言为 true——绿不绿没人验过</span>
+      <button class="toggle" aria-expanded="false" aria-controls="p-d7" id="b-d7">展开</button>
+    </div>
+    <div class="panel" id="p-d7" hidden>
+      <dl class="kv">
+        <dt>风险点</dt><dd><code>CanFight</code> 末条要过 <code>pawn.WorkTagIsDisabled(WorkTags.Violent)</code>，而测试替身 <code>Visitor()</code> 的 <code>story</code> / <code>workSettings</code> 都是 null——这条路径<b>以前从没被走到 true</b>。</dd>
+        <dt>处置</dt><dd>下次开会话先跑一次 Tests 工程确认。若在替身上抛异常，需要给 <code>Visitor()</code> 补 <code>workSettings</code> / <code>story</code> 替身（<b>推测</b>，评审没跑）。</dd>
+        <dt>本机限制</dt><dd><code>dotnet test</code> 的 testhost 被 <code>OpenProcess</code> 拒绝（Win32Exception 5）⇒ 只能构建、不能跑。</dd>
+      </dl>
+    </div>
+  </article>
+</section>
+
+<section>
+  <h2>四、五条"不用改"</h2>
+  <p class="sec-note">写出来是为了防止下一个人把它们当成问题再改一遍。</p>
+  <article class="card">
+    <div class="card-head">
+      <span class="badge keep">不改</span>
+      <span class="card-title">既有命名债与既有反向依赖，本次只是消费者</span>
+      <button class="toggle" aria-expanded="false" aria-controls="p-e" id="b-e">展开</button>
+    </div>
+    <div class="panel" id="p-e" hidden>
+      <dl class="kv">
+        <dt>E-1</dt><dd>Compat → <code>RHAH_VisitorRules.LiftsAgeImmobility</code> 是既有反向调用，本次未新增。</dd>
+        <dt>E-2</dt><dd><code>ManipulationStage</code> 把"婴儿不能动"和"hediff 动手阶段"揉进同一个 0/1/2 属既有命名债；改名会波及 5 处调用，不值得在修 bug 里做。</dd>
+        <dt>E-3</dt><dd><code>RHAH_VisitorSeek</code> 这个 defName 不改——它的主用法（waitSpot 半径 10）里"寻"是准的，只在武装进攻里被借作"原地待命"，加注释即可。</dd>
+        <dt>E-4</dt><dd>蜂群分支对婴儿也给 <code>Wait_Combat</code>、不查年龄，是既有行为，与本改动无关。</dd>
+        <dt>E-5</dt><dd>票 0002 那轮已整改的命名与本次无交集。</dd>
+      </dl>
+    </div>
+  </article>
+</section>
+
+<section>
+  <h2>五、哪些是查过的，哪些是推的</h2>
+  <p class="sec-note">这份评审的结论强度不一样，分开看。</p>
+  <div class="two">
+    <div class="col fact">
+      <h3>实测（逐条对过行号）</h3>
+      <ul>
+        <li>改动范围：2 个 <code>.cs</code> + 4 个 dll（dll 未看未动）</li>
+        <li>全部引用位置与行号（JobGiver / LordToil / ChildMovement / VisitorRules / Feed / ReliefFood / FamineWeapons / PawnDefaults / BatchAttitude / 测试）</li>
+        <li>全仓 grep 计数：<code>CanFight|AbleToFight</code> 7 处、<code>DevelopmentalStage.Adult()</code> 生产代码 6 处</li>
+        <li><b>原版下 <code>ManipulationStage&gt;0</code> ⟺ <code>!= Baby</code></b>：由"返回 0 的第一条前提是 <code>== Baby</code>"与"无 hediff 返回 2"直接推出，属读码可证</li>
+        <li><code>Pawn → Compat</code> 的 3 处既有先例</li>
+      </ul>
+    </div>
+    <div class="col guess">
+      <h3>推测（未验证，别当结论）</h3>
+      <ul>
+        <li>Toddlers 下"能走、动手阶段仍 0"的非婴儿儿童真实存在，且会因此继续闲逛饿死</li>
+        <li>新用例在 xUnit 下是绿的（<code>WorkTagIsDisabled</code> 在替身上的行为未验）</li>
+        <li>非围攻敌对来客的儿童"真的会打"——路径已实测，但没在游戏里看过一次</li>
+        <li>判据改动在 Toddlers 场景的净效果</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>六、这次一共提了多少</h2>
+  <ul class="stats">
+    <li><b>3</b>必修</li>
+    <li><b>7</b>建议</li>
+    <li><b>5</b>不用改</li>
+    <li><b>1</b>判定为"不越界"（Pawn → Compat）</li>
+    <li><b>0</b>行代码被评审改动</li>
+  </ul>
+  <p class="small" style="margin-top:1.5rem">评审本身只读：未编译、未跑单测、未起游戏、未写探测脚本、未改任何代码或 dll。</p>
+</section>
+
+<footer>
+  <p>源文件：<a href="RHAH-0010-代码评审-20261025.md">RHAH-0010-代码评审-20261025.md</a> · 本页是它的可视化投影，内容以 MD 为准。</p>
+</footer>
+
+</div>
+
+<script>
+(function () {
+  var buttons = document.querySelectorAll('button.toggle');
+
+  function panelOf(btn) {
+    return document.getElementById(btn.getAttribute('aria-controls'));
+  }
+
+  function setOpen(btn, open) {
+    var panel = panelOf(btn);
+    if (!panel) return;
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.textContent = open ? '收起' : '展开';
+    panel.hidden = !open;
+  }
+
+  Array.prototype.forEach.call(buttons, function (btn) {
+    setOpen(btn, btn.getAttribute('aria-expanded') === 'true');
+    btn.addEventListener('click', function () {
+      var open = btn.getAttribute('aria-expanded') !== 'true';
+      setOpen(btn, open);
+    });
+  });
+
+  // 深链：#p-xxx 打开页面时直接展开对应节点
+  function openFromHash() {
+    var id = location.hash.replace('#', '');
+    if (!id) return;
+    var panel = document.getElementById(id);
+    if (!panel) return;
+    var btn = document.querySelector('button.toggle[aria-controls="' + id + '"]');
+    if (btn) setOpen(btn, true);
+    panel.scrollIntoView({ block: 'center' });
+  }
+
+  window.addEventListener('hashchange', openFromHash);
+  openFromHash();
+})();
+</script>
+</body>
+</html>
