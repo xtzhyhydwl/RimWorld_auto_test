@@ -33,8 +33,31 @@ desktop.ini
 # 测试产物与报告（体积大、可重生成）
 /reports/
 
-# 文档只留在磁盘，不进 git（本仓库只放主要代码）
-/docs/
-
 # 工作区文件
 /RHAH.code-workspace
+
+# ── 与测试工程无关的内容（2026-10-26 移出跟踪，文件仍在磁盘）──
+语音副官/
+共享单车/
+快照捕捉/
+自动化测试/
+src/foodcontrol-core/
+src/foodcontrol-game/
+src/colonyrecorder/
+mods/FoodControl/
+mods/ColonyRecorder/
+mods/BikeProbe/
+bridge/DSH.FoodProbe/
+tools/asmdump/
+tools/asmref/
+tools/gen-art-spec.py
+tools/validate-art-spec.py
+tools/make-broken-samples.py
+tools/demo-iterate-loop.py
+交接-写新mod.md
+新会话开场白.txt
+DSH插件开发机制研究报告.md
+rimworld_agent_mcp_survey.md
+steam_workshop_subscribe_research.md
+docs/README-共享单车.md
+docs/archive/共享单车-开发流程-已作废章节.md
