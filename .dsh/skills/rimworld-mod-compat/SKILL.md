@@ -43,7 +43,7 @@ const mods = await call('rimworld/list_mods', { compatibleOnly: false });
 | `hasConfigurationWarning` / `configurationWarning` | 配置警告的原文 |
 | `rootDir` / `source` | 从哪加载的（`ModsFolder` / `SteamWorkshop`） |
 
-现成脚本：`node scripts/check-ratkin.mjs`（按关键词过滤后打印明细，可改关键词复用）。
+原「按关键词过滤后打印 mod 明细」的脚本 `scripts/check-ratkin.mjs` **已于 `9dbfa33`（2026-10-17）移除**，需要时 `git checkout 9dbfa33^ -- scripts/check-ratkin.mjs` 取回，不要重写。
 
 ---
 
@@ -89,7 +89,8 @@ Get-ChildItem $ws -Directory | ForEach-Object {
 7. 工具类                   （RimBridgeServer、Character Editor…）
 ```
 
-改顺序：`node scripts/modsconfig.mjs set a,b,c`（或用 `add` / `remove` / `baseline` / `copy-main`）。
+改顺序：原 `scripts/modsconfig.mjs`（`list` / `add` / `remove` / `set` / `baseline` / `copy-main`）**已于 `9dbfa33`（2026-10-17）移除**，需要时 `git checkout 9dbfa33^ -- scripts/modsconfig.mjs` 取回，不要重写。
+现在的入口：`node src/cli.js mods --profile <p>`（只读/写「被测 mod 清单」并写回 ModsConfig 对应部分）；**整份顺序仍要直接改 `profiles/<p>/Config/ModsConfig.xml`**。
 **改完必须重启游戏**（`node src/cli.js stop` 再 `start`）—— 加载顺序只在启动时生效。
 
 ---
@@ -170,7 +171,7 @@ const defs = [...new Set((area.cells ?? []).flatMap(c => (c.things ?? []).map(t 
 | 依赖写在 `loadAfter` 里被漏掉 | 顺依赖链必须同时看 `modDependencies` 和 `loadAfter` |
 | 改了 ModsConfig 但没生效 | 没重启游戏；或改错了 profile 的文件 |
 | 加载极慢 | 正常现象。实测纯原版 6 秒，加 HAR+Ratkin+CE 后 12-15 秒 |
-| 想复刻主力配置排查 | `node scripts/modsconfig.mjs copy-main`（整份复制 385 个 mod 的列表） |
+| 想复刻主力配置排查 | 原 `scripts/modsconfig.mjs copy-main` **已于 `9dbfa33`（2026-10-17）移除**（取回：`git checkout 9dbfa33^ -- scripts/modsconfig.mjs`）；现在直接把主力的 `Config/ModsConfig.xml` 复制到 `profiles/<新名字>/Config/` |
 
 ---
 
