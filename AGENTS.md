@@ -19,13 +19,15 @@
 用**全新上下文**的代理，不要用继承对话的那种。
 派**验证 / 机械执行**类子代理时，若 `subagent` 工具暴露 `reasoning_effort`，传 `low`；调研、设计、评审仍用默认高档。
 理由：这类任务判据明确，慢的是**往返轮数**不是思考（2026-10-25 实测：技能加载只差 13 秒，砍轮数才有效）。
+**自动化测试的"执行"一律派子代理**（用户 2026-10-25 定）：起实例 / 推时间 / 存档解析 / 还原工坊这些逐步动作，父会话只写派单（自包含提示词 + 判据 + 证据路径 + 纪律）和收结果，**不自己在主会话里一步步跑**（那样每步都占一轮往返，用户在旁边干等）。
 4. **东西放哪**：
 
 |内容|去处|
 |-|-|
 |流程、可复用经验|**skill**|
 |环境事实、机制说明|`docs/`|
-|进度、待办、已知坑|`STATUS.md`（**顶部留 ≤30 行"现在"摘要**，历史往下堆）|
+|进度、待办|**票仓**（`..\RHAH-wayfinder\tickets\`）票面的 `## 状态`。**不要再记进 `STATUS.md`**|
+|关键事实、指针|`STATUS.md`（**≤25 行**：三仓关系、票与闸门指针、重复咬人的经验。**不记当前状态**——端口 / mod 数 / 某进程在不在看 `env-check`，进度看票）|
 |测试产物、报告、截图|`runs/`|
 
 5. **等游戏状态只准两种形式，禁止 `Start-Sleep`。**
@@ -39,9 +41,16 @@
 
 6. **自动化测试的机器资源约定**（用户可能同时在玩他自己那一局；数字见 `docs/多实例改造-实现-20261017.md`）：
 - **只开轻 profile**（例 `voiced`）——**底座 11 项**（清单见 `base-mods.json`）+ 人工加入的条目；**本次激活数用 `node src/cli.js env-check --profile <p>` 看 `mods.activeModsCount`，本文不写数字**。满配 `vanilla` 是几百个 mod（本机实测 562），要当次用户许可。
-- **推时间速度上限 `Fast`**；禁 `Superfast` / `Ultrafast` / `ultraSpeedBoost:true` / `forceRequestedSpeed:true`，除非用户当次允许。
-  - 语义对齐：`Normal`=1 倍（实测 ≈60 tick/s）、`Fast`=3 倍（实测 ≈180 tick/s）、`Superfast`=6 倍、`Ultrafast`=15 倍。所以「允许到 `Fast`」= 允许到平常说的 3 倍速。
-  - **`play_for` 不传 `speed` 会按当前档跑**，容易静默退成 1 倍速；推时间一律显式传 `"speed":"Fast"`。
+- **推时间只有一条路：`node src/cli.js advance`**（`--to-tick <N>` 绝对 / `--ticks <N>` 相对）。
+  它走 **GameLink 文件通道**（`runs\live\<p>.link\`）、**不经 RimBridgeServer**，游戏侧在 tick 边界自己刹车
+  ⇒ 落点精确、期间出帧、收尾暂停。**不要**用 `play_for` / `step_game_ticks` / 「算时间+延时」拼推时间。
+  - **可以推到「某件事发生就停」**：`--stop-when "letter[:defName[:含词]]"` / `"message[:含词]"` / `"message:def=<defName>"`；只观察不停用 `--watch`。
+    现在只有**信件 / 右上角消息**两种探针；要别的（小人倒地、左侧 alert、地图上出现某物）**停手报缺原子**，不要自己绕。
+    原子能力清单 + 组合配方见 `docs\GameLink-协议-v1.md` §9。
+  - 档位：`Normal`=1 倍（≈60 tick/s）、`Fast`=3 倍（≈177）、`Superfast`=6 倍、`Ultrafast`=15 倍；默认 `--speed auto`（剩余 >6000 tick 走 `Ultrafast`）。
+  - **`--force-speed` 默认关**：它顺带开 `UltraSpeedBoost`，实测能到 8800–12000 tick/s，只有用户当次明确同意才许开。
+  - **事件发生后游戏会 `ForceNormalSpeed`（钉回 1×≈59 tick/s）**：那是游戏的正常行为，不加 `--force-speed` 就让它慢；判进度只看返回的 `reached` / `stopReason`。
+  - 契约见 `docs\GameLink-协议-v1.md`；步骤见 skill `rimworld-auto-test-closed-loop` 的 `docs\测试SOP\推时间.md`。
 - 用**独立 profile** 与用户那一局并存（记录/端口/`stop` 都已按 profile 隔离）；一个 profile 只起一个实例。
 - `stop` 默认只关本 profile；**`--force` 会强杀全机 RimWorld（含用户在玩的那局），只有用户明确要求才用**。
 - 起游戏会**抢一次窗口焦点**：用户正在玩时先说一声，窗口放副屏（`prefs.json` 的 `monitor`）。
@@ -90,7 +99,8 @@
 * **只提醒。** 不擅自换会话、不擅自"精简"对话历史
 * **换不换由用户说了算**
 * 用户决定换时，**由用户自己调用 `handoff` skill**（它是 user-invoked，只有人能调）
-* 换之前要做的三件（这些我可以做）：**结论落盘 → 更新 `STATUS.md` 顶部 → `git commit`**
+* 换之前要做的三件（这些我可以做）：**结论落盘**（进度写回票面 `## 状态`；机制进 `docs/`；可复用经验进 skill）→ **`git commit`**。
+`STATUS.md` **只在关键事实变了时**才改（它不记状态，见硬约束 4）。
 
 ## 每个阶段结束时自查
 
