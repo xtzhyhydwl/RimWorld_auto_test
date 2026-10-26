@@ -118,19 +118,16 @@ node src/cli.js smoke --doorstop         # 保留 Doorstop（一般不要，见�
 | `rimworld_smoke` | 跑完整冒烟测试并返回报告路径 |
 | `rimworld_logs` | 看 Player.log 尾部，或读游戏内日志期刊 |
 
-```powershell
-node scripts\test-plugin.mjs --live      # 在 DSH 之外验证插件（不装也能测）
-node scripts\install-plugin.mjs --dry-run # 看安装会改什么
-node scripts\install-plugin.mjs           # 安装（自动备份配置）
-node scripts\uninstall-plugin.mjs         # 完整卸载
-```
+> **装插件的三个脚本已移除**：`test-plugin.mjs` / `install-plugin.mjs` / `uninstall-plugin.mjs`
+> 已于 `9dbfa33`（2026-10-17）移除，需要时 `git checkout 9dbfa33^ -- scripts/<名>` 取回，**不要重写**。
+> 现在照下一段手工做那三处改动（没有 `--dry-run` 能替你先看会改什么）。
 
 安装会改 `~/.dsh/profiles/<profile>/` 下的三处，两个配置文件都先备份成 `.bak-<时间戳>`：
 复制插件目录到 `node_modules/dsh-rimworld`、在 `package.json` 的 `dsh.profile.bundles` 里登记、
 在 `cordis.patch.yml` 末尾追加带配置的行。**改完要重启 DSH 才生效。**
 
-插件源码在装进 DSH 之前就已经用 `scripts/test-plugin.mjs` 验证过：工具注册、
-展示层形状、以及对真实游戏的调用都跑通了。
+插件源码在装进 DSH 之前是用 `scripts/test-plugin.mjs` 验证过的（工具注册、展示层形状、对真实游戏的调用都跑通）；
+该脚本**已于 `9dbfa33`（2026-10-17）移除**，需要时 `git checkout 9dbfa33^ -- scripts/test-plugin.mjs` 取回，不要重写。
 
 ---
 
@@ -152,8 +149,13 @@ Command line arguments: -savedatafolder=E:\...\profiles\vanilla -logFile ...
 Save data folder overridden to E:\2026.7以后的新工程\DSH\RimWorld_auto_test\profiles\vanilla
 ```
 
-`profiles/vanilla/Config/ModsConfig.xml` 里是**纯净基线**：原版 + 全 6 个 DLC + Harmony + RimBridgeServer，
-共 8 项。实测启动 **6.1 秒**（你的主力配置是 385 个 mod）。
+`profiles/` **不受版本控制**（`.gitignore` 的第一条规则，从首个提交起）：里面有什么取决于这台机器，不是仓库的事实。
+所以别假设 `profiles/vanilla` 是「纯净基线」——本机 2026-10-26 数它的 `Config/ModsConfig.xml` 是 **568 条**
+`activeMods`（`1.7.4985 rev1269`）。**激活数一律问 `node src/cli.js env-check --profile <p>`**，本文不复制它的数字。
+
+`--profile` 的规矩（`src/cli.js` 里的 `PROFILE_REQUIRED`）：`start` / `stop` / `smoke` / `env-check` / `mods` / `advance`
+**必须显式给**，缺了直接拒绝执行（缺省值 `vanilla` 是满配档，猜错代价最大）；`status` / `tools` / `call` / `wait` / `logs` / `live`
+等只读命令仍缺省 `vanilla`。跑测试请给轻档，例：`node src/cli.js start --profile voiced`。
 
 要测特定 mod 组合时，往这个 ModsConfig 里加条目即可，或者复制一份成 `profiles/<新名字>/`。
 
@@ -236,7 +238,7 @@ Could not resolve type with token 0100001f from typeref
 例："Drop pods raid at location..." 实测要走 **势力 → 点数 → 点地图 → 半径** 四步，
 而且点了地图之后还会再弹一次。**不要硬编码层数**，写成贪心循环：
 有弹窗就按候选池挑一个能匹配的选项点掉，没弹窗就补一次地图点击，直到点击后不再弹。
-参考 `scripts/raid-full.mjs`。
+参考已移除的 `scripts/raid-full.mjs`（`git checkout 9dbfa33^ -- scripts/raid-full.mjs` 取回，不要重写）。
 
 另一个细节：RimWorld 列表行在 UI 快照里是**多个元素**（2 个 label + 1 个 button，
 button 自己的 label 是 null），所以不能靠 label 找可点元素，要靠**屏幕矩形相同**配对。
@@ -279,14 +281,10 @@ src/
   smoke.js       冒烟测试闭环与报告生成
   cli.js         命令行入口
 plugin/dsh-rimworld/   DSH Cordis 插件（7 个工具）
-scripts/
-  install-plugin.mjs      安装插件到 DSH profile（带备份）
-  uninstall-plugin.mjs    完整卸载
-  test-plugin.mjs         在 DSH 之外验证插件（含真实游戏调用）
-  demo.mjs                一串真实游戏操作演示
-  raid-full.mjs           驱动多层原生对话框叫一场空投袭击
+scripts/        空目录：里面的脚本于 9dbfa33（2026-10-17）被全部删除（曾入库，后来清空）
+                （需要某个旧脚本：git checkout 9dbfa33^ -- scripts/<名> 取回，不要重写）
 profiles/
-  vanilla/       纯净隔离存档目录（Config/Saves/Screenshots/Player.log）
+  vanilla/       隔离存档目录（Config/Saves/Screenshots/Player.log）；不入库，内容取决于本机
 runs/
   <runId>/       report.json + report.md + 截图副本
   game-process.json  当前实例的 PID 与启动参数
